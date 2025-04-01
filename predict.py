@@ -14,7 +14,7 @@ from data.utils import (
 )
 from peft.sam_lora_image_encoder_mask_decoder import LoRA_Sam
 from segment_anything import SamAutomaticMaskGeneratorOptMaskNMS, sam_model_registry
-from set_environment import set_env
+from set_environment import DEVICE, set_env
 
 
 def sam_output_to_mask(output):
@@ -76,9 +76,11 @@ def predict_images(config, images, progress_callback=None, stop_event=None):
 
 
 def load_model_from_config(config, empty_lora=False):
-    model = sam_model_registry[config["vit_name"]](checkpoint=config["model_path"], image_size=config["sam_image_size"])
+    model = sam_model_registry[config["vit_name"]](
+        checkpoint=config["model_path"], image_size=config["sam_image_size"]
+    )
     model = LoRA_Sam(model, config)
-    model = model.cuda()
+    model = model.to(DEVICE)
     if empty_lora:
         pass
     else:

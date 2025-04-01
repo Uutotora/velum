@@ -6,8 +6,12 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def set_env(deterministic=True, seed=0, allow_tf32_on_cudnn=True, allow_tf32_on_matmul=True):
+
+def set_env(
+    deterministic=True, seed=0, allow_tf32_on_cudnn=True, allow_tf32_on_matmul=True
+):
     if deterministic:
         torch.set_num_threads(1)
         random.seed(seed)

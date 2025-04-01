@@ -1,16 +1,12 @@
 import io
 import multiprocessing
-import os
 import time
 import zipfile
 from datetime import datetime, timedelta
-from pathlib import Path
 
-import cv2
 import psutil
 import streamlit as st
 
-from data.utils import read_image_to_numpy, resize_image
 from gui.pages.utils.predict_state_manager import PredictionStateManager
 from gui.pages.utils.web_utils import (
     LORA_PTH_DIR,
@@ -18,7 +14,7 @@ from gui.pages.utils.web_utils import (
     SUPPORT_EXTENSION,
     TEST_IMAGE_DIR,
     delete_file,
-    get_available_gpus,
+    get_available_devices,
     get_sam_model_path,
     initialize_session_state,
     list_files,
@@ -193,15 +189,22 @@ def main():
             st.selectbox("Select LoRA to use", options=["No LoRA models available"], disabled=True)
 
     with col2:
-        gpu_options = get_available_gpus()
-        if gpu_options:
-            selected_gpu = st.selectbox("Select GPU to use", options=gpu_options)
+        device_options = get_available_devices()
+        if len(device_options) > 1:
+            selected_device = st.selectbox(
+                "Select Device", options=device_options, help="Select CPU or GPU for prediction."
+            )
+        elif len(device_options) == 1 and device_options[0] == "cpu":
+            st.info("No GPUs detected. CPU will be used for prediction.")
+            selected_device = "cpu"
         else:
-            st.warning("No GPUs available.")
-            selected_gpu = None
+            st.error("Could not determine available devices. Please check system configuration.")
+            selected_device = None
+
     with col3:
+        start_button_disabled = is_prediction_running or (selected_device is None)
         start_button = st.button(
-            "Start Prediction", type="primary", use_container_width=True, disabled=is_prediction_running
+            "Start Prediction", type="primary", use_container_width=True, disabled=start_button_disabled
         )
     with col4:
         stop_button = st.button(
@@ -242,7 +245,7 @@ def main():
                 lora_rank,
                 nms_thresh,
             )
-            config["selected_gpu"] = selected_gpu
+            config["selected_device"] = selected_device
             config["image_paths"] = [str(TEST_IMAGE_DIR / img) for img in images]
 
             if PRED_MASK_DIR.exists():
@@ -363,12 +366,26 @@ def prepare_config(
 
 
 def run_prediction(config, state_manager):
-    os.environ["CUDA_VISIBLE_DEVICES"] = config["selected_gpu"]
+    import os
 
+    selected_device = config.get("selected_device", "cpu")
+    if selected_device == "cpu":
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+        print("INFO: Running prediction on CPU.")
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = selected_device
+        print(f"INFO: Running prediction on GPU {selected_device}.")
+    from pathlib import Path
+
+    import cv2
+
+    from data.utils import read_image_to_numpy, resize_image
     from predict import predict_images
 
     images = [read_image_to_numpy(image_path) for image_path in config["image_paths"]]
-    if config["resize_size"] is not None:
+    if (
+        config.get("resize_size") and config["resize_size"][0] > 0 and config["resize_size"][1] > 0
+    ):
         images = [resize_image(img, config["resize_size"]) for img in images]
 
     pred_masks = []

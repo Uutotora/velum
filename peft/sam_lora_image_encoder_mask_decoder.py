@@ -358,67 +358,81 @@ class LoRA_Sam(nn.Module):
         filename = str(filename)
         assert filename.endswith(".pt") or filename.endswith(".pth")
 
-        state_dict = torch.load(filename, weights_only=True)
+        # Load state dict to CPU first to prevent errors when CUDA is unavailable
+        state_dict = torch.load(filename, map_location=torch.device('cpu'), weights_only=True)
 
+        # Determine the target device from the main SAM model
+        target_device = next(self.sam.parameters()).device
+
+        # Load LoRA weights for image encoder blocks and move to target device
         for i, w_A_linear in enumerate(self.w_As):
             saved_key = f"w_a_{i:03d}"
             saved_tensor = state_dict[saved_key]
-            w_A_linear.weight = Parameter(saved_tensor)
+            w_A_linear.weight = Parameter(saved_tensor.to(target_device))
 
         for i, w_B_linear in enumerate(self.w_Bs):
             saved_key = f"w_b_{i:03d}"
             saved_tensor = state_dict[saved_key]
-            w_B_linear.weight = Parameter(saved_tensor)
+            w_B_linear.weight = Parameter(saved_tensor.to(target_device))
 
+        # Load LoRA weights for mask decoder self-attention and move to target device
         for i, sa_A_linear in enumerate(self.self_attn_As):
             saved_key = f"sa_a_{i:03d}"
             saved_tensor = state_dict[saved_key]
-            sa_A_linear.weight = Parameter(saved_tensor)
+            sa_A_linear.weight = Parameter(saved_tensor.to(target_device))
 
         for i, sa_B_linear in enumerate(self.self_attn_Bs):
             saved_key = f"sa_b_{i:03d}"
             saved_tensor = state_dict[saved_key]
-            sa_B_linear.weight = Parameter(saved_tensor)
+            sa_B_linear.weight = Parameter(saved_tensor.to(target_device))
 
+        # Load LoRA weights for mask decoder cross-attention (token to image) and move to target device
         for i, cti_a_linear in enumerate(self.cross_attn_ti_As):
             saved_key = f"cti_a_{i:03d}"
             saved_tensor = state_dict[saved_key]
-            cti_a_linear.weight = Parameter(saved_tensor)
+            cti_a_linear.weight = Parameter(saved_tensor.to(target_device))
 
         for i, cti_b_linear in enumerate(self.cross_attn_ti_Bs):
             saved_key = f"cti_b_{i:03d}"
             saved_tensor = state_dict[saved_key]
-            cti_b_linear.weight = Parameter(saved_tensor)
+            cti_b_linear.weight = Parameter(saved_tensor.to(target_device))
 
+        # Load LoRA weights for mask decoder cross-attention (image to token) and move to target device
         for i, cit_a_linear in enumerate(self.cross_attn_it_As):
             saved_key = f"cit_a_{i:03d}"
             saved_tensor = state_dict[saved_key]
-            cit_a_linear.weight = Parameter(saved_tensor)
+            cit_a_linear.weight = Parameter(saved_tensor.to(target_device))
 
         for i, cit_b_linear in enumerate(self.cross_attn_it_Bs):
             saved_key = f"cit_b_{i:03d}"
             saved_tensor = state_dict[saved_key]
-            cit_b_linear.weight = Parameter(saved_tensor)
+            cit_b_linear.weight = Parameter(saved_tensor.to(target_device))
 
-        self.fa_ti_q_proj_A.weight = Parameter(state_dict["fati_qa"])
-        self.fa_ti_q_proj_B.weight = Parameter(state_dict["fati_qb"])
-        self.fa_ti_v_proj_A.weight = Parameter(state_dict["fati_va"])
-        self.fa_ti_v_proj_B.weight = Parameter(state_dict["fati_vb"])
+        # Load LoRA weights for final attention (token to image) and move to target device
+        self.fa_ti_q_proj_A.weight = Parameter(state_dict["fati_qa"].to(target_device))
+        self.fa_ti_q_proj_B.weight = Parameter(state_dict["fati_qb"].to(target_device))
+        self.fa_ti_v_proj_A.weight = Parameter(state_dict["fati_va"].to(target_device))
+        self.fa_ti_v_proj_B.weight = Parameter(state_dict["fati_vb"].to(target_device))
 
+        # Prepare to load non-LoRA parts (prompt encoder, parts of mask decoder)
         sam_dict = self.sam.state_dict()
         sam_keys = sam_dict.keys()
 
-        # load prompt encoder
+        # Load prompt encoder weights and move to target device
         prompt_encoder_keys = [k for k in sam_keys if "prompt_encoder" in k]
-        prompt_encoder_values = [state_dict[k] for k in prompt_encoder_keys]
-        prompt_encoder_new_state_dict = {k: v for k, v in zip(prompt_encoder_keys, prompt_encoder_values)}
+        prompt_encoder_new_state_dict = {
+            k: state_dict[k].to(target_device) for k in prompt_encoder_keys if k in state_dict
+        }
         sam_dict.update(prompt_encoder_new_state_dict)
 
-        # load mask decoder
+        # Load mask decoder weights (excluding transformer parts modified by LoRA) and move to target device
         mask_decoder_keys = [k for k in sam_keys if "mask_decoder" in k and "transformer" not in k]
-        mask_decoder_values = [state_dict[k] for k in mask_decoder_keys]
-        mask_decoder_new_state_dict = {k: v for k, v in zip(mask_decoder_keys, mask_decoder_values)}
+        mask_decoder_new_state_dict = {
+            k: state_dict[k].to(target_device) for k in mask_decoder_keys if k in state_dict
+        }
         sam_dict.update(mask_decoder_new_state_dict)
+
+        # Load the updated state dict into the main SAM model
         self.sam.load_state_dict(sam_dict)
 
     def kaiming_uniform_5(self, tensor) -> None:

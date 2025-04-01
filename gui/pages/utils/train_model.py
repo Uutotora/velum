@@ -1,5 +1,3 @@
-import os
-
 from data.dataset import TrainDataset
 
 
@@ -16,7 +14,15 @@ def load_dataset(config):
 
 
 def train_model(config, state_manager):
-    os.environ["CUDA_VISIBLE_DEVICES"] = config["selected_gpu"]
+    import os
+
+    selected_device = config.get("selected_device", "cpu")
+    if selected_device == "cpu":
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+        print("INFO: Running training on CPU.")
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = selected_device
+        print(f"INFO: Running training on GPU {selected_device}.")
 
     from cellseg1_train import (
         load_model,

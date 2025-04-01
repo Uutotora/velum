@@ -52,7 +52,8 @@ def load_default_config():
     return config
 
 
-def get_available_gpus():
+def get_available_devices():
+    devices = []
     try:
         result = subprocess.run(
             [
@@ -63,16 +64,23 @@ def get_available_gpus():
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            check=True,
         )
-        if result.returncode != 0 or not result.stdout.strip():
-            st.error("No GPUs found or error querying GPUs.")
-            return []
-        gpu_info = result.stdout.strip().split("\n")
-        gpu_list = [info.split(",")[0].strip() for info in gpu_info]
-        return gpu_list
+        if result.stdout.strip():
+            gpu_info = result.stdout.strip().split("\n")
+            gpu_list = [info.split(",")[0].strip() for info in gpu_info]
+            devices.extend(gpu_list)
+        else:
+             st.warning("nvidia-smi ran successfully but found no GPUs. Only CPU is available.")
+    except FileNotFoundError:
+        st.warning("nvidia-smi command not found. Assuming no GPUs are available. Only CPU is available.")
+    except subprocess.CalledProcessError as e:
+        st.warning(f"nvidia-smi failed with error: {e.stderr}. Assuming no GPUs are available. Only CPU is available.")
     except Exception as e:
-        st.error(f"Error retrieving GPU list: {e}")
-        return []
+        st.error(f"An unexpected error occurred while checking for GPUs: {e}. Only CPU is available.")
+
+    devices.append("cpu")
+    return devices
 
 
 def list_files(directory, extensions=None):

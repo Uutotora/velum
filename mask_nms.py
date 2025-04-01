@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-DEVICE = torch.device("cuda")
+from set_environment import DEVICE
 
 
 def rle_to_mask(rle):
@@ -30,7 +30,11 @@ def overlap_matrix(boxes):
 
 
 def calculate_ious_between_pred_masks(masks, boxes, diagonal_value=1):
-    masks = masks.detach() if isinstance(masks, torch.Tensor) else torch.tensor(masks, device=DEVICE)
+    masks = (
+        masks.detach()
+        if isinstance(masks, torch.Tensor)
+        else torch.tensor(masks, device=DEVICE)
+    )
     n_points = masks.shape[0]
     m = torch.zeros((n_points, n_points), device=DEVICE)
 
@@ -60,7 +64,11 @@ def mask_nms_not_opt(rles, boxes, scores, nms_thresh):
         return torch.tensor([], device=DEVICE, dtype=torch.int64)
 
     masks = torch.stack([torch.tensor(rle_to_mask(rle), device=DEVICE) for rle in rles])
-    scores = scores.detach() if isinstance(scores, torch.Tensor) else torch.tensor(scores, device=DEVICE)
+    scores = (
+        scores.detach()
+        if isinstance(scores, torch.Tensor)
+        else torch.tensor(scores, device=DEVICE)
+    )
 
     n_masks = masks.shape[0]
     iou_matrix = torch.zeros((n_masks, n_masks), device=DEVICE)
@@ -97,8 +105,16 @@ def opt_mask_nms(rles, boxes, scores, nms_thresh):
         return torch.tensor([], device=DEVICE, dtype=torch.int64)
 
     masks = torch.stack([torch.tensor(rle_to_mask(rle), device=DEVICE) for rle in rles])
-    boxes = boxes.detach() if isinstance(boxes, torch.Tensor) else torch.tensor(boxes, device=DEVICE)
-    scores = scores.detach() if isinstance(scores, torch.Tensor) else torch.tensor(scores, device=DEVICE)
+    boxes = (
+        boxes.detach()
+        if isinstance(boxes, torch.Tensor)
+        else torch.tensor(boxes, device=DEVICE)
+    )
+    scores = (
+        scores.detach()
+        if isinstance(scores, torch.Tensor)
+        else torch.tensor(scores, device=DEVICE)
+    )
 
     iou_matrix = calculate_ious_between_pred_masks(masks, boxes)
     sorted_indices = torch.argsort(scores, descending=True)

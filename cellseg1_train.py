@@ -17,7 +17,7 @@ from gpu_memory_tracker import GPUMemoryTracker
 from peft.sam_lora_image_encoder_mask_decoder import LoRA_Sam
 from sampler import create_collate_fn
 from segment_anything import sam_model_registry
-from set_environment import set_env
+from set_environment import set_env, DEVICE
 
 
 def prepare_directories(config: Dict):
@@ -37,7 +37,7 @@ def load_dataset(config: Dict) -> TrainDataset:
 
 def load_model(config: Dict) -> LoRA_Sam:
     model = sam_model_registry[config["vit_name"]](checkpoint=config["model_path"], image_size=config["sam_image_size"])
-    return LoRA_Sam(model, config).cuda()
+    return LoRA_Sam(model, config).to(DEVICE)
 
 
 def setup_training(
@@ -70,11 +70,11 @@ def setup_training(
 def to_tensor(
     images: List[np.ndarray], all_points: List[List[np.ndarray]], image_size: int
 ) -> Tuple[List[torch.Tensor], List[Dict[str, torch.Tensor]]]:
-    tensor_images = [torch.as_tensor(image.transpose(2, 0, 1), dtype=torch.float).cuda() for image in images]
+    tensor_images = [torch.as_tensor(image.transpose(2, 0, 1), dtype=torch.float).to(DEVICE) for image in images]
     items = [
         {
-            "point_coords": torch.as_tensor(np.stack(points).astype(np.int64), dtype=torch.float)[:, None, :].cuda(),
-            "point_labels": torch.ones(len(points), 1, dtype=torch.int).cuda(),
+            "point_coords": torch.as_tensor(np.stack(points).astype(np.int64), dtype=torch.float)[:, None, :].to(DEVICE),
+            "point_labels": torch.ones(len(points), 1, dtype=torch.int).to(DEVICE),
             "original_size": (image_size, image_size),
         }
         for points in all_points
@@ -90,7 +90,7 @@ def extract_outputs(outputs: List[Dict[str, torch.Tensor]]) -> Tuple[torch.Tenso
         for i in range(point_nums):
             pred_logits.append(output["low_res_logits"][i][0])
             pred_cell_probs.append(output["iou_predictions"][i][0])
-    return torch.stack(pred_logits).cuda(), torch.stack(pred_cell_probs).cuda()
+    return torch.stack(pred_logits).to(DEVICE), torch.stack(pred_cell_probs).to(DEVICE)
 
 
 def extract_true_masks(
@@ -113,8 +113,8 @@ def extract_true_masks(
                 cell_prob = 0
             true_masks.append(low_res_true_mask)
             true_cell_probs.append(cell_prob)
-    true_cell_probs = torch.tensor(true_cell_probs, dtype=torch.float32).cuda()
-    true_masks = torch.tensor(np.array(true_masks), dtype=torch.float32).cuda()
+    true_cell_probs = torch.tensor(true_cell_probs, dtype=torch.float32).to(DEVICE)
+    true_masks = torch.tensor(np.array(true_masks), dtype=torch.float32).to(DEVICE)
     return true_masks, true_cell_probs
 
 

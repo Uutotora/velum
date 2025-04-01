@@ -15,7 +15,7 @@ from gui.pages.utils.web_utils import (
     TRAIN_IMAGE_DIR,
     TRAIN_MASK_DIR,
     delete_file,
-    get_available_gpus,
+    get_available_devices, # Changed from get_available_gpus
     get_sam_model_path,
     initialize_session_state,
     list_files,
@@ -194,20 +194,26 @@ def main():
         stop_disabled = True
     col1, col2, col3, col4, col5 = st.columns([3, 3, 3, 3, 3], gap="small", vertical_alignment="bottom")
     with col1:
-        gpu_options = get_available_gpus()
-        if gpu_options:
-            selected_gpu = st.selectbox("Select GPU to use", options=gpu_options)
+        device_options = get_available_devices()
+        if len(device_options) > 1:
+             selected_device = st.selectbox("Select Device", options=device_options, help="Select CPU or GPU for training.")
+        elif len(device_options) == 1 and device_options[0] == 'cpu':
+             st.info("No GPUs detected. CPU will be used for training.")
+             selected_device = 'cpu'
         else:
-            st.warning("No GPUs available.")
-            selected_gpu = None
+             st.error("Could not determine available devices. Please check system configuration.")
+             selected_device = None
+
     with col2:
+        # Disable start if no device could be selected
+        start_button_disabled = start_disabled or (selected_device is None)
         start_button = st.button(
             "Start Training",
             key="train_start_button",
             help="Click to start training",
             type="primary",
             use_container_width=True,
-            disabled=start_disabled,
+            disabled=start_button_disabled,
         )
     with col3:
         stop_button = st.button(
@@ -257,7 +263,8 @@ def main():
                 resize_size,
                 lora_rank,
             )
-            config["selected_gpu"] = selected_gpu
+            # Pass the selected device to the config
+            config["selected_device"] = selected_device
             config["train_id"] = list(range(len(images)))
 
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
