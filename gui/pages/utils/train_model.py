@@ -66,6 +66,10 @@ def train_model(config, state_manager, progress_queue=None, stop_event=None):
 
     train_dataset = load_dataset(config)
     model = load_model(config)
+    # Resume from existing LoRA checkpoint (used by refine flow)
+    finetune_from = config.get("finetune_from")
+    if finetune_from and Path(finetune_from).exists():
+        model.load_lora_parameters(finetune_from)
     trainloader, optimizer, scheduler = setup_training(config, model, train_dataset)
 
     state_manager.clear_loss_history()

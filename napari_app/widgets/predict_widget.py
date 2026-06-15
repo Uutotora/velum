@@ -1,3 +1,4 @@
+import queue as _queue
 import threading
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QScrollArea, QProgressBar, QTextEdit,
     QGroupBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
 from gui.pages.utils.predict_state_manager import PredictionStateManager
 from project_root import STORAGE_DIR
@@ -79,15 +80,21 @@ class PredictWidget(QWidget):
     _finish_signal         = pyqtSignal()
     _batch_progress_signal = pyqtSignal(int, int)   # (done, total)
     _batch_finish_signal   = pyqtSignal()
+    _refine_finish_signal  = pyqtSignal(str)        # refined .pth path
 
     def __init__(self, viewer):
         super().__init__()
         self.viewer = viewer
-        self._pred_thread   = None
-        self._last_mask     = None
-        self._last_img_path = None
-        self._lora_paths    = {}
-        self._batch_stop    = threading.Event()
+        self._pred_thread    = None
+        self._last_mask      = None
+        self._last_img_path  = None
+        self._lora_paths     = {}
+        self._batch_stop     = threading.Event()
+        self._refine_timer   = QTimer()
+        self._refine_timer.setInterval(3000)
+        self._refine_lh: list = []
+
+        self.setAcceptDrops(True)
 
         self.setStyleSheet(WIDGET_SS)
 
@@ -154,6 +161,15 @@ class PredictWidget(QWidget):
         self.results_section = CollapsibleSection("Results")
         self.results_section.setVisible(False)
 
+        # Pixel size (µm/px) — shown at top of results so areas can be in µm²
+        self.pixel_size = QDoubleSpinBox()
+        self.pixel_size.setDecimals(4)
+        self.pixel_size.setRange(0.0, 1000.0)
+        self.pixel_size.setValue(0.0)
+        self.pixel_size.setSpecialValueText("— px")
+        self.pixel_size.setToolTip("Set µm per pixel to display areas in µm². Leave 0 to use pixels.")
+        self.results_section.addLayout(_param_row("Pixel size µm/px", self.pixel_size))
+
         self._stats_lbl = QLabel()
         self._stats_lbl.setStyleSheet(
             f"color:{TEXT}; background:{FG}; border-radius:5px; padding:8px;"
@@ -171,6 +187,16 @@ class PredictWidget(QWidget):
         csv_btn.setToolTip("Saves cell_id, area_px, centroid_y, centroid_x for each detected cell")
         csv_btn.clicked.connect(self._export_csv)
         self.results_section.addWidget(csv_btn)
+
+        refine_btn = QPushButton("Refine with edited Labels layer")
+        refine_btn.setStyleSheet(BTN_SECONDARY)
+        refine_btn.setToolTip(
+            "Edit the prediction Labels layer in napari (add/remove/fix cells),\n"
+            "then click to run 50-epoch fine-tune from the current checkpoint.\n"
+            "Saves a new _refined.pth next to the original."
+        )
+        refine_btn.clicked.connect(self._run_refine)
+        self.results_section.addWidget(refine_btn)
 
         L.addWidget(self.results_section)
         L.addWidget(_divider())
@@ -328,6 +354,7 @@ class PredictWidget(QWidget):
         self._finish_signal.connect(self._on_done)
         self._batch_progress_signal.connect(self._on_batch_progress)
         self._batch_finish_signal.connect(self._on_batch_done)
+        self._refine_finish_signal.connect(self._on_refine_done)
 
         # Keyboard shortcuts (napari viewer-level)
         viewer.bind_key('Control-r', lambda v: self._run_prediction())
@@ -555,10 +582,19 @@ class PredictWidget(QWidget):
         avg_a = int(np.mean(areas)) if areas else 0
         med_a = int(np.median(areas)) if areas else 0
         cov   = counts[1:].sum() / (shape[0] * shape[1]) * 100
+        px = self.pixel_size.value()
+        if px > 0:
+            unit = "µm²"
+            avg_s = f"{avg_a * px * px:.1f}"
+            med_s = f"{med_a * px * px:.1f}"
+        else:
+            unit = "px²"
+            avg_s = str(avg_a)
+            med_s = str(med_a)
         self._stats_lbl.setText(
             f"<b style='font-size:18px;color:{TEXT};'>{n}</b>"
             f"<span style='color:{DIM};'> cells detected</span><br>"
-            f"<span style='color:{DIM};'>Avg {avg_a} px²  ·  Median {med_a} px²"
+            f"<span style='color:{DIM};'>Avg {avg_s} {unit}  ·  Median {med_s} {unit}"
             f"  ·  {cov:.1f}% coverage</span>"
         )
         self.results_section.setVisible(True)
@@ -660,6 +696,112 @@ class PredictWidget(QWidget):
         self.batch_progress.setVisible(False)
         self.batch_lbl.setText("")
 
+    # ── Drag-and-drop ─────────────────────────────────────────────────────────
+
+    _IMG_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".npy"}
+
+    def dragEnterEvent(self, event):
+        urls = event.mimeData().urls()
+        if urls and urls[0].isLocalFile() and \
+                Path(urls[0].toLocalFile()).suffix.lower() in self._IMG_EXTS:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        path = event.mimeData().urls()[0].toLocalFile()
+        self.image_path.setText(path)
+        self._append_log(f"Dropped: {Path(path).name}")
+
+    # ── Refine with corrected mask ────────────────────────────────────────────
+
+    def _run_refine(self):
+        import napari.layers as nl, tempfile, shutil, cv2
+        from gui.pages.utils.train_state_manager import TrainingStateManager
+
+        labels_layer = next((l for l in self.viewer.layers if isinstance(l, nl.Labels)), None)
+        if labels_layer is None:
+            self._append_log("[ERROR] No Labels layer — edit prediction first"); return
+        if self._last_img_path is None:
+            self._append_log("[ERROR] Run prediction first"); return
+
+        lora_path = self._resolve_lora()
+        if not lora_path or not Path(lora_path).exists():
+            self._append_log("[ERROR] No checkpoint selected"); return
+        try:
+            base_config = self._build_config()
+        except ValueError as e:
+            self._append_log(f"[ERROR] {e}"); return
+
+        # Write image + edited mask to temp folder
+        tmp      = tempfile.mkdtemp(prefix="cellseg_refine_")
+        tmp_img  = Path(tmp) / "images"; tmp_img.mkdir()
+        tmp_msk  = Path(tmp) / "masks";  tmp_msk.mkdir()
+        img = cv2.imread(self._last_img_path, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            self._append_log(f"[ERROR] Cannot read {self._last_img_path}"); return
+        cv2.imwrite(str(tmp_img / "img.png"), img)
+        mask = np.asarray(labels_layer.data, dtype=np.int32)
+        cv2.imwrite(str(tmp_msk / "img.png"), mask.clip(0, 65535).astype(np.uint16))
+
+        refined_path = str(LORA_DIR / f"{Path(lora_path).stem}_refined.pth")
+        rs = int(self.resize_size.currentText())
+        config = {
+            **base_config,
+            "train_image_dir": str(tmp_img),
+            "train_mask_dir":  str(tmp_msk),
+            "result_pth_path": refined_path,
+            "finetune_from":   lora_path,
+            "epoch_max":       50,
+            "train_id":        [0],
+            "duplicate_data":  64,
+            "patch_size":      rs // 2,
+        }
+
+        sm = TrainingStateManager(str(STORAGE_DIR / "refine_state"))
+        pq = _queue.Queue()
+        self._refine_lh = []
+        self._refine_timer.stop()
+        self._refine_timer = QTimer()
+        self._refine_timer.setInterval(3000)
+
+        def _poll():
+            while not pq.empty():
+                self._refine_lh.append(pq.get_nowait())
+            if self._refine_lh:
+                last = self._refine_lh[-1]
+                self._log_signal.emit(
+                    f"  refine ep {last['epoch']}/50  loss {last['loss']:.5f}")
+
+        self._refine_timer.timeout.connect(_poll)
+        self._refine_timer.start()
+
+        n_cells = int(mask.max())
+        self._append_log(
+            f"▶ Refine: 50 ep, {n_cells} cells, from {Path(lora_path).name}")
+
+        def run():
+            from gui.pages.utils.train_model import train_model
+            try:
+                train_model(config, sm, progress_queue=pq)
+                self._log_signal.emit(f"✓ Refined → {Path(refined_path).name}")
+                self._refine_finish_signal.emit(refined_path)
+            except Exception as e:
+                import traceback
+                self._log_signal.emit(f"[ERROR] refine: {e}\n{traceback.format_exc()}")
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_refine_done(self, refined_path: str):
+        self._refine_timer.stop()
+        self._populate_lora_combo()
+        stem = Path(refined_path).stem
+        for i in range(self.lora_combo.count()):
+            if stem in self.lora_combo.itemText(i):
+                self.lora_combo.setCurrentIndex(i); break
+
     def _export_csv(self):
         if self._last_mask is None:
             return
@@ -680,14 +822,23 @@ class PredictWidget(QWidget):
         areas = np.bincount(flat, minlength=n + 1)[1:].astype(np.int64)
         sum_y = np.bincount(flat, weights=ys.ravel().astype(np.float64), minlength=n + 1)[1:]
         sum_x = np.bincount(flat, weights=xs.ravel().astype(np.float64), minlength=n + 1)[1:]
+        px = self.pixel_size.value()
         with open(p, "w", newline="") as f:
             wr = csv.writer(f)
-            wr.writerow(["cell_id", "area_px", "centroid_y", "centroid_x"])
+            header = ["cell_id", "area_px"]
+            if px > 0:
+                header.append("area_um2")
+            header += ["centroid_y", "centroid_x"]
+            wr.writerow(header)
             for i in range(n):
                 a = int(areas[i])
                 if a == 0:
                     continue
-                wr.writerow([i + 1, a, f"{sum_y[i] / a:.1f}", f"{sum_x[i] / a:.1f}"])
+                row = [i + 1, a]
+                if px > 0:
+                    row.append(f"{a * px * px:.3f}")
+                row += [f"{sum_y[i] / a:.1f}", f"{sum_x[i] / a:.1f}"]
+                wr.writerow(row)
         self._append_log(f"✓ Exported {n} cells → {Path(p).name}")
 
     def _append_log(self, text):
