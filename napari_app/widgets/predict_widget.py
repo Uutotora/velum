@@ -6,17 +6,21 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox,
     QFileDialog, QScrollArea, QProgressBar, QTextEdit,
-    QFrame, QGroupBox,
+    QFrame, QGroupBox, QToolButton, QSizePolicy,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont
 
 from gui.pages.utils.predict_state_manager import PredictionStateManager
 from project_root import STORAGE_DIR
+from napari_app.theme import (
+    WIDGET_SS, BTN_SUCCESS, BTN_SECONDARY, BTN_BROWSE,
+    BG, FG, TEXT, ACCENT, DIM, SECONDARY, CONSOLE,
+)
 
-LORA_DIR = STORAGE_DIR / "loras"
+LORA_DIR        = STORAGE_DIR / "loras"
 BUILTIN_LORA_DIR = Path(__file__).parents[2] / "checkpoints"
-TEST_IMAGE_DIR = STORAGE_DIR / "test_images"
+TEST_IMAGE_DIR  = STORAGE_DIR / "test_images"
 
 LORA_META = {
     "cellpose_specialized_12.pth":      ("General cells",         0.917),
@@ -30,224 +34,267 @@ STATE_MANAGER = PredictionStateManager(str(STORAGE_DIR))
 _DLG = QFileDialog.Option.DontUseNativeDialog
 
 
+# ── Reusable UI helpers ───────────────────────────────────────────────────────
+
+def _browse_btn(parent, callback):
+    b = QPushButton("⋯")
+    b.setFixedSize(28, 28)
+    b.setStyleSheet(BTN_BROWSE)
+    b.clicked.connect(callback)
+    return b
+
+
 def _pick_file(parent, line_edit, caption, ext="All (*)"):
     start = str(Path(line_edit.text()).parent) if line_edit.text() else str(Path.home())
-    path, _ = QFileDialog.getOpenFileName(parent, caption, start, ext, options=_DLG)
-    if path:
-        line_edit.setText(path)
+    p, _ = QFileDialog.getOpenFileName(parent, caption, start, ext, options=_DLG)
+    if p:
+        line_edit.setText(p)
+
+
+def _file_row(parent, line_edit, caption, ext="All (*)"):
+    row = QHBoxLayout()
+    row.setSpacing(4)
+    row.addWidget(line_edit)
+    row.addWidget(_browse_btn(parent, lambda: _pick_file(parent, line_edit, caption, ext)))
+    return row
 
 
 def _divider():
     f = QFrame()
     f.setFrameShape(QFrame.Shape.HLine)
-    f.setStyleSheet("color: #3a3a3a; margin: 2px 0;")
+    f.setFixedHeight(1)
+    f.setStyleSheet(f"background: {FG}; border: none;")
     return f
 
 
-def _section(text, color="#90CAF9"):
-    lbl = QLabel(text)
-    font = QFont()
-    font.setBold(True)
-    font.setPointSize(11)
-    lbl.setFont(font)
-    lbl.setStyleSheet(f"color: {color}; margin-top: 8px; margin-bottom: 2px;")
-    return lbl
+def _param_row(label_text, widget, tip=""):
+    row = QHBoxLayout()
+    row.setSpacing(8)
+    lbl = QLabel(label_text)
+    lbl.setStyleSheet(f"color: {DIM}; font-size: 12px;")
+    lbl.setMinimumWidth(115)
+    if tip:
+        lbl.setToolTip(tip)
+        widget.setToolTip(tip)
+    row.addWidget(lbl)
+    row.addWidget(widget)
+    return row
+
+
+class CollapsibleSection(QWidget):
+    """Section with a clickable header that shows/hides content."""
+
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self._collapsed = False
+
+        vbox = QVBoxLayout()
+        vbox.setSpacing(0)
+        vbox.setContentsMargins(0, 4, 0, 4)
+
+        # Header row
+        header = QHBoxLayout()
+        header.setSpacing(6)
+
+        self._toggle = QToolButton()
+        self._toggle.setText(f"▾  {title}")
+        self._toggle.setCheckable(True)
+        self._toggle.setChecked(True)
+        self._toggle.clicked.connect(self._on_toggle)
+        self._toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        header.addWidget(self._toggle)
+        vbox.addLayout(header)
+
+        # Content container
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout()
+        self._content_layout.setSpacing(5)
+        self._content_layout.setContentsMargins(0, 4, 0, 0)
+        self._content.setLayout(self._content_layout)
+        vbox.addWidget(self._content)
+
+        self.setLayout(vbox)
+
+    def addWidget(self, w):
+        self._content_layout.addWidget(w)
+
+    def addLayout(self, l):
+        self._content_layout.addLayout(l)
+
+    def _on_toggle(self, checked):
+        self._content.setVisible(checked)
+        self._toggle.setText(
+            f"▾  {self._toggle.text()[3:]}" if checked
+            else f"▸  {self._toggle.text()[3:]}"
+        )
 
 
 class PredictWidget(QWidget):
     _log_signal    = pyqtSignal(str)
-    _done_signal   = pyqtSignal(object, object)   # image_arr, label_mask
+    _done_signal   = pyqtSignal(object, object)
     _finish_signal = pyqtSignal()
 
     def __init__(self, viewer):
         super().__init__()
         self.viewer = viewer
-        self._pred_thread = None
-        self._last_label_mask = None
-        self._last_image_path = None
+        self._pred_thread   = None
+        self._last_mask     = None
+        self._last_img_path = None
+        self._lora_paths    = {}
+
+        self.setStyleSheet(WIDGET_SS)
 
         outer = QVBoxLayout()
-        outer.setSpacing(4)
-        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(0)
+        outer.setContentsMargins(0, 0, 0, 0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         inner = QWidget()
         L = QVBoxLayout()
-        L.setSpacing(4)
-        L.setContentsMargins(0, 0, 0, 0)
+        L.setSpacing(8)
+        L.setContentsMargins(12, 12, 12, 12)
 
-        # ── LoRA checkpoint ──────────────────────────────────────────────────
-        L.addWidget(_section("LoRA checkpoint", "#A5D6A7"))
+        # ── Quick run ─────────────────────────────────────────────────────────
+        qr = CollapsibleSection("Quick run")
+
+        qr.addWidget(QLabel("Checkpoint"))
         self.lora_combo = QComboBox()
-        self._lora_paths = {}
         self._populate_lora_combo()
-        L.addWidget(self.lora_combo)
+        qr.addWidget(self.lora_combo)
 
-        row_custom = QHBoxLayout()
-        self.lora_custom = QLineEdit()
-        self.lora_custom.setPlaceholderText("Custom .pth — leave blank to use above")
-        row_custom.addWidget(self.lora_custom)
-        b = QPushButton("…"); b.setFixedWidth(30)
-        b.clicked.connect(lambda: _pick_file(self, self.lora_custom, "Select LoRA checkpoint", "PyTorch (*.pth)"))
-        row_custom.addWidget(b)
-        L.addLayout(row_custom)
-
-        L.addWidget(_divider())
-
-        # ── Input image ──────────────────────────────────────────────────────
-        L.addWidget(_section("Input image", "#A5D6A7"))
-        row_img = QHBoxLayout()
+        qr.addWidget(QLabel("Image"))
         self.image_path = QLineEdit()
-        default_img = _find_test_image()
-        if default_img:
-            self.image_path.setText(str(default_img))
-        row_img.addWidget(self.image_path)
-        b2 = QPushButton("…"); b2.setFixedWidth(30)
-        b2.clicked.connect(lambda: _pick_file(self, self.image_path, "Select image",
+        self.image_path.setPlaceholderText("Select microscopy image…")
+        img = _find_test_image()
+        if img:
+            self.image_path.setText(str(img))
+        qr.addLayout(_file_row(self, self.image_path, "Select image",
             "Images (*.png *.tif *.tiff *.jpg *.bmp *.npy)"))
-        row_img.addWidget(b2)
-        L.addLayout(row_img)
 
-        # Ground truth overlay
-        row_gt = QHBoxLayout()
-        self.gt_path = QLineEdit()
-        self.gt_path.setPlaceholderText("Ground truth mask (optional)")
-        row_gt.addWidget(self.gt_path)
-        b_gt = QPushButton("…"); b_gt.setFixedWidth(30)
-        b_gt.clicked.connect(lambda: _pick_file(self, self.gt_path, "Select ground truth mask",
-            "Images (*.png *.tif *.tiff *.npy)"))
-        row_gt.addWidget(b_gt)
-        L.addLayout(row_gt)
-
-        btn_gt = QPushButton("Show ground truth layer")
-        btn_gt.setStyleSheet("background:#2a3a4a; color:#90CAF9; border-radius:3px;")
-        btn_gt.clicked.connect(self._show_ground_truth)
-        L.addWidget(btn_gt)
-
-        L.addWidget(_divider())
-
-        # ── Model ────────────────────────────────────────────────────────────
-        L.addWidget(_section("Model", "#A5D6A7"))
-
-        row_vit = QHBoxLayout()
-        row_vit.addWidget(QLabel("SAM type"))
-        self.vit_name = QComboBox()
-        self.vit_name.addItems(["vit_h", "vit_l", "vit_b"])
-        self.vit_name.currentTextChanged.connect(self._on_vit_changed)
-        row_vit.addWidget(self.vit_name)
-        L.addLayout(row_vit)
-
-        row_sam = QHBoxLayout()
-        row_sam.addWidget(QLabel("SAM backbone"))
-        self.sam_path = QLineEdit()
-        self.sam_path.setPlaceholderText("auto")
-        row_sam.addWidget(self.sam_path)
-        b3 = QPushButton("…"); b3.setFixedWidth(30)
-        b3.clicked.connect(lambda: _pick_file(self, self.sam_path, "Select SAM backbone", "PyTorch (*.pth)"))
-        row_sam.addWidget(b3)
-        L.addLayout(row_sam)
-        self._on_vit_changed("vit_h")
-
-        row_rank = QHBoxLayout()
-        row_rank.addWidget(QLabel("LoRA rank"))
-        self.lora_rank = QSpinBox()
-        self.lora_rank.setRange(1, 64)
-        self.lora_rank.setValue(4)
-        row_rank.addWidget(self.lora_rank)
-        L.addLayout(row_rank)
-
-        row_dev = QHBoxLayout()
-        row_dev.addWidget(QLabel("Device"))
-        self.device = QComboBox()
-        self._populate_devices()
-        row_dev.addWidget(self.device)
-        L.addLayout(row_dev)
-
-        L.addWidget(_divider())
-
-        # ── Inference parameters ─────────────────────────────────────────────
-        L.addWidget(_section("Inference parameters", "#A5D6A7"))
-
-        row_rs = QHBoxLayout()
-        row_rs.addWidget(QLabel("Resize size"))
-        self.resize_size = QComboBox()
-        for v in ["256", "512", "768", "1024"]:
-            self.resize_size.addItem(v)
-        self.resize_size.setCurrentText("512")
-        self.resize_size.setToolTip(
-            "Resolution for SAM inference. Higher = better accuracy but slower and more memory.")
-        row_rs.addWidget(self.resize_size)
-        L.addLayout(row_rs)
-
-        params = [
-            ("Points/side",    "points_per_side",         4,   128,  32,  0, 4),
-            ("IoU threshold",  "pred_iou_thresh",          0.0, 1.0, 0.8,  2, 0.05),
-            ("Stability score","stability_score_thresh",   0.0, 1.0, 0.6,  2, 0.05),
-            ("Box NMS thresh", "box_nms_thresh",           0.0, 1.0, 0.05, 3, 0.01),
-            ("Min mask area",  "min_mask_area",            0,   10000, 20, 0, 10),
-        ]
-        for label, attr, lo, hi, val, dec, step in params:
-            row = QHBoxLayout()
-            row.addWidget(QLabel(label))
-            if dec == 0:
-                w = QSpinBox()
-                w.setRange(int(lo), int(hi))
-                w.setValue(int(val))
-                w.setSingleStep(int(step))
-            else:
-                w = QDoubleSpinBox()
-                w.setDecimals(dec)
-                w.setRange(lo, hi)
-                w.setValue(val)
-                w.setSingleStep(step)
-            setattr(self, attr, w)
-            row.addWidget(w)
-            L.addLayout(row)
-
-        L.addWidget(_divider())
-
-        # ── Run ──────────────────────────────────────────────────────────────
-        self.run_btn = QPushButton("▶  Run Prediction")
+        self.run_btn = QPushButton("▶   Run Prediction")
         self.run_btn.setFixedHeight(38)
-        self.run_btn.setStyleSheet(
-            "background:#1B5E20; color:white; font-weight:bold; border-radius:5px; font-size:13px;")
+        self.run_btn.setStyleSheet(BTN_SUCCESS)
         self.run_btn.clicked.connect(self._run_prediction)
-        L.addWidget(self.run_btn)
+        qr.addWidget(self.run_btn)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setVisible(False)
-        L.addWidget(self.progress_bar)
+        self.progress_bar.setFixedHeight(4)
+        qr.addWidget(self.progress_bar)
 
-        # ── Stats ────────────────────────────────────────────────────────────
-        self.stats_box = QGroupBox("Result")
-        self.stats_box.setVisible(False)
-        stats_layout = QVBoxLayout()
-        self.cell_count_lbl  = QLabel("Cells found: —")
-        self.avg_area_lbl    = QLabel("Avg area: —")
-        self.coverage_lbl    = QLabel("Coverage: —")
-        for lbl in (self.cell_count_lbl, self.avg_area_lbl, self.coverage_lbl):
-            lbl.setStyleSheet("color: #E0E0E0; font-size: 12px;")
-            stats_layout.addWidget(lbl)
+        L.addWidget(qr)
+        L.addWidget(_divider())
 
-        self.save_mask_btn = QPushButton("💾  Save masks as PNG")
-        self.save_mask_btn.setStyleSheet("background:#1a3a5a; color:white; border-radius:3px;")
-        self.save_mask_btn.clicked.connect(self._save_masks)
-        stats_layout.addWidget(self.save_mask_btn)
+        # ── Results ───────────────────────────────────────────────────────────
+        self.results_section = CollapsibleSection("Results")
+        self.results_section.setVisible(False)
 
-        self.stats_box.setLayout(stats_layout)
-        L.addWidget(self.stats_box)
+        self._stats_lbl = QLabel()
+        self._stats_lbl.setStyleSheet(
+            f"color:{TEXT}; background:{FG}; border-radius:5px; padding:8px;"
+            f"font-size:12px; line-height:160%;")
+        self._stats_lbl.setWordWrap(True)
+        self.results_section.addWidget(self._stats_lbl)
 
-        # ── Log ──────────────────────────────────────────────────────────────
-        L.addWidget(_section("Log", "#A5D6A7"))
+        save_btn = QPushButton("💾  Save masks as PNG/TIFF")
+        save_btn.setStyleSheet(BTN_SECONDARY)
+        save_btn.clicked.connect(self._save_masks)
+        self.results_section.addWidget(save_btn)
+
+        L.addWidget(self.results_section)
+        L.addWidget(_divider())
+
+        # ── Ground truth ──────────────────────────────────────────────────────
+        gt_sec = CollapsibleSection("Ground truth overlay")
+        gt_sec._on_toggle(False)  # collapsed by default
+
+        gt_sec.addWidget(QLabel("GT mask file"))
+        self.gt_path = QLineEdit()
+        self.gt_path.setPlaceholderText("Optional: compare with ground truth")
+        gt_sec.addLayout(_file_row(self, self.gt_path, "Select ground truth",
+            "Images (*.png *.tif *.tiff *.npy)"))
+        gt_btn = QPushButton("Show GT layer")
+        gt_btn.setStyleSheet(BTN_SECONDARY)
+        gt_btn.clicked.connect(self._show_ground_truth)
+        gt_sec.addWidget(gt_btn)
+
+        L.addWidget(gt_sec)
+        L.addWidget(_divider())
+
+        # ── Model settings ────────────────────────────────────────────────────
+        mdl_sec = CollapsibleSection("Model settings")
+        mdl_sec._on_toggle(False)
+
+        mdl_sec.addLayout(_param_row("Custom .pth", _make_custom_lora_row(self)))
+
+        row_vit = QHBoxLayout(); row_vit.setSpacing(8)
+        row_vit.addWidget(QLabel("SAM type", styleSheet=f"color:{DIM}; min-width:115px;"))
+        self.vit_name = QComboBox()
+        self.vit_name.addItems(["vit_h", "vit_l", "vit_b"])
+        self.vit_name.currentTextChanged.connect(self._on_vit_changed)
+        row_vit.addWidget(self.vit_name)
+        mdl_sec.addLayout(row_vit)
+
+        self.sam_path = QLineEdit()
+        self.sam_path.setPlaceholderText("auto-detected")
+        self._on_vit_changed("vit_h")
+        mdl_sec.addLayout(_file_row(self, self.sam_path, "Select SAM backbone", "PyTorch (*.pth)"))
+
+        self.lora_rank = QSpinBox(); self.lora_rank.setRange(1, 64); self.lora_rank.setValue(4)
+        mdl_sec.addLayout(_param_row("LoRA rank", self.lora_rank,
+            "Must match the rank used during training (default 4)"))
+
+        self.device = QComboBox(); self._populate_devices()
+        mdl_sec.addLayout(_param_row("Device", self.device))
+
+        L.addWidget(mdl_sec)
+        L.addWidget(_divider())
+
+        # ── Inference parameters ──────────────────────────────────────────────
+        inf_sec = CollapsibleSection("Inference parameters")
+        inf_sec._on_toggle(False)
+
+        self.resize_size = QComboBox()
+        for v in ["256", "512", "768", "1024"]:
+            self.resize_size.addItem(v)
+        self.resize_size.setCurrentText("512")
+        inf_sec.addLayout(_param_row("Resize size", self.resize_size,
+            "SAM inference resolution. Higher = better accuracy, slower. Try 1024 for small particles."))
+
+        params = [
+            ("Points/side",     "points_per_side",        4,   128,  32,  0, 4,
+             "Grid density for mask proposals. Higher = more candidates (slower)."),
+            ("IoU threshold",   "pred_iou_thresh",         0.0, 1.0, 0.8,  2, 0.05,
+             "Min predicted IoU to keep a mask. Raise to reduce false positives."),
+            ("Stability score", "stability_score_thresh",  0.0, 1.0, 0.6,  2, 0.05,
+             "Mask stability threshold. Raise to keep only confident masks."),
+            ("Box NMS thresh",  "box_nms_thresh",          0.0, 1.0, 0.05, 3, 0.01,
+             "Non-max suppression overlap. Lower = separates touching objects better."),
+            ("Min mask area",   "min_mask_area",           0,   10000, 20, 0, 10,
+             "Discard masks smaller than this (pixels)."),
+        ]
+        for label, attr, lo, hi, val, dec, step, tip in params:
+            if dec == 0:
+                w = QSpinBox(); w.setRange(int(lo), int(hi)); w.setValue(int(val)); w.setSingleStep(int(step))
+            else:
+                w = QDoubleSpinBox(); w.setDecimals(dec); w.setRange(lo, hi); w.setValue(val); w.setSingleStep(step)
+            setattr(self, attr, w)
+            inf_sec.addLayout(_param_row(label, w, tip))
+
+        L.addWidget(inf_sec)
+        L.addWidget(_divider())
+
+        # ── Log ───────────────────────────────────────────────────────────────
+        log_sec = CollapsibleSection("Log")
+        log_sec._on_toggle(False)
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
-        self.log_box.setMaximumHeight(110)
-        self.log_box.setStyleSheet(
-            "background:#1A2E1A; color:#A0C0A0; font-family:Menlo,Monaco,Courier; font-size:11px;")
-        L.addWidget(self.log_box)
+        self.log_box.setFixedHeight(100)
+        log_sec.addWidget(self.log_box)
+        L.addWidget(log_sec)
 
         L.addStretch()
         inner.setLayout(L)
@@ -267,21 +314,20 @@ class PredictWidget(QWidget):
         self._lora_paths = {}
         for f in sorted(BUILTIN_LORA_DIR.glob("*.pth")):
             desc, mAP = LORA_META.get(f.name, ("Custom", 0.0))
-            label = f"{desc}  ·  mAP {mAP:.3f}  [{f.name}]" if mAP else f.name
-            self.lora_combo.addItem(label)
-            self._lora_paths[label] = str(f)
+            lbl = f"{desc}  ·  mAP {mAP:.3f}" if mAP else f.name
+            self.lora_combo.addItem(lbl)
+            self._lora_paths[lbl] = str(f)
         for f in sorted(LORA_DIR.glob("*.pth")):
             if f.name not in LORA_META:
-                label = f"[trained] {f.name}"
-                self.lora_combo.addItem(label)
-                self._lora_paths[label] = str(f)
+                lbl = f"[trained]  {f.stem}"
+                self.lora_combo.addItem(lbl)
+                self._lora_paths[lbl] = str(f)
 
     def _populate_devices(self):
         import torch
         self.device.addItem("cpu")
         if torch.backends.mps.is_available():
-            self.device.addItem("mps")
-            self.device.setCurrentText("mps")
+            self.device.addItem("mps"); self.device.setCurrentText("mps")
         if torch.cuda.is_available():
             for i in range(torch.cuda.device_count()):
                 self.device.addItem(str(i))
@@ -290,20 +336,18 @@ class PredictWidget(QWidget):
         names = {"vit_h": "sam_vit_h_4b8939.pth",
                  "vit_l": "sam_vit_l_0b3195.pth",
                  "vit_b": "sam_vit_b_01ec64.pth"}
-        cand = STORAGE_DIR / "sam_backbone" / names.get(vit, "")
-        if cand.exists():
-            self.sam_path.setText(str(cand))
+        c = STORAGE_DIR / "sam_backbone" / names.get(vit, "")
+        if c.exists():
+            self.sam_path.setText(str(c))
         else:
-            self.sam_path.clear()
-            self.sam_path.setPlaceholderText(f"Not found: {cand.name}")
+            self.sam_path.clear(); self.sam_path.setPlaceholderText(f"Not found: {c.name}")
 
-    def _resolve_lora_path(self):
-        custom = self.lora_custom.text().strip()
-        if custom:
-            return custom
+    def _resolve_lora(self):
+        if hasattr(self, 'lora_custom') and self.lora_custom.text().strip():
+            return self.lora_custom.text().strip()
         return self._lora_paths.get(self.lora_combo.currentText(), "")
 
-    def _resolve_sam_path(self):
+    def _resolve_sam(self):
         p = self.sam_path.text().strip()
         if p and Path(p).exists():
             return p
@@ -311,55 +355,44 @@ class PredictWidget(QWidget):
         names = {"vit_h": "sam_vit_h_4b8939.pth",
                  "vit_l": "sam_vit_l_0b3195.pth",
                  "vit_b": "sam_vit_b_01ec64.pth"}
-        cand = STORAGE_DIR / "sam_backbone" / names[vit]
-        if cand.exists():
-            return str(cand)
+        c = STORAGE_DIR / "sam_backbone" / names[vit]
+        if c.exists():
+            return str(c)
         raise ValueError(f"SAM backbone not found. Place {names[vit]} in {STORAGE_DIR/'sam_backbone'}/")
 
     def _build_config(self):
-        lora_path  = self._resolve_lora_path()
-        image_path = self.image_path.text().strip()
-        sam_path   = self._resolve_sam_path()
-
-        if not lora_path or not Path(lora_path).exists():
-            raise ValueError(f"LoRA checkpoint not found: {lora_path}")
-        if not image_path or not Path(image_path).exists():
-            raise ValueError(f"Image not found: {image_path}")
-
+        lora = self._resolve_lora()
+        img  = self.image_path.text().strip()
+        sam  = self._resolve_sam()
+        if not lora or not Path(lora).exists():
+            raise ValueError(f"LoRA checkpoint not found: {lora}")
+        if not img or not Path(img).exists():
+            raise ValueError(f"Image not found: {img}")
         rs = int(self.resize_size.currentText())
         return {
             "vit_name": self.vit_name.currentText(),
-            "model_path": sam_path,
-            "result_pth_path": lora_path,
-            "image_path": image_path,
+            "model_path": sam, "result_pth_path": lora, "image_path": img,
             "image_encoder_lora_rank": self.lora_rank.value(),
             "mask_decoder_lora_rank":  self.lora_rank.value(),
-            "freeze_image_encoder":             True,
-            "freeze_prompt_encoder":            True,
-            "freeze_mask_decoder_transformer":  True,
-            "freeze_upscaling_cnn":             True,
+            "freeze_image_encoder": True, "freeze_prompt_encoder": True,
+            "freeze_mask_decoder_transformer": True, "freeze_upscaling_cnn": True,
             "freeze_output_hypernetworks_mlps": True,
-            "freeze_mask_decoder_mask_tokens":  True,
-            "freeze_mask_decoder_iou":          True,
+            "freeze_mask_decoder_mask_tokens": True, "freeze_mask_decoder_iou": True,
             "lora_dropout": 0.1,
-            "sam_image_size": rs,
-            "resize_size": [rs, rs],
-            "points_per_side":  self.points_per_side.value(),
+            "sam_image_size": rs, "resize_size": [rs, rs],
+            "points_per_side": self.points_per_side.value(),
             "points_per_batch": 64,
-            "pred_iou_thresh":         self.pred_iou_thresh.value(),
-            "stability_score_thresh":  self.stability_score_thresh.value(),
-            "stability_score_offset":  0.8,
-            "box_nms_thresh":          self.box_nms_thresh.value(),
-            "crop_nms_thresh":         0.05,
-            "crop_n_layers":           1,
+            "pred_iou_thresh": self.pred_iou_thresh.value(),
+            "stability_score_thresh": self.stability_score_thresh.value(),
+            "stability_score_offset": 0.8,
+            "box_nms_thresh": self.box_nms_thresh.value(),
+            "crop_nms_thresh": 0.05, "crop_n_layers": 1,
             "crop_n_points_downscale_factor": 1,
-            "min_mask_region_area":    self.min_mask_area.value(),
+            "min_mask_region_area": self.min_mask_area.value(),
             "max_mask_region_area_ratio": 0.1,
             "selected_device": self.device.currentText(),
-            "deterministic": True,
-            "seed": 0,
-            "allow_tf32_on_cudnn":  True,
-            "allow_tf32_on_matmul": True,
+            "deterministic": True, "seed": 0,
+            "allow_tf32_on_cudnn": True, "allow_tf32_on_matmul": True,
         }
 
     # ── Actions ──────────────────────────────────────────────────────────────
@@ -368,109 +401,92 @@ class PredictWidget(QWidget):
         try:
             config = self._build_config()
         except ValueError as e:
-            self._append_log(f"[ERROR] {e}")
-            return
+            self._append_log(f"[ERROR] {e}"); return
 
         self.run_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self.stats_box.setVisible(False)
-        self._append_log(f"Running on {Path(config['image_path']).name} …")
+        self.results_section.setVisible(False)
+        self._append_log(f"▶ {Path(config['image_path']).name}")
 
         def run():
             try:
-                image_arr, label_mask = _predict(config)
-                self._done_signal.emit(image_arr, label_mask)
-                n = int(label_mask.max()) if label_mask is not None else 0
-                self._log_signal.emit(f"Done — {n} cells found.")
+                img_arr, mask = _predict(config)
+                self._done_signal.emit(img_arr, mask)
+                self._log_signal.emit(f"✓ {int(mask.max())} cells found")
             except Exception as e:
                 import traceback
-                self._log_signal.emit(f"[ERROR] {e}")
-                self._log_signal.emit(traceback.format_exc())
+                self._log_signal.emit(f"[ERROR] {e}\n{traceback.format_exc()}")
             finally:
                 self._finish_signal.emit()
 
-        self._pred_thread = threading.Thread(target=run, daemon=True)
-        self._pred_thread.start()
+        threading.Thread(target=run, daemon=True).start()
 
     def _on_done(self):
         self.run_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
         self._populate_lora_combo()
 
-    def _show_results(self, image_arr, label_mask):
+    def _show_results(self, img_arr, mask):
         name = Path(self.image_path.text()).stem
-        self._last_label_mask  = label_mask
-        self._last_image_path  = self.image_path.text()
+        self._last_mask = mask
+        self._last_img_path = self.image_path.text()
 
-        for layer in list(self.viewer.layers):
-            if layer.name.startswith(name) and "_gt" not in layer.name:
-                self.viewer.layers.remove(layer)
+        for lyr in list(self.viewer.layers):
+            if lyr.name.startswith(name) and "_gt" not in lyr.name:
+                self.viewer.layers.remove(lyr)
 
-        self.viewer.add_image(image_arr, name=f"{name}_image")
-
-        if label_mask is not None and label_mask.max() > 0:
-            lyr = self.viewer.add_labels(
-                label_mask.astype(np.int32), name=f"{name}_masks", opacity=0.7)
+        self.viewer.add_image(img_arr, name=f"{name}_image")
+        if mask is not None and mask.max() > 0:
+            lyr = self.viewer.add_labels(mask.astype(np.int32), name=f"{name}_masks", opacity=0.7)
             lyr.contour = 2
-            self._update_stats(label_mask, image_arr.shape[:2])
+            self._show_stats(mask, img_arr.shape[:2])
         self.viewer.reset_view()
 
-    def _update_stats(self, label_mask, shape):
-        n_cells = int(label_mask.max())
-        total_px = shape[0] * shape[1]
-        cell_px  = int((label_mask > 0).sum())
-        areas    = [int((label_mask == i).sum()) for i in range(1, n_cells + 1)]
-        avg_area = int(np.mean(areas)) if areas else 0
-        coverage = cell_px / total_px * 100
-
-        self.cell_count_lbl.setText(f"Cells found:  {n_cells}")
-        self.avg_area_lbl.setText(f"Avg area:      {avg_area} px²")
-        self.coverage_lbl.setText(f"Coverage:     {coverage:.1f}%")
-        self.stats_box.setVisible(True)
+    def _show_stats(self, mask, shape):
+        n = int(mask.max())
+        areas = [int((mask == i).sum()) for i in range(1, n + 1)]
+        avg_a = int(np.mean(areas)) if areas else 0
+        med_a = int(np.median(areas)) if areas else 0
+        cov   = (mask > 0).sum() / (shape[0] * shape[1]) * 100
+        self._stats_lbl.setText(
+            f"<b style='font-size:20px;color:{ACCENT};'>{n}</b> cells detected<br>"
+            f"Avg area: <b>{avg_a}</b> px²  ·  Median: <b>{med_a}</b> px²<br>"
+            f"Coverage: <b>{cov:.1f}%</b>  ·  Image: <b>{shape[1]}×{shape[0]}</b> px"
+        )
+        self.results_section.setVisible(True)
 
     def _show_ground_truth(self):
-        gt_path = self.gt_path.text().strip()
-        if not gt_path or not Path(gt_path).exists():
-            self._append_log("[ERROR] Ground truth path not set or not found.")
-            return
+        p = self.gt_path.text().strip()
+        if not p or not Path(p).exists():
+            self._append_log("[ERROR] GT file not found"); return
         try:
             import cv2
-            gt = cv2.imread(gt_path, cv2.IMREAD_UNCHANGED)
+            gt = cv2.imread(p, cv2.IMREAD_UNCHANGED)
             if gt is None:
-                import numpy as _np
-                gt = _np.load(gt_path)
+                gt = np.load(p)
             name = Path(self.image_path.text()).stem
-            layer_name = f"{name}_gt"
+            lname = f"{name}_gt"
             for lyr in list(self.viewer.layers):
-                if lyr.name == layer_name:
+                if lyr.name == lname:
                     self.viewer.layers.remove(lyr)
-            gt_lyr = self.viewer.add_labels(
-                gt.astype(np.int32), name=layer_name, opacity=0.5)
-            gt_lyr.contour = 2
-            n_gt = int(gt.max())
-            self._append_log(f"Ground truth loaded — {n_gt} cells.")
+            l = self.viewer.add_labels(gt.astype(np.int32), name=lname, opacity=0.5)
+            l.contour = 2
+            self._append_log(f"✓ GT loaded — {int(gt.max())} cells")
         except Exception as e:
-            self._append_log(f"[ERROR] loading GT: {e}")
+            self._append_log(f"[ERROR] {e}")
 
     def _save_masks(self):
-        if self._last_label_mask is None:
+        if self._last_mask is None:
             return
-        stem = Path(self._last_image_path).stem if self._last_image_path else "mask"
+        stem = Path(self._last_img_path).stem if self._last_img_path else "mask"
         default = str(STORAGE_DIR / "predict_masks" / f"{stem}_mask.png")
-        path, _ = QFileDialog.getSaveFileName(
+        p, _ = QFileDialog.getSaveFileName(
             self, "Save mask", default, "PNG (*.png);;TIFF (*.tif)", options=_DLG)
-        if not path:
+        if not p:
             return
-        try:
-            import cv2
-            mask = self._last_label_mask
-            if mask.max() <= 65535:
-                cv2.imwrite(path, mask.astype(np.uint16))
-            else:
-                cv2.imwrite(path, mask.astype(np.int32))
-            self._append_log(f"Saved: {Path(path).name}")
-        except Exception as e:
-            self._append_log(f"[ERROR] saving: {e}")
+        import cv2
+        cv2.imwrite(p, self._last_mask.astype(np.uint16))
+        self._append_log(f"✓ Saved {Path(p).name}")
 
     def _append_log(self, text):
         self.log_box.append(text)
@@ -478,51 +494,52 @@ class PredictWidget(QWidget):
             self.log_box.verticalScrollBar().maximum())
 
 
-# ── Prediction logic (background thread) ─────────────────────────────────────
+def _make_custom_lora_row(parent):
+    """Returns a widget containing the custom lora path field — assigned to parent."""
+    parent.lora_custom = QLineEdit()
+    parent.lora_custom.setPlaceholderText("Leave blank to use dropdown above")
+    container = QWidget()
+    row = QHBoxLayout(); row.setContentsMargins(0,0,0,0); row.setSpacing(4)
+    row.addWidget(parent.lora_custom)
+    row.addWidget(_browse_btn(parent,
+        lambda: _pick_file(parent, parent.lora_custom, "Select LoRA checkpoint", "PyTorch (*.pth)")))
+    container.setLayout(row)
+    return container
+
+
+# ── Prediction core ───────────────────────────────────────────────────────────
 
 def _predict(config):
-    import os
-    dev = config.get("selected_device", "cpu")
-    if dev in ("cpu", "mps"):
-        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-    if dev == "mps":
-        os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-    elif "PYTORCH_ENABLE_MPS_FALLBACK" in os.environ:
-        del os.environ["PYTORCH_ENABLE_MPS_FALLBACK"]
-    if dev not in ("cpu", "mps"):
-        os.environ["CUDA_VISIBLE_DEVICES"] = dev
-
-    import cv2
+    import os, cv2
     from data.utils import resize_image
     from predict import predict_images
 
-    image_path = config["image_path"]
-    img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+    dev = config.get("selected_device", "cpu")
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1" if dev in ("cpu", "mps") else dev
+    if dev == "mps":
+        os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+    else:
+        os.environ.pop("PYTORCH_ENABLE_MPS_FALLBACK", None)
+
+    img = cv2.imread(config["image_path"], cv2.IMREAD_UNCHANGED)
     if img is None:
-        raise ValueError(f"Cannot read image: {image_path}")
-
+        raise ValueError(f"Cannot read: {config['image_path']}")
     if img.ndim == 2:
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
     elif img.shape[2] == 4:
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
+        img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
     else:
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    orig_h, orig_w = img_rgb.shape[:2]
-    img_resized = resize_image(img_rgb, config["resize_size"])
-    label_small = predict_images(config, [img_resized])[0]
+    orig_h, orig_w = img.shape[:2]
+    small = predict_images(config, [resize_image(img, config["resize_size"])])[0]
 
-    # Scale mask back to original image size
-    if label_small.shape != (orig_h, orig_w):
-        label_mask = cv2.resize(
-            label_small.astype(np.float32),
-            (orig_w, orig_h),
-            interpolation=cv2.INTER_NEAREST,
-        ).astype(label_small.dtype)
+    if small.shape != (orig_h, orig_w):
+        mask = cv2.resize(small.astype(np.float32), (orig_w, orig_h),
+                          interpolation=cv2.INTER_NEAREST).astype(small.dtype)
     else:
-        label_mask = label_small
-
-    return img_rgb, label_mask
+        mask = small
+    return img, mask
 
 
 def _find_test_image():
