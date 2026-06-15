@@ -3,14 +3,15 @@ import threading
 from pathlib import Path
 
 import numpy as np
+import queue
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QSpinBox, QDoubleSpinBox,
-    QProgressBar, QFileDialog, QScrollArea, QFrame,
-    QTextEdit, QToolButton, QSizePolicy,
+    QProgressBar, QFileDialog, QScrollArea,
+    QTextEdit, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
 
 from gui.pages.utils.train_state_manager import TrainingStateManager
 from project_root import STORAGE_DIR
@@ -18,6 +19,7 @@ from napari_app.theme import (
     WIDGET_SS, BTN_PRIMARY, BTN_DANGER, BTN_SECONDARY, BTN_PRESET, BTN_BROWSE,
     BG, FG, BORDER, TEXT, ACCENT, DIM, CONSOLE,
 )
+from napari_app.widgets.common import CollapsibleSection, divider as _divider, param_row as _param_row
 
 TRAIN_IMAGE_DIR  = STORAGE_DIR / "train_images"
 TRAIN_MASK_DIR   = STORAGE_DIR / "train_masks"
@@ -78,44 +80,6 @@ def _file_row(parent, le, caption, ext, start=None):
     return row
 
 
-def _divider():
-    f = QFrame(); f.setFrameShape(QFrame.Shape.HLine)
-    f.setFixedHeight(1); f.setStyleSheet(f"background:{BORDER}; border:none;")
-    return f
-
-
-def _param_row(label, widget, tip=""):
-    row = QHBoxLayout(); row.setSpacing(8)
-    lbl = QLabel(label); lbl.setStyleSheet(f"color:{DIM}; font-size:12px;"); lbl.setMinimumWidth(115)
-    if tip:
-        lbl.setToolTip(tip); widget.setToolTip(tip)
-    row.addWidget(lbl); row.addWidget(widget)
-    return row
-
-
-class CollapsibleSection(QWidget):
-    def __init__(self, title):
-        super().__init__()
-        vbox = QVBoxLayout(); vbox.setSpacing(0); vbox.setContentsMargins(0, 4, 0, 4)
-        self._toggle = QToolButton()
-        self._toggle.setText(f"▾  {title}")
-        self._toggle.setCheckable(True); self._toggle.setChecked(True)
-        self._toggle.clicked.connect(self._on_toggle)
-        self._toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        vbox.addWidget(self._toggle)
-        self._content = QWidget()
-        self._cl = QVBoxLayout(); self._cl.setSpacing(5); self._cl.setContentsMargins(0, 4, 0, 0)
-        self._content.setLayout(self._cl)
-        vbox.addWidget(self._content)
-        self.setLayout(vbox)
-
-    def addWidget(self, w): self._cl.addWidget(w)
-    def addLayout(self, l): self._cl.addLayout(l)
-
-    def _on_toggle(self, checked):
-        self._content.setVisible(checked)
-        title = self._toggle.text()[3:]
-        self._toggle.setText(f"{'▾' if checked else '▸'}  {title}")
 
 
 class LossChart(QWidget):
@@ -167,6 +131,8 @@ class TrainWidget(QWidget):
         super().__init__()
         self.viewer = viewer
         self._train_thread = None
+        self._stop_event   = threading.Event()
+        self._progress_queue: queue.Queue = queue.Queue()
 
         self.setStyleSheet(WIDGET_SS)
 
@@ -204,6 +170,20 @@ class TrainWidget(QWidget):
         sec_data.addWidget(QLabel("Masks folder", styleSheet=f"color:{DIM};font-size:12px;"))
         self.mask_dir = QLineEdit(str(TRAIN_MASK_DIR))
         sec_data.addLayout(_folder_row(self, self.mask_dir, str(TRAIN_MASK_DIR)))
+
+        # ── Use active napari layers as training data ──────────────────────────
+        use_layers_btn = QPushButton("⬇  Use active napari layers as training data")
+        use_layers_btn.setStyleSheet(BTN_SECONDARY)
+        use_layers_btn.setToolTip(
+            "Exports the currently selected Image + Labels layers from napari\n"
+            "into the training folders above. Use napari annotation tools to\n"
+            "label your cells first, then click this button."
+        )
+        use_layers_btn.clicked.connect(self._use_napari_layers)
+        sec_data.addWidget(use_layers_btn)
+        self._layer_status_lbl = QLabel("")
+        self._layer_status_lbl.setStyleSheet(f"color:{DIM}; font-size:11px;")
+        sec_data.addWidget(self._layer_status_lbl)
 
         sec_data.addWidget(QLabel("Output .pth", styleSheet=f"color:{DIM};font-size:12px;"))
         self.output_path = QLineEdit(); self.output_path.setPlaceholderText("auto-named")
@@ -414,6 +394,63 @@ class TrainWidget(QWidget):
             "track_gpu_memory": False, "selected_device": self.device.currentText(),
         }
 
+    def _use_napari_layers(self):
+        """Export the active Image + Labels layers from napari to training folders."""
+        import cv2
+        import numpy as np
+
+        image_layer = None
+        labels_layer = None
+
+        try:
+            import napari.layers as nl
+            for layer in self.viewer.layers:
+                if isinstance(layer, nl.Labels) and labels_layer is None:
+                    labels_layer = layer
+                elif isinstance(layer, nl.Image) and image_layer is None:
+                    image_layer = layer
+        except Exception as e:
+            self._layer_status_lbl.setText(f"[ERROR] {e}")
+            return
+
+        if image_layer is None or labels_layer is None:
+            missing = []
+            if image_layer is None:
+                missing.append("Image layer")
+            if labels_layer is None:
+                missing.append("Labels layer")
+            self._layer_status_lbl.setText(f"Missing: {', '.join(missing)}")
+            return
+
+        img = np.asarray(image_layer.data, dtype=np.float32)
+        mask = np.asarray(labels_layer.data).astype(np.int32)
+
+        # Normalise to uint8 — handles float32, uint16, uint8, grayscale, RGBA
+        if img.max() > 1.0:
+            img = (img / img.max() * 255.0).clip(0, 255).astype(np.uint8)
+        else:
+            img = (img * 255.0).clip(0, 255).astype(np.uint8)
+
+        if img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        elif img.ndim == 3 and img.shape[2] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+
+        stem = Path(image_layer.name).stem or "napari_image"
+        img_path  = Path(self.image_dir.text()) / f"{stem}.png"
+        mask_path = Path(self.mask_dir.text())  / f"{stem}.png"
+
+        Path(self.image_dir.text()).mkdir(parents=True, exist_ok=True)
+        Path(self.mask_dir.text()).mkdir(parents=True, exist_ok=True)
+
+        cv2.imwrite(str(img_path),  cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(str(mask_path), np.clip(mask, 0, 65535).astype(np.uint16))
+
+        n_cells = int(mask.max())
+        self._layer_status_lbl.setText(
+            f"✓ Saved: {img_path.name}  ({n_cells} cells in mask)"
+        )
+
     def _refresh_history(self):
         h = STATE_MANAGER.load_history()
         if not h:
@@ -433,15 +470,58 @@ class TrainWidget(QWidget):
 
     # ── Training ─────────────────────────────────────────────────────────────
 
+    def _validate_masks(self, mask_dir: str, min_cell_area: int) -> tuple[str, bool]:
+        """Return (message, is_fatal) describing mask quality.
+
+        is_fatal=True means training should be aborted (caller handles it).
+        """
+        import cv2, numpy as np
+        masks = sorted(Path(mask_dir).glob("*"))
+        masks = [m for m in masks if m.suffix.lower() in
+                 (".png", ".tif", ".tiff", ".npy", ".bmp")]
+        if not masks:
+            return "[ERROR] No mask files found in mask folder", True
+        total_cells = 0
+        small_cells = 0
+        for mp in masks:
+            if mp.suffix.lower() == ".npy":
+                m = np.load(str(mp)).astype(np.int32)
+            else:
+                m = cv2.imread(str(mp), cv2.IMREAD_UNCHANGED)
+            if m is None:
+                continue
+            n = int(m.max())
+            total_cells += n
+            counts = np.bincount(m.ravel())
+            for i in range(1, n + 1):
+                if i < len(counts) and counts[i] < min_cell_area:
+                    small_cells += 1
+        parts = [f"✓ {total_cells} cells across {len(masks)} mask(s)"]
+        if small_cells:
+            parts.append(f"⚠ {small_cells} cells < min_cell_area={min_cell_area} (will be filtered)")
+        if total_cells < 20:
+            parts.append("⚠ Fewer than 20 cells — training may be unstable")
+        return "  ".join(parts), False
+
     def _start_training(self):
         try:
             config = self._build_config()
         except ValueError as e:
             self._append_log(f"[ERROR] {e}"); return
 
+        validation_msg, is_fatal = self._validate_masks(
+            config["train_mask_dir"], config["min_cell_area"])
+        self._append_log(validation_msg)
+        if is_fatal:
+            return
+
         STATE_MANAGER.clear_training_state()
         STATE_MANAGER.clear_stop_flag()
         STATE_MANAGER.clear_loss_history()
+        self._stop_event.clear()
+        while not self._progress_queue.empty():
+            self._progress_queue.get_nowait()
+        self._loss_history: list = []
 
         self.start_btn.setEnabled(False); self.stop_btn.setEnabled(True)
         self.progress_bar.setValue(0); self.loss_chart.setVisible(False)
@@ -451,10 +531,12 @@ class TrainWidget(QWidget):
             f"▶ {config['epoch_max']} epochs · {n_imgs} image(s) · "
             f"rank {config['image_encoder_lora_rank']} · {config['selected_device']}")
 
+        pq, se = self._progress_queue, self._stop_event
+
         def run():
             from gui.pages.utils.train_model import train_model
             try:
-                train_model(config, STATE_MANAGER)
+                train_model(config, STATE_MANAGER, progress_queue=pq, stop_event=se)
                 self._log_signal.emit("✓ Training complete")
             except Exception as e:
                 import traceback
@@ -467,21 +549,25 @@ class TrainWidget(QWidget):
         self._timer.start()
 
     def _stop_training(self):
+        self._stop_event.set()
         STATE_MANAGER.set_stop_flag()
         self._append_log("■ Stop requested")
         self.stop_btn.setEnabled(False)
 
     def _poll_progress(self):
-        prog  = STATE_MANAGER.load_progress()
-        pct   = prog.get("progress", 0)
-        epoch = prog.get("current_epoch", 0)
         total = self.epochs.value()
-        self.progress_bar.setValue(pct)
-        self.epoch_lbl.setText(f"Epoch {epoch} / {total}")
-        hist = STATE_MANAGER.load_loss_history()
-        if hist:
-            self.loss_lbl.setText(f"loss {hist[-1]['loss']:.6f}")
-            self.loss_chart.update(hist, total)
+        last_epoch = last_pct = last_loss = None
+        while not self._progress_queue.empty():
+            item = self._progress_queue.get_nowait()
+            last_epoch = item["epoch"]
+            last_pct   = item["pct"]
+            last_loss  = item["loss"]
+            self._loss_history.append({"epoch": last_epoch, "loss": last_loss})
+        if last_epoch is not None:
+            self.progress_bar.setValue(last_pct)
+            self.epoch_lbl.setText(f"Epoch {last_epoch} / {total}")
+            self.loss_lbl.setText(f"loss {last_loss:.6f}")
+            self.loss_chart.update(self._loss_history, total)
         if self._train_thread and not self._train_thread.is_alive():
             self._timer.stop()
 

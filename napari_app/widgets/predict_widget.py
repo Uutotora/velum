@@ -6,10 +6,9 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox,
     QFileDialog, QScrollArea, QProgressBar, QTextEdit,
-    QFrame, QGroupBox, QToolButton, QSizePolicy,
+    QGroupBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from gui.pages.utils.predict_state_manager import PredictionStateManager
 from project_root import STORAGE_DIR
@@ -17,6 +16,7 @@ from napari_app.theme import (
     WIDGET_SS, BTN_SUCCESS, BTN_SECONDARY, BTN_BROWSE,
     BG, FG, BORDER, TEXT, ACCENT, DIM, CONSOLE,
 )
+from napari_app.widgets.common import CollapsibleSection, divider as _divider, param_row as _param_row
 
 LORA_DIR        = STORAGE_DIR / "loras"
 BUILTIN_LORA_DIR = Path(__file__).parents[2] / "checkpoints"
@@ -59,74 +59,6 @@ def _file_row(parent, line_edit, caption, ext="All (*)"):
     return row
 
 
-def _divider():
-    f = QFrame()
-    f.setFrameShape(QFrame.Shape.HLine)
-    f.setFixedHeight(1)
-    f.setStyleSheet(f"background: {BORDER}; border: none; margin: 0;")
-    return f
-
-
-def _param_row(label_text, widget, tip=""):
-    row = QHBoxLayout()
-    row.setSpacing(8)
-    lbl = QLabel(label_text)
-    lbl.setStyleSheet(f"color: {DIM}; font-size: 12px;")
-    lbl.setMinimumWidth(115)
-    if tip:
-        lbl.setToolTip(tip)
-        widget.setToolTip(tip)
-    row.addWidget(lbl)
-    row.addWidget(widget)
-    return row
-
-
-class CollapsibleSection(QWidget):
-    """Section with a clickable header that shows/hides content."""
-
-    def __init__(self, title, parent=None):
-        super().__init__(parent)
-        self._collapsed = False
-
-        vbox = QVBoxLayout()
-        vbox.setSpacing(0)
-        vbox.setContentsMargins(0, 4, 0, 4)
-
-        # Header row
-        header = QHBoxLayout()
-        header.setSpacing(6)
-
-        self._toggle = QToolButton()
-        self._toggle.setText(f"▾  {title}")
-        self._toggle.setCheckable(True)
-        self._toggle.setChecked(True)
-        self._toggle.clicked.connect(self._on_toggle)
-        self._toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        header.addWidget(self._toggle)
-        vbox.addLayout(header)
-
-        # Content container
-        self._content = QWidget()
-        self._content_layout = QVBoxLayout()
-        self._content_layout.setSpacing(5)
-        self._content_layout.setContentsMargins(0, 4, 0, 0)
-        self._content.setLayout(self._content_layout)
-        vbox.addWidget(self._content)
-
-        self.setLayout(vbox)
-
-    def addWidget(self, w):
-        self._content_layout.addWidget(w)
-
-    def addLayout(self, l):
-        self._content_layout.addLayout(l)
-
-    def _on_toggle(self, checked):
-        self._content.setVisible(checked)
-        self._toggle.setText(
-            f"▾  {self._toggle.text()[3:]}" if checked
-            else f"▸  {self._toggle.text()[3:]}"
-        )
 
 
 class PredictWidget(QWidget):

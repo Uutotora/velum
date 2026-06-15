@@ -1,10 +1,25 @@
+import json
 from datetime import datetime
+from pathlib import Path
 
-from data.dataset import TrainDataset
+
+def _save_config_sidecar(config, loss_history):
+    """Save a reproducible JSON sidecar next to the checkpoint."""
+    pth = Path(config["result_pth_path"])
+    sidecar = pth.with_suffix(".json")
+    serialisable = {
+        k: v for k, v in config.items()
+        if isinstance(v, (int, float, str, bool, list))
+    }
+    serialisable["loss_history"] = loss_history
+    serialisable["saved_at"] = datetime.now().isoformat()
+    with open(sidecar, "w") as f:
+        json.dump(serialisable, f, indent=2)
 
 
 def load_dataset(config):
-    train_dataset = TrainDataset(
+    from data.dataset import TrainDataset
+    return TrainDataset(
         image_dir=config["train_image_dir"],
         mask_dir=config["train_mask_dir"],
         resize_size=config["resize_size"],
@@ -12,23 +27,25 @@ def load_dataset(config):
         train_id=config["train_id"],
         duplicate_data=config["duplicate_data"],
     )
-    return train_dataset
 
 
-def train_model(config, state_manager):
+def train_model(config, state_manager, progress_queue=None, stop_event=None):
+    """Train the model.
+
+    progress_queue: if provided, puts dicts {"epoch", "pct", "loss"} for in-process UI updates.
+                    Also used for file-based Streamlit state (both can coexist).
+    stop_event: threading.Event — set it to request early stop without touching disk.
+    """
     import os
 
     selected_device = config.get("selected_device", "cpu")
     if selected_device == "cpu":
         os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-        print("INFO: Running training on CPU.")
     elif selected_device == "mps":
         os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
         os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-        print("INFO: Running training on Apple Silicon GPU (MPS) with CPU fallback for unsupported ops.")
     else:
         os.environ["CUDA_VISIBLE_DEVICES"] = selected_device
-        print(f"INFO: Running training on GPU {selected_device}.")
 
     from cellseg1_train import (
         load_model,
@@ -58,20 +75,31 @@ def train_model(config, state_manager):
 
     try:
         for epoch in range(config["epoch_max"]):
-            if state_manager.check_stop_flag():
+            stopped = (
+                (stop_event is not None and stop_event.is_set())
+                or state_manager.check_stop_flag()
+            )
+            if stopped:
                 save_model = False
                 break
 
             avg_loss = train_epoch(model, config, trainloader, optimizer, scheduler)
-            progress = int(((epoch + 1) / config["epoch_max"]) * 100)
             current_epoch = epoch + 1
+            pct = int(current_epoch / config["epoch_max"] * 100)
+            loss_entry = {"epoch": current_epoch, "loss": round(float(avg_loss), 6)}
+            loss_history.append(loss_entry)
 
-            loss_history.append({"epoch": current_epoch, "loss": round(float(avg_loss), 6)})
+            # fast in-process path
+            if progress_queue is not None:
+                progress_queue.put({"epoch": current_epoch, "pct": pct, "loss": loss_entry["loss"]})
+
+            # file-based path (Streamlit GUI compatibility)
             state_manager.save_loss_history(loss_history)
-            state_manager.save_progress(progress, current_epoch)
+            state_manager.save_progress(pct, current_epoch)
 
         if save_model:
             save_model_pth(model, config["result_pth_path"])
+            _save_config_sidecar(config, loss_history)
 
         final_loss = loss_history[-1]["loss"] if loss_history else None
         state_manager.append_history_entry({
