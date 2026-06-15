@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QFileDialog, QScrollArea,
     QTextEdit, QSizePolicy,
 )
+from napari_app.widgets.log_window import get_log_window
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
 from gui.pages.utils.train_state_manager import TrainingStateManager
@@ -285,26 +286,18 @@ class TrainWidget(QWidget):
         inner.setLayout(L); scroll.setWidget(inner)
         outer.addWidget(scroll)
 
-        # ── Log pinned at bottom (outside scroll, always visible) ─────────────
+        # ── Log button footer ─────────────────────────────────────────────────
         outer.addWidget(_divider())
-        _log_hdr = QHBoxLayout()
-        _log_hdr.setContentsMargins(12, 3, 8, 0)
-        _lh = QLabel("LOG")
-        _lh.setStyleSheet(f"color:{DIM}; font-size:10px; letter-spacing:1px;")
-        _lc = QPushButton("×")
-        _lc.setFixedSize(18, 18)
-        _lc.setStyleSheet(f"color:{DIM}; border:none; background:transparent; font-size:14px;")
-        _log_hdr.addWidget(_lh); _log_hdr.addStretch(); _log_hdr.addWidget(_lc)
-        outer.addLayout(_log_hdr)
-        self.log_box = QTextEdit()
-        self.log_box.setReadOnly(True)
-        self.log_box.setMinimumHeight(160)
-        self.log_box.setStyleSheet(
-            f"border:none; border-radius:0; padding:6px 12px;"
-            f"background:{CONSOLE}; color:{TEXT};"
-        )
-        _lc.clicked.connect(self.log_box.clear)
-        outer.addWidget(self.log_box)
+        _footer = QHBoxLayout()
+        _footer.setContentsMargins(8, 4, 8, 4)
+        _log_btn = QPushButton("Log ↗")
+        _log_btn.setStyleSheet(
+            f"color:{DIM}; background:transparent; border:none; font-size:11px;")
+        _log_btn.setToolTip("Open the floating log window")
+        _log_btn.clicked.connect(lambda: get_log_window().show_and_raise())
+        _footer.addStretch()
+        _footer.addWidget(_log_btn)
+        outer.addLayout(_footer)
 
         self.setLayout(outer)
         self.setMinimumWidth(360)
@@ -596,6 +589,7 @@ class TrainWidget(QWidget):
         self._timer.stop(); self._refresh_history()
 
     def _append_log(self, text):
-        self.log_box.append(text)
-        self.log_box.verticalScrollBar().setValue(
-            self.log_box.verticalScrollBar().maximum())
+        lw = get_log_window()
+        lw.append(text)
+        if not lw.isVisible():
+            lw.show()
