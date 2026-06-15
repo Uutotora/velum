@@ -281,17 +281,33 @@ class TrainWidget(QWidget):
         L.addWidget(sec_hist)
         L.addWidget(_divider())
 
-        # ── Log ───────────────────────────────────────────────────────────────
-        sec_log = CollapsibleSection("Log")
-        sec_log._on_toggle(False)
-        self.log_box = QTextEdit(); self.log_box.setReadOnly(True); self.log_box.setFixedHeight(100)
-        sec_log.addWidget(self.log_box)
-        L.addWidget(sec_log)
-
         L.addStretch()
         inner.setLayout(L); scroll.setWidget(inner)
-        outer.addWidget(scroll); self.setLayout(outer)
-        self.setMinimumWidth(320)
+        outer.addWidget(scroll)
+
+        # ── Log pinned at bottom (outside scroll, always visible) ─────────────
+        outer.addWidget(_divider())
+        _log_hdr = QHBoxLayout()
+        _log_hdr.setContentsMargins(12, 3, 8, 0)
+        _lh = QLabel("LOG")
+        _lh.setStyleSheet(f"color:{DIM}; font-size:10px; letter-spacing:1px;")
+        _lc = QPushButton("×")
+        _lc.setFixedSize(18, 18)
+        _lc.setStyleSheet(f"color:{DIM}; border:none; background:transparent; font-size:14px;")
+        _log_hdr.addWidget(_lh); _log_hdr.addStretch(); _log_hdr.addWidget(_lc)
+        outer.addLayout(_log_hdr)
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setMinimumHeight(160)
+        self.log_box.setStyleSheet(
+            f"border:none; border-radius:0; padding:6px 12px;"
+            f"background:{CONSOLE}; color:{TEXT};"
+        )
+        _lc.clicked.connect(self.log_box.clear)
+        outer.addWidget(self.log_box)
+
+        self.setLayout(outer)
+        self.setMinimumWidth(360)
 
         self._log_signal.connect(self._append_log)
         self._finish_signal.connect(self._on_finish)

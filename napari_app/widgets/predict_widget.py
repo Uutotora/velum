@@ -97,6 +97,11 @@ class PredictWidget(QWidget):
         self.lora_combo.currentIndexChanged.connect(self._on_checkpoint_changed)
         qr.addWidget(self.lora_combo)
 
+        self._meta_lbl = QLabel("")
+        self._meta_lbl.setStyleSheet(f"color:{DIM}; font-size:11px; padding:0 2px 2px;")
+        self._meta_lbl.setWordWrap(True)
+        qr.addWidget(self._meta_lbl)
+
         qr.addWidget(QLabel("Image"))
         self.image_path = QLineEdit()
         self.image_path.setPlaceholderText("Select microscopy image…")
@@ -141,10 +146,16 @@ class PredictWidget(QWidget):
         self._stats_lbl.setWordWrap(True)
         self.results_section.addWidget(self._stats_lbl)
 
-        save_btn = QPushButton("💾  Save masks as PNG/TIFF")
+        save_btn = QPushButton("Save masks as PNG/TIFF")
         save_btn.setStyleSheet(BTN_SECONDARY)
         save_btn.clicked.connect(self._save_masks)
         self.results_section.addWidget(save_btn)
+
+        csv_btn = QPushButton("Export measurements CSV")
+        csv_btn.setStyleSheet(BTN_SECONDARY)
+        csv_btn.setToolTip("Saves cell_id, area_px, centroid_y, centroid_x for each detected cell")
+        csv_btn.clicked.connect(self._export_csv)
+        self.results_section.addWidget(csv_btn)
 
         L.addWidget(self.results_section)
         L.addWidget(_divider())
@@ -229,21 +240,34 @@ class PredictWidget(QWidget):
         L.addWidget(inf_sec)
         L.addWidget(_divider())
 
-        # ── Log ───────────────────────────────────────────────────────────────
-        log_sec = CollapsibleSection("Log")
-        log_sec._on_toggle(False)
-        self.log_box = QTextEdit()
-        self.log_box.setReadOnly(True)
-        self.log_box.setFixedHeight(100)
-        log_sec.addWidget(self.log_box)
-        L.addWidget(log_sec)
-
         L.addStretch()
         inner.setLayout(L)
         scroll.setWidget(inner)
         outer.addWidget(scroll)
+
+        # ── Log pinned at bottom (outside scroll, always visible) ─────────────
+        outer.addWidget(_divider())
+        _log_hdr = QHBoxLayout()
+        _log_hdr.setContentsMargins(12, 3, 8, 0)
+        _lh = QLabel("LOG")
+        _lh.setStyleSheet(f"color:{DIM}; font-size:10px; letter-spacing:1px;")
+        _lc = QPushButton("×")
+        _lc.setFixedSize(18, 18)
+        _lc.setStyleSheet(f"color:{DIM}; border:none; background:transparent; font-size:14px;")
+        _log_hdr.addWidget(_lh); _log_hdr.addStretch(); _log_hdr.addWidget(_lc)
+        outer.addLayout(_log_hdr)
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setMinimumHeight(160)
+        self.log_box.setStyleSheet(
+            f"border:none; border-radius:0; padding:6px 12px;"
+            f"background:{CONSOLE}; color:{TEXT};"
+        )
+        _lc.clicked.connect(self.log_box.clear)
+        outer.addWidget(self.log_box)
+
         self.setLayout(outer)
-        self.setMinimumWidth(320)
+        self.setMinimumWidth(360)
 
         self._log_signal.connect(self._append_log)
         self._done_signal.connect(self._show_results)
@@ -293,7 +317,8 @@ class PredictWidget(QWidget):
         if fl is not None:
             parts.append(f"loss {fl:.5f}")
         parts.append(f"{epochs}/{epoch_max} ep")
-        self._append_log("auto: " + "  ·  ".join(parts))
+        self._meta_lbl.setText("  ·  ".join(parts))
+        self._append_log("checkpoint: " + "  ·  ".join(parts))
 
     def _populate_lora_combo(self):
         self.lora_combo.clear()
@@ -510,6 +535,36 @@ class PredictWidget(QWidget):
         import cv2
         cv2.imwrite(p, self._last_mask.astype(np.uint16))
         self._append_log(f"✓ Saved {Path(p).name}")
+
+    def _export_csv(self):
+        if self._last_mask is None:
+            return
+        import csv
+        mask = self._last_mask
+        n = int(mask.max())
+        if n == 0:
+            self._append_log("[WARN] No cells to export"); return
+        stem = Path(self._last_img_path).stem if self._last_img_path else "mask"
+        (STORAGE_DIR / "predict_masks").mkdir(parents=True, exist_ok=True)
+        default = str(STORAGE_DIR / "predict_masks" / f"{stem}_measurements.csv")
+        p, _ = QFileDialog.getSaveFileName(
+            self, "Export CSV", default, "CSV (*.csv)", options=_DLG)
+        if not p:
+            return
+        flat  = mask.ravel()
+        ys, xs = np.indices(mask.shape)
+        areas = np.bincount(flat, minlength=n + 1)[1:].astype(np.int64)
+        sum_y = np.bincount(flat, weights=ys.ravel().astype(np.float64), minlength=n + 1)[1:]
+        sum_x = np.bincount(flat, weights=xs.ravel().astype(np.float64), minlength=n + 1)[1:]
+        with open(p, "w", newline="") as f:
+            wr = csv.writer(f)
+            wr.writerow(["cell_id", "area_px", "centroid_y", "centroid_x"])
+            for i in range(n):
+                a = int(areas[i])
+                if a == 0:
+                    continue
+                wr.writerow([i + 1, a, f"{sum_y[i] / a:.1f}", f"{sum_x[i] / a:.1f}"])
+        self._append_log(f"✓ Exported {n} cells → {Path(p).name}")
 
     def _append_log(self, text):
         self.log_box.append(text)
