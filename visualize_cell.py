@@ -326,6 +326,7 @@ class InstanceVisualizer:
         line_width: float,
         line_type: str,
         hover_template: Optional[str] = None,
+        opacity: float = 1.0,
     ) -> go.Scatter:
         x = []
         y = []
@@ -338,6 +339,7 @@ class InstanceVisualizer:
             y=y,
             mode="lines",
             line=dict(color=color, width=line_width, dash=line_type),
+            opacity=opacity,
             showlegend=False,
             hovertemplate=hover_template,
             hoverinfo="skip",
@@ -368,6 +370,7 @@ class InstanceVisualizer:
                         style.true_mask_line_width,
                         style.true_mask_line_type,
                         style.hover_template,
+                        opacity=style.overlay_alpha,
                     )
                 )
 
@@ -380,6 +383,7 @@ class InstanceVisualizer:
                         style.pred_mask_line_width,
                         style.pred_mask_line_type,
                         style.hover_template,
+                        opacity=style.overlay_alpha,
                     )
                 )
 

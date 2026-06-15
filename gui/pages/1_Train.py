@@ -3,6 +3,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import plotly.graph_objects as go
 import psutil
 import streamlit as st
 
@@ -10,324 +11,505 @@ from data.dataset import TrainDataset
 from gui.pages.utils.train_model import train_model
 from gui.pages.utils.train_state_manager import TrainingStateManager
 from gui.pages.utils.web_utils import (
+    DEVICE_LABELS,
     LORA_PTH_DIR,
     SUPPORT_EXTENSION,
     TRAIN_IMAGE_DIR,
     TRAIN_MASK_DIR,
     delete_file,
-    get_available_devices, # Changed from get_available_gpus
+    get_available_devices,
     get_sam_model_path,
+    inject_css,
     initialize_session_state,
     list_files,
     load_default_config,
+    render_sidebar,
+    show_compact_file_list,
 )
 from project_root import STORAGE_DIR
 
+# ── Presets ───────────────────────────────────────────────────────────────────
+
+PRESETS = {
+    "fast_mps": {
+        "label": "Fast · MPS",
+        "help": "150 epochs · batch 1 · grad accum 32 · rank 4 — quick iteration on Apple Silicon (~10 min)",
+        "train_epoch_max": 150,
+        "train_batch_size": 1,
+        "train_gradient_accumulation": 32,
+        "train_base_lr": 0.003,
+        "train_lora_rank": 4,
+        "train_selected_sam_type": "vit_h",
+        "train_sam_image_size": 512,
+        "train_resize_size": 512,
+        "train_patch_size": 256,
+        "train_random_seed": 0,
+    },
+    "balanced": {
+        "label": "Balanced",
+        "help": "300 epochs · batch 1 · grad accum 32 · rank 4 — recommended default (~20–30 min on MPS)",
+        "train_epoch_max": 300,
+        "train_batch_size": 1,
+        "train_gradient_accumulation": 32,
+        "train_base_lr": 0.003,
+        "train_lora_rank": 4,
+        "train_selected_sam_type": "vit_h",
+        "train_sam_image_size": 512,
+        "train_resize_size": 512,
+        "train_patch_size": 256,
+        "train_random_seed": 0,
+    },
+    "best_quality": {
+        "label": "Best quality",
+        "help": "500 epochs · rank 8 · SAM 1024 — maximum accuracy, ~2× slower and uses more memory",
+        "train_epoch_max": 500,
+        "train_batch_size": 1,
+        "train_gradient_accumulation": 32,
+        "train_base_lr": 0.001,
+        "train_lora_rank": 8,
+        "train_selected_sam_type": "vit_h",
+        "train_sam_image_size": 1024,
+        "train_resize_size": 1024,
+        "train_patch_size": 512,
+        "train_random_seed": 0,
+    },
+}
+
+
+def apply_preset(preset_key: str) -> None:
+    for k, v in PRESETS[preset_key].items():
+        if k not in ("label", "help"):
+            st.session_state[k] = v
+
+
+# ── Loss chart ────────────────────────────────────────────────────────────────
+
+def render_loss_chart(loss_history: list, epoch_max: int | None = None) -> None:
+    epochs = [d["epoch"] for d in loss_history]
+    losses = [d["loss"] for d in loss_history]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=epochs,
+        y=losses,
+        mode="lines",
+        line=dict(color="#ef4444", width=2),
+        fill="tozeroy",
+        fillcolor="rgba(239,68,68,0.07)",
+        hovertemplate="Epoch %{x}<br>Loss %{y:.5f}<extra></extra>",
+    ))
+    if epoch_max:
+        fig.update_xaxes(range=[1, epoch_max])
+    fig.update_layout(
+        xaxis_title="Epoch",
+        yaxis_title="Loss",
+        height=210,
+        margin=dict(l=50, r=20, t=8, b=40),
+        paper_bgcolor="white",
+        plot_bgcolor="#f8fafc",
+        showlegend=False,
+        xaxis=dict(gridcolor="#e2e8f0", zeroline=False),
+        yaxis=dict(gridcolor="#e2e8f0", zeroline=False),
+    )
+    st.markdown('<p class="sec-label">Training loss</p>', unsafe_allow_html=True)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    if losses:
+        min_l, last_l = min(losses), losses[-1]
+        st.caption(
+            f"Latest: **{last_l:.5f}** · Best: **{min_l:.5f}** · Epoch {epochs[-1]}"
+            + (f" / {epoch_max}" if epoch_max else "")
+        )
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     initialize_session_state()
-    st.set_page_config(page_title="Train", layout="wide")
-    st.title("Train")
+    st.set_page_config(page_title="Train — CellSeg1", layout="wide")
+    inject_css()
+    render_sidebar()
 
-    with st.container():
-        col1, col2 = st.columns(2)
+    st.markdown("## Train")
+    st.caption("Fine-tune SAM with LoRA on a single annotated image · requires one image + instance mask")
+    st.divider()
+
+    # ── Data upload ───────────────────────────────────────────────────────────
+    with st.container(border=True):
+        col1, col2 = st.columns(2, gap="large")
         with col1:
+            st.markdown('<p class="sec-label">Training image</p>', unsafe_allow_html=True)
             image_files = st.file_uploader(
-                "Upload Training Images",
+                "Upload training images",
                 accept_multiple_files=True,
                 type=SUPPORT_EXTENSION,
                 key="train_image_files",
+                label_visibility="collapsed",
             )
+            if image_files:
+                TRAIN_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+                for f in image_files:
+                    with open(TRAIN_IMAGE_DIR / f.name, "wb") as fp:
+                        fp.write(f.getbuffer())
+                st.success("Images saved.")
+            existing_images = list_files(TRAIN_IMAGE_DIR)
+            if existing_images:
+                show_compact_file_list(TRAIN_IMAGE_DIR, existing_images, "del_train_img", show_preview=True)
+            else:
+                st.caption("No images loaded. Upload a microscopy image (PNG / TIF / JPG).")
+
         with col2:
+            st.markdown('<p class="sec-label">Instance mask</p>', unsafe_allow_html=True)
             mask_files = st.file_uploader(
-                "Upload Training Masks",
+                "Upload training masks",
                 accept_multiple_files=True,
                 type=SUPPORT_EXTENSION,
                 key="train_mask_files",
+                label_visibility="collapsed",
             )
-
-        if image_files:
-            TRAIN_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-            for uploaded_file in image_files:
-                with open(TRAIN_IMAGE_DIR / uploaded_file.name, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-            st.success("Training images uploaded successfully.")
-
-        if mask_files:
-            TRAIN_MASK_DIR.mkdir(parents=True, exist_ok=True)
-            for uploaded_file in mask_files:
-                with open(TRAIN_MASK_DIR / uploaded_file.name, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-            st.success("Training masks uploaded successfully.")
-        col1, col2 = st.columns(2)
-        with col1:
-            existing_images = list_files(TRAIN_IMAGE_DIR)
-            with st.expander(f"Existing {len(existing_images)} Files:", expanded=True):
-                if existing_images:
-                    for img in existing_images:
-                        col_img, col_del = st.columns([3, 1])
-                        with col_img:
-                            st.text(img)
-                        with col_del:
-                            delete_button = st.button(
-                                "Delete",
-                                key=f"delete_train_image_{img}",
-                                on_click=lambda img=img: delete_file(TRAIN_IMAGE_DIR, img),
-                            )
-                else:
-                    st.info("No training images uploaded yet.")
-        with col2:
+            if mask_files:
+                TRAIN_MASK_DIR.mkdir(parents=True, exist_ok=True)
+                for f in mask_files:
+                    with open(TRAIN_MASK_DIR / f.name, "wb") as fp:
+                        fp.write(f.getbuffer())
+                st.success("Masks saved.")
             existing_masks = list_files(TRAIN_MASK_DIR)
-            with st.expander(f"Existing {len(existing_masks)} Files:", expanded=True):
-                if existing_masks:
-                    for msk in existing_masks:
-                        col_msk, col_del = st.columns([3, 1])
-                        with col_msk:
-                            st.text(msk)
-                        with col_del:
-                            delete_button = st.button(  # noqa: F841
-                                "Delete",
-                                key=f"delete_train_mask_{msk}",
-                                on_click=lambda msk=msk: delete_file(TRAIN_MASK_DIR, msk),
-                            )
-                else:
-                    st.info("No training masks uploaded yet.")
+            if existing_masks:
+                show_compact_file_list(TRAIN_MASK_DIR, existing_masks, "del_train_msk", show_preview=True)
+            else:
+                st.caption("No masks loaded. Each pixel value should equal the cell instance ID (0 = background).")
 
-    with st.expander("Advanced Settings"):
-        col1, col2, col3, col4, col5 = st.columns(5, vertical_alignment="bottom")
-        with col1:
+    # ── Presets ───────────────────────────────────────────────────────────────
+    st.markdown("")
+    st.markdown('<p class="sec-label">Presets</p>', unsafe_allow_html=True)
+    pc1, pc2, pc3, _spacer = st.columns([1, 1, 1, 3])
+    with pc1:
+        st.button(
+            PRESETS["fast_mps"]["label"],
+            on_click=apply_preset,
+            args=("fast_mps",),
+            use_container_width=True,
+            help=PRESETS["fast_mps"]["help"],
+        )
+    with pc2:
+        st.button(
+            PRESETS["balanced"]["label"],
+            on_click=apply_preset,
+            args=("balanced",),
+            use_container_width=True,
+            help=PRESETS["balanced"]["help"],
+        )
+    with pc3:
+        st.button(
+            PRESETS["best_quality"]["label"],
+            on_click=apply_preset,
+            args=("best_quality",),
+            use_container_width=True,
+            help=PRESETS["best_quality"]["help"],
+        )
+
+    # ── Advanced settings ─────────────────────────────────────────────────────
+    with st.expander("Advanced settings"):
+        # Model
+        st.markdown('<p class="sec-label">Model</p>', unsafe_allow_html=True)
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
             st.selectbox(
-                "Select SAM Type",
+                "SAM type",
                 options=["vit_h", "vit_l", "vit_b"],
                 key="train_selected_sam_type",
-                help="huge > large > base",
+                help="vit_h (huge) gives the best results; vit_b (base) is fastest. Must match the type used at prediction time.",
             )
-        with col2:
-            sam_image_size = st.number_input(
-                "SAM Image Size",
-                min_value=64,
-                max_value=1024,
-                value=512,
-                step=64,
-                help="This is the input size of SAM.",
-            )
-        with col3:
-            lora_rank = st.number_input(
-                "LoRA Rank", min_value=1, max_value=30, value=4, step=1, help="This apply to both encoder and decoder."
-            )
-        with col4:
-            resize_size = st.number_input(
-                "Resize Size",
-                min_value=0,
-                max_value=1024,
-                value=512,
-                step=64,
-                help="0 represent not resize. Image -> Resize image by Resize Size -> Slice patch by Patch Size - > Resize patch by SAM Image Size",
-            )
-        with col5:
-            patch_size = st.number_input(
-                "Patch Size",
-                min_value=0,
-                max_value=512,
-                value=256,
-                step=64,
-                help="50% overlap between patches.",
-            )
-        col6, col7, col8, col9, col10 = st.columns(5, vertical_alignment="bottom")
-        with col6:
-            random_seed = st.number_input(
-                "Random Seed",
-                min_value=0,
-                max_value=1000000,
-                value=0,
+        with mc2:
+            st.number_input(
+                "LoRA rank",
+                min_value=1, max_value=30,
+                key="train_lora_rank",
                 step=1,
+                help="Adapter dimension — higher rank = more trainable parameters. Default 4 works well for most cases.",
             )
-        with col7:
+        with mc3:
+            st.number_input(
+                "SAM image size",
+                min_value=64, max_value=1024,
+                key="train_sam_image_size",
+                step=64,
+                help="Internal SAM resolution. Must match prediction time. Default 512.",
+            )
+
+        st.divider()
+
+        # Data
+        st.markdown('<p class="sec-label">Data</p>', unsafe_allow_html=True)
+        dc1, dc2 = st.columns(2)
+        with dc1:
+            st.number_input(
+                "Resize size",
+                min_value=0, max_value=2048,
+                key="train_resize_size",
+                step=64,
+                help="Resize the image before patching. 0 = no resize. Pipeline: Image → Resize → Patches → SAM size.",
+            )
+        with dc2:
+            st.number_input(
+                "Patch size",
+                min_value=0, max_value=1024,
+                key="train_patch_size",
+                step=64,
+                help="Patch size for sliding window extraction (50% overlap). Should be ≤ resize size.",
+            )
+
+        st.divider()
+
+        # Training
+        st.markdown('<p class="sec-label">Training</p>', unsafe_allow_html=True)
+        tc1, tc2, tc3, tc4, tc5 = st.columns(5, vertical_alignment="bottom")
+        with tc1:
+            epoch_max = st.number_input(
+                "Epochs",
+                min_value=1, max_value=10000,
+                key="train_epoch_max",
+                step=50,
+                help="Number of training epochs. 300 is the recommended default.",
+            )
+        with tc2:
             base_lr = st.number_input(
-                "Learning Rate",
-                min_value=0.00001,
-                max_value=0.3,
-                value=0.003,
+                "Learning rate",
+                min_value=0.00001, max_value=0.3,
+                key="train_base_lr",
                 step=0.0001,
                 format="%.5f",
+                help="Peak learning rate for OneCycleLR scheduler.",
             )
-        with col8:
-            epoch_max = st.number_input(
-                "Training Epochs",
-                min_value=1,
-                max_value=10000,
-                value=300,
-                step=50,
-                help="In rare cases, training with large amounts of poorly labeled images for extended periods may cause model collapse. If this occurs, try reducing this value or using a different random seed.",
-            )
-        with col9:
+        with tc3:
             batch_size = st.number_input(
-                "Batch Size",
-                min_value=1,
-                max_value=128,
-                value=1,
+                "Batch size",
+                min_value=1, max_value=128,
+                key="train_batch_size",
                 step=1,
-                help="The effective batch size is equal to the batch size multiplied by the number of gradient accumulation steps.",
+                help="Samples per gradient update step.",
             )
-        with col10:
+        with tc4:
             gradient_accumulation_step = st.number_input(
-                "Gradient Accumulation", min_value=1, max_value=128, value=32, step=1
+                "Grad. accumulation",
+                min_value=1, max_value=128,
+                key="train_gradient_accumulation",
+                step=1,
+                help="Accumulate gradients over N steps before updating weights.",
+            )
+        with tc5:
+            random_seed = st.number_input(
+                "Random seed",
+                min_value=0, max_value=1_000_000,
+                key="train_random_seed",
+                step=1,
             )
 
-    st.header("Run")
+        eff = batch_size * gradient_accumulation_step
+        st.info(
+            f"Effective batch size = {batch_size} × {gradient_accumulation_step} = **{eff}**  "
+            f"— 8 GB VRAM: try 1×32  ·  12 GB: 2×16  ·  24 GB: 4×8",
+            icon="ℹ️",
+        )
 
+    # ── State manager ─────────────────────────────────────────────────────────
     state_manager = TrainingStateManager(STORAGE_DIR)
     running_state = state_manager.load_training_state()
     if running_state:
         pid = running_state["process_id"]
-        if psutil.pid_exists(pid):
-            pass
-        else:
+        if not psutil.pid_exists(pid):
             state_manager.clear_training_state()
-            st.success("Training is complete.")
             running_state = None
-    if running_state:
-        start_disabled = True
-        stop_disabled = False
-    else:
-        start_disabled = False
-        stop_disabled = True
-    col1, col2, col3, col4, col5 = st.columns([3, 3, 3, 3, 3], gap="small", vertical_alignment="bottom")
-    with col1:
-        device_options = get_available_devices()
-        if len(device_options) > 1:
-             selected_device = st.selectbox("Select Device", options=device_options, help="Select CPU or GPU for training.")
-        elif len(device_options) == 1 and device_options[0] == 'cpu':
-             st.info("No GPUs detected. CPU will be used for training.")
-             selected_device = 'cpu'
-        else:
-             st.error("Could not determine available devices. Please check system configuration.")
-             selected_device = None
 
-    with col2:
-        # Disable start if no device could be selected
-        start_button_disabled = start_disabled or (selected_device is None)
-        start_button = st.button(
+    is_running = running_state is not None
+
+    # ── Run ───────────────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown('<p class="sec-label">Run</p>', unsafe_allow_html=True)
+
+    device_options = get_available_devices()
+    rc1, rc2, rc3, rc4 = st.columns([3, 2, 2, 3], vertical_alignment="bottom")
+    with rc1:
+        selected_device = st.selectbox(
+            "Device",
+            options=device_options,
+            format_func=lambda d: DEVICE_LABELS.get(d, f"GPU {d}"),
+            help="Select compute device for training.",
+        )
+    with rc2:
+        st.button(
             "Start Training",
             key="train_start_button",
-            help="Click to start training",
             type="primary",
             use_container_width=True,
-            disabled=start_button_disabled,
+            disabled=is_running or selected_device is None,
         )
-    with col3:
-        stop_button = st.button(
-            "Stop Training",
+    with rc3:
+        st.button(
+            "Stop",
             key="train_stop_button",
-            help="Click to stop training",
             type="secondary",
             use_container_width=True,
-            disabled=stop_disabled,
+            disabled=not is_running,
         )
-    with col4:
-        lora_files = reversed(list_files(LORA_PTH_DIR, extensions=[".pth"]))
-        selected_lora = st.selectbox(
-            "Select LoRA file",
-            options=lora_files,
-            index=0 if lora_files else None,
-        )
-    with col5:
-        if selected_lora:
-            with open(LORA_PTH_DIR / selected_lora, "rb") as f:
-                st.download_button(
-                    label="Download",
-                    data=f,
-                    file_name=selected_lora,
-                    mime="application/octet-stream",
-                    use_container_width=True,
-                )
-        else:
-            st.button("Download", help="No LoRA file available", disabled=True, use_container_width=True)
 
-    if start_button:
+    # Running banner
+    if is_running:
+        st.info(
+            "Training is running in the background. Safe to close the browser — progress is preserved.",
+            icon="ℹ️",
+        )
+
+    # Start / stop button actions
+    if st.session_state.get("train_start_button"):
         images = list_files(TRAIN_IMAGE_DIR)
         masks = list_files(TRAIN_MASK_DIR)
         if validate_inputs(TRAIN_IMAGE_DIR, TRAIN_MASK_DIR, images, masks):
             sam_type = st.session_state.get("train_selected_sam_type", "vit_h")
             config = prepare_config(
-                epoch_max,
-                base_lr,
-                batch_size,
-                gradient_accumulation_step,
-                TRAIN_IMAGE_DIR,
-                TRAIN_MASK_DIR,
-                sam_type,
-                random_seed,
-                sam_image_size,
-                patch_size,
-                resize_size,
-                lora_rank,
+                epoch_max=st.session_state["train_epoch_max"],
+                base_lr=st.session_state["train_base_lr"],
+                batch_size=st.session_state["train_batch_size"],
+                gradient_accumulation_step=st.session_state["train_gradient_accumulation"],
+                image_dir=TRAIN_IMAGE_DIR,
+                mask_dir=TRAIN_MASK_DIR,
+                sam_type=sam_type,
+                random_seed=st.session_state["train_random_seed"],
+                sam_image_size=st.session_state["train_sam_image_size"],
+                patch_size=st.session_state["train_patch_size"],
+                resize_size=st.session_state["train_resize_size"],
+                lora_rank=st.session_state["train_lora_rank"],
             )
-            # Pass the selected device to the config
             config["selected_device"] = selected_device
             config["train_id"] = list(range(len(images)))
 
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            lora_path = STORAGE_DIR / "loras" / f"lora_{sam_type}_{lora_rank}_{sam_image_size}_{timestamp}.pth"
+            lora_path = (
+                STORAGE_DIR / "loras"
+                / f"lora_{sam_type}_{st.session_state['train_lora_rank']}_{st.session_state['train_sam_image_size']}_{timestamp}.pth"
+            )
             config["result_pth_path"] = str(lora_path)
 
-            process = multiprocessing.Process(
-                target=train_model,
-                args=(config, state_manager),
-            )
+            process = multiprocessing.Process(target=train_model, args=(config, state_manager))
             process.start()
-
             state_manager.save_training_state(process.pid, datetime.now())
-            st.success("Training has started.")
+            st.success("Training started.")
             st.rerun()
         else:
-            st.error("Validation failed. Please check your inputs.")
+            st.error("Check inputs before starting.")
 
-    if stop_button:
+    if st.session_state.get("train_stop_button"):
         if running_state:
             state_manager.set_stop_flag()
-            st.warning("Training will be stopped shortly.")
+            st.warning("Stop signal sent — training will halt after the current epoch.")
         else:
-            st.info("No training process is running.")
+            st.info("No training is running.")
 
-    if running_state:
+    # ── Progress + live loss chart ────────────────────────────────────────────
+    if is_running:
         pid = running_state["process_id"]
         if psutil.pid_exists(pid):
             progress_data = state_manager.load_progress()
-            progress_value = progress_data.get("progress", 0)
             current_epoch = progress_data.get("current_epoch", 0)
+            progress_pct = progress_data.get("progress", 0)
+            elapsed = datetime.now() - running_state["start_time"]
 
-            _ = st.progress(progress_value / 100)
-            elapsed_time = datetime.now() - running_state["start_time"]
-
-            if current_epoch > 0 and progress_value > 0:
-                time_per_epoch = elapsed_time / current_epoch
-                remaining_epochs = epoch_max - current_epoch
-                estimated_remaining_time = time_per_epoch * remaining_epochs
-                estimated_remaining_time = timedelta(seconds=int(estimated_remaining_time.total_seconds()))
+            if current_epoch > 0 and progress_pct > 0:
+                time_per_epoch = elapsed / current_epoch
+                remaining = epoch_max - current_epoch
+                eta = timedelta(seconds=int((time_per_epoch * remaining).total_seconds()))
             else:
-                estimated_remaining_time = "Calculating..."
+                eta = "—"
 
-            st.text(
-                f"Training Epoch: {current_epoch}/{epoch_max} | "
-                f"Elapsed Time: {str(elapsed_time).split('.')[0]} | "
-                f"Estimated Remaining Time: {estimated_remaining_time}"
-            )
+            st.progress(progress_pct / 100)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Epoch", f"{current_epoch} / {epoch_max}")
+            m2.metric("Elapsed", str(elapsed).split(".")[0])
+            m3.metric("ETA", str(eta))
+
+            loss_history = state_manager.load_loss_history()
+            if loss_history:
+                render_loss_chart(loss_history, epoch_max=epoch_max)
+
             time.sleep(1)
             st.rerun()
         else:
             state_manager.clear_training_state()
-            st.success("Training is complete.")
+            st.rerun()
     else:
-        st.info("No training process is running.")
+        # Show loss chart from completed run
+        loss_history = state_manager.load_loss_history()
+        if loss_history:
+            render_loss_chart(loss_history, epoch_max=epoch_max)
 
+    # ── Output — download ─────────────────────────────────────────────────────
+    st.divider()
+    st.markdown('<p class="sec-label">Output</p>', unsafe_allow_html=True)
+    lora_files = list(reversed(list_files(LORA_PTH_DIR, extensions=[".pth"])))
+
+    if lora_files:
+        dl1, dl2, _spacer = st.columns([3, 2, 4], vertical_alignment="bottom")
+        with dl1:
+            selected_lora = st.selectbox(
+                "Select LoRA checkpoint",
+                options=lora_files,
+                label_visibility="collapsed",
+            )
+        with dl2:
+            with open(LORA_PTH_DIR / selected_lora, "rb") as f:
+                st.download_button(
+                    label="Download .pth",
+                    data=f,
+                    file_name=selected_lora,
+                    mime="application/octet-stream",
+                    use_container_width=True,
+                )
+        st.caption(f"Saved: `streamlit_storage/loras/{selected_lora}`")
+    else:
+        st.caption("No trained models yet. Run training to generate a LoRA checkpoint.")
+
+    # ── Training history ──────────────────────────────────────────────────────
+    st.divider()
+    history = state_manager.load_history()
+    with st.expander(f"Training history  ({len(history)} run{'s' if len(history) != 1 else ''})",
+                     expanded=False):
+        if history:
+            import pandas as pd
+            rows = []
+            for h in history:
+                ts = h.get("started_at", "")[:19].replace("T", " ")
+                fl = h.get("final_loss")
+                ep = h.get("epochs_run", 0)
+                ep_max = h.get("epoch_max", "")
+                ckpt = Path(h.get("checkpoint", "")).name
+                rows.append({
+                    "Date": ts,
+                    "SAM": h.get("sam_type", ""),
+                    "Rank": h.get("lora_rank", ""),
+                    "Epochs": f"{ep} / {ep_max}",
+                    "Final loss": f"{fl:.5f}" if fl is not None else "—",
+                    "Status": h.get("status", ""),
+                    "Checkpoint": ckpt,
+                })
+            st.dataframe(
+                pd.DataFrame(rows),
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Final loss": st.column_config.NumberColumn("Final loss", format="%.5f"),
+                },
+            )
+        else:
+            st.caption("No runs recorded yet. History is saved automatically when training completes.")
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def validate_inputs(image_dir, mask_dir, images, masks):
     if not Path(image_dir).exists():
-        st.error("The specified image directory does not exist.")
+        st.error("Image directory does not exist.")
         return False
     if not Path(mask_dir).exists():
-        st.error("The specified mask directory does not exist.")
+        st.error("Mask directory does not exist.")
         return False
     if len(images) == 0:
         st.error("No training images uploaded.")
@@ -336,24 +518,15 @@ def validate_inputs(image_dir, mask_dir, images, masks):
         st.error("No training masks uploaded.")
         return False
     if len(images) != len(masks):
-        st.error("The number of training images and masks must be the same.")
+        st.error(f"Image / mask count mismatch: {len(images)} images vs {len(masks)} masks.")
         return False
     return True
 
 
 def prepare_config(
-    epoch_max,
-    base_lr,
-    batch_size,
-    gradient_accumulation_step,
-    image_dir,
-    mask_dir,
-    sam_type,
-    random_seed,
-    sam_image_size,
-    patch_size,
-    resize_size,
-    lora_rank,
+    epoch_max, base_lr, batch_size, gradient_accumulation_step,
+    image_dir, mask_dir, sam_type, random_seed,
+    sam_image_size, patch_size, resize_size, lora_rank,
 ):
     config = load_default_config()
     config["epoch_max"] = epoch_max
@@ -375,7 +548,7 @@ def prepare_config(
 
 
 def load_dataset(config):
-    train_dataset = TrainDataset(
+    return TrainDataset(
         image_dir=config["train_image_dir"],
         mask_dir=config["train_mask_dir"],
         resize_size=config["resize_size"],
@@ -383,7 +556,6 @@ def load_dataset(config):
         train_id=config["train_id"],
         duplicate_data=config["duplicate_data"],
     )
-    return train_dataset
 
 
 if __name__ == "__main__":

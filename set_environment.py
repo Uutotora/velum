@@ -6,7 +6,12 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
+else:
+    DEVICE = torch.device("cpu")
 
 
 def set_env(
@@ -18,17 +23,21 @@ def set_env(
         np.random.seed(seed)
         cv2.setRNGSeed(seed)
         torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
         os.environ["PYTHONHASHSEED"] = str(seed)
 
-        cudnn.benchmark = False
-        cudnn.deterministic = True
-        # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        torch.use_deterministic_algorithms(True)
+        if torch.cuda.is_available():
+            cudnn.benchmark = False
+            cudnn.deterministic = True
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        # MPS does not support all deterministic ops, skip on Apple Silicon
+        if not torch.backends.mps.is_available():
+            torch.use_deterministic_algorithms(True)
     else:
-        cudnn.benchmark = True
+        if torch.cuda.is_available():
+            cudnn.benchmark = True
         torch.use_deterministic_algorithms(False)
 
     # https://pytorch.org/docs/stable/notes/cuda.html#tf32-on-ampere

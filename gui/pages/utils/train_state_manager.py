@@ -51,3 +51,32 @@ class TrainingStateManager:
 
     def check_stop_flag(self):
         return self.stop_flag_file.exists()
+
+    def save_loss_history(self, loss_history: list) -> None:
+        with open(self.storage_dir / "loss_history.json", "w") as f:
+            json.dump(loss_history, f)
+
+    def load_loss_history(self) -> list:
+        loss_file = self.storage_dir / "loss_history.json"
+        if not loss_file.exists():
+            return []
+        with open(loss_file) as f:
+            return json.load(f)
+
+    def clear_loss_history(self) -> None:
+        loss_file = self.storage_dir / "loss_history.json"
+        if loss_file.exists():
+            loss_file.unlink()
+
+    def append_history_entry(self, entry: dict) -> None:
+        history = self.load_history()
+        history.insert(0, entry)  # newest first
+        with open(self.storage_dir / "training_history.json", "w") as f:
+            json.dump(history, f, indent=2)
+
+    def load_history(self) -> list:
+        history_file = self.storage_dir / "training_history.json"
+        if not history_file.exists():
+            return []
+        with open(history_file) as f:
+            return json.load(f)

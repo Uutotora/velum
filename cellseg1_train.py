@@ -160,12 +160,14 @@ def train_epoch(
     optimizer: optim.Optimizer,
     scheduler: OneCycleLR,
     stop_event=None,
-):
+) -> float:
     model.train()
     actual_ga_step = 0
+    total_loss = 0.0
+    counted = 0
     for i_batch, batch_data in enumerate(tqdm(trainloader, desc="Batches", leave=False)):
         if stop_event is not None and stop_event.is_set():
-            return
+            return total_loss / max(counted, 1)
         images, true_instance_masks, cell_masks, all_points, all_cell_probs = batch_data
 
         if not is_valid_batch(images, all_points):
@@ -174,6 +176,8 @@ def train_epoch(
         batch_images, batch_points = to_tensor(images, all_points, config["sam_image_size"])
 
         loss = compute_loss(model, config, batch_images, batch_points, cell_masks, all_points, all_cell_probs)
+        total_loss += loss.item()
+        counted += 1
 
         actual_ga_step += 1
         loss_ga = loss / (actual_ga_step if (i_batch + 1) == len(trainloader) else config["gradient_accumulation_step"])
@@ -184,6 +188,8 @@ def train_epoch(
             optimizer.zero_grad()
             actual_ga_step = 0
             scheduler.step()
+
+    return total_loss / max(counted, 1)
 
 
 def save_model_pth(model: LoRA_Sam, save_path: str):

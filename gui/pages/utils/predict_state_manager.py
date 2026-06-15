@@ -30,8 +30,15 @@ class PredictionStateManager:
             if file.exists():
                 file.unlink()
 
-    def save_progress(self, progress):
-        data = {"progress": progress}
+    def save_progress(self, done: int, total: int = None,
+                      current_image: str = "", image_started_at: float = None):
+        data = {"progress": done}
+        if total is not None:
+            data["total"] = total
+        if current_image:
+            data["current_image"] = current_image
+        if image_started_at is not None:
+            data["image_started_at"] = image_started_at
         with open(self.progress_file, "w") as f:
             json.dump(data, f)
 
