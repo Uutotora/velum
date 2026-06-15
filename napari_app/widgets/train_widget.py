@@ -16,7 +16,7 @@ from gui.pages.utils.train_state_manager import TrainingStateManager
 from project_root import STORAGE_DIR
 from napari_app.theme import (
     WIDGET_SS, BTN_PRIMARY, BTN_DANGER, BTN_SECONDARY, BTN_PRESET, BTN_BROWSE,
-    BG, FG, TEXT, ACCENT, DIM, SECONDARY, CONSOLE, GREEN,
+    BG, FG, BORDER, TEXT, ACCENT, DIM, CONSOLE,
 )
 
 TRAIN_IMAGE_DIR  = STORAGE_DIR / "train_images"
@@ -80,7 +80,7 @@ def _file_row(parent, le, caption, ext, start=None):
 
 def _divider():
     f = QFrame(); f.setFrameShape(QFrame.Shape.HLine)
-    f.setFixedHeight(1); f.setStyleSheet(f"background:{FG}; border:none;")
+    f.setFixedHeight(1); f.setStyleSheet(f"background:{BORDER}; border:none;")
     return f
 
 
@@ -136,11 +136,11 @@ class LossChart(QWidget):
 
     def _style(self):
         ax = self.ax
-        ax.set_facecolor("#0d0d1a")
-        ax.tick_params(colors=SECONDARY, labelsize=8)
-        ax.set_xlabel("Epoch", color=SECONDARY, fontsize=8)
-        ax.set_ylabel("Loss",  color=SECONDARY, fontsize=8)
-        for s in ax.spines.values(): s.set_edgecolor(FG)
+        ax.set_facecolor(CONSOLE)
+        ax.tick_params(colors=DIM, labelsize=8)
+        ax.set_xlabel("Epoch", color=DIM, fontsize=8)
+        ax.set_ylabel("Loss",  color=DIM, fontsize=8)
+        for s in ax.spines.values(): s.set_edgecolor(BORDER)
         self.fig.tight_layout(pad=0.6)
 
     def update(self, history, epoch_max):
@@ -185,7 +185,7 @@ class TrainWidget(QWidget):
             row_pre.addWidget(b)
         sec_pre.addLayout(row_pre)
         lbl_eff = QLabel()
-        lbl_eff.setStyleSheet(f"color:{SECONDARY}; font-size:11px;")
+        lbl_eff.setStyleSheet(f"color:{DIM}; font-size:11px;")
         self._eff_lbl = lbl_eff
         sec_pre.addWidget(lbl_eff)
         L.addWidget(sec_pre)
@@ -284,7 +284,7 @@ class TrainWidget(QWidget):
 
         status_row = QHBoxLayout()
         self.epoch_lbl = QLabel("—"); self.epoch_lbl.setStyleSheet(f"color:{DIM};font-size:11px;")
-        self.loss_lbl  = QLabel("—"); self.loss_lbl.setStyleSheet(f"color:#ef9999;font-size:11px;")
+        self.loss_lbl  = QLabel("—"); self.loss_lbl.setStyleSheet(f"color:{DIM};font-size:11px;")
         status_row.addWidget(self.epoch_lbl); status_row.addStretch(); status_row.addWidget(self.loss_lbl)
         L.addLayout(status_row)
 

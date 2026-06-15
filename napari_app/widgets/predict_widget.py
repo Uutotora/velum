@@ -15,7 +15,7 @@ from gui.pages.utils.predict_state_manager import PredictionStateManager
 from project_root import STORAGE_DIR
 from napari_app.theme import (
     WIDGET_SS, BTN_SUCCESS, BTN_SECONDARY, BTN_BROWSE,
-    BG, FG, TEXT, ACCENT, DIM, SECONDARY, CONSOLE,
+    BG, FG, BORDER, TEXT, ACCENT, DIM, CONSOLE,
 )
 
 LORA_DIR        = STORAGE_DIR / "loras"
@@ -63,7 +63,7 @@ def _divider():
     f = QFrame()
     f.setFrameShape(QFrame.Shape.HLine)
     f.setFixedHeight(1)
-    f.setStyleSheet(f"background: {FG}; border: none;")
+    f.setStyleSheet(f"background: {BORDER}; border: none; margin: 0;")
     return f
 
 
@@ -449,9 +449,10 @@ class PredictWidget(QWidget):
         med_a = int(np.median(areas)) if areas else 0
         cov   = (mask > 0).sum() / (shape[0] * shape[1]) * 100
         self._stats_lbl.setText(
-            f"<b style='font-size:20px;color:{ACCENT};'>{n}</b> cells detected<br>"
-            f"Avg area: <b>{avg_a}</b> px²  ·  Median: <b>{med_a}</b> px²<br>"
-            f"Coverage: <b>{cov:.1f}%</b>  ·  Image: <b>{shape[1]}×{shape[0]}</b> px"
+            f"<b style='font-size:18px;color:{TEXT};'>{n}</b>"
+            f"<span style='color:{DIM};'> cells detected</span><br>"
+            f"<span style='color:{DIM};'>Avg {avg_a} px²  ·  Median {med_a} px²"
+            f"  ·  {cov:.1f}% coverage</span>"
         )
         self.results_section.setVisible(True)
 
