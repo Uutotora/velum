@@ -59,12 +59,26 @@ def _file_row(parent, line_edit, caption, ext="All (*)"):
     return row
 
 
+def _dir_row(parent, line_edit, caption):
+    def pick():
+        p = QFileDialog.getExistingDirectory(
+            parent, caption, line_edit.text() or str(Path.home()), _DLG)
+        if p:
+            line_edit.setText(p)
+    row = QHBoxLayout(); row.setSpacing(4)
+    row.addWidget(line_edit)
+    row.addWidget(_browse_btn(parent, pick))
+    return row
+
+
 
 
 class PredictWidget(QWidget):
-    _log_signal    = pyqtSignal(str)
-    _done_signal   = pyqtSignal(object, object)
-    _finish_signal = pyqtSignal()
+    _log_signal            = pyqtSignal(str)
+    _done_signal           = pyqtSignal(object, object)
+    _finish_signal         = pyqtSignal()
+    _batch_progress_signal = pyqtSignal(int, int)   # (done, total)
+    _batch_finish_signal   = pyqtSignal()
 
     def __init__(self, viewer):
         super().__init__()
@@ -73,6 +87,7 @@ class PredictWidget(QWidget):
         self._last_mask     = None
         self._last_img_path = None
         self._lora_paths    = {}
+        self._batch_stop    = threading.Event()
 
         self.setStyleSheet(WIDGET_SS)
 
@@ -177,6 +192,45 @@ class PredictWidget(QWidget):
         L.addWidget(gt_sec)
         L.addWidget(_divider())
 
+        # ── Batch prediction ──────────────────────────────────────────────────
+        batch_sec = CollapsibleSection("Batch prediction")
+        batch_sec._on_toggle(False)
+
+        batch_sec.addWidget(QLabel("Input folder", styleSheet=f"color:{DIM};font-size:12px;"))
+        self.batch_in = QLineEdit()
+        self.batch_in.setPlaceholderText("Folder with images to process")
+        batch_sec.addLayout(_dir_row(self, self.batch_in, "Select input folder"))
+
+        batch_sec.addWidget(QLabel("Output folder", styleSheet=f"color:{DIM};font-size:12px;"))
+        self.batch_out = QLineEdit(str(STORAGE_DIR / "predict_masks"))
+        batch_sec.addLayout(_dir_row(self, self.batch_out, "Select output folder"))
+
+        _br = QHBoxLayout(); _br.setSpacing(6)
+        self.batch_btn = QPushButton("Run Batch")
+        self.batch_btn.setStyleSheet(BTN_SUCCESS)
+        self.batch_btn.clicked.connect(self._run_batch)
+        _br.addWidget(self.batch_btn)
+        self.batch_stop_btn = QPushButton("Stop")
+        self.batch_stop_btn.setFixedWidth(70)
+        self.batch_stop_btn.setEnabled(False)
+        self.batch_stop_btn.setStyleSheet(BTN_SECONDARY)
+        self.batch_stop_btn.clicked.connect(self._stop_batch)
+        _br.addWidget(self.batch_stop_btn)
+        batch_sec.addLayout(_br)
+
+        self.batch_progress = QProgressBar()
+        self.batch_progress.setRange(0, 100)
+        self.batch_progress.setFixedHeight(4)
+        self.batch_progress.setVisible(False)
+        batch_sec.addWidget(self.batch_progress)
+
+        self.batch_lbl = QLabel("")
+        self.batch_lbl.setStyleSheet(f"color:{DIM}; font-size:11px;")
+        batch_sec.addWidget(self.batch_lbl)
+
+        L.addWidget(batch_sec)
+        L.addWidget(_divider())
+
         # ── Model settings ────────────────────────────────────────────────────
         mdl_sec = CollapsibleSection("Model settings")
         mdl_sec._on_toggle(False)
@@ -272,6 +326,12 @@ class PredictWidget(QWidget):
         self._log_signal.connect(self._append_log)
         self._done_signal.connect(self._show_results)
         self._finish_signal.connect(self._on_done)
+        self._batch_progress_signal.connect(self._on_batch_progress)
+        self._batch_finish_signal.connect(self._on_batch_done)
+
+        # Keyboard shortcuts (napari viewer-level)
+        viewer.bind_key('Control-r', lambda v: self._run_prediction())
+        viewer.bind_key('Control-Shift-r', lambda v: self._predict_active_layer())
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -535,6 +595,70 @@ class PredictWidget(QWidget):
         import cv2
         cv2.imwrite(p, self._last_mask.astype(np.uint16))
         self._append_log(f"✓ Saved {Path(p).name}")
+
+    def _run_batch(self):
+        in_dir  = Path(self.batch_in.text().strip())
+        out_dir = Path(self.batch_out.text().strip())
+        if not in_dir.is_dir():
+            self._append_log("[ERROR] Input folder not found"); return
+        exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".npy"}
+        images = sorted(f for f in in_dir.iterdir() if f.suffix.lower() in exts)
+        if not images:
+            self._append_log("[ERROR] No images found in input folder"); return
+        out_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            config = self._build_config()
+        except ValueError as e:
+            self._append_log(f"[ERROR] {e}"); return
+
+        self._batch_stop.clear()
+        self.batch_btn.setEnabled(False)
+        self.batch_stop_btn.setEnabled(True)
+        self.batch_progress.setVisible(True)
+        self.batch_progress.setValue(0)
+        self.batch_lbl.setText(f"0 / {len(images)}")
+        self._append_log(f"▶ Batch: {len(images)} images → {out_dir.name}/")
+
+        import cv2 as _cv2
+
+        def run():
+            n = len(images)
+            done = 0
+            for img_path in images:
+                if self._batch_stop.is_set():
+                    self._log_signal.emit(f"■ Stopped at {done}/{n}")
+                    break
+                self._log_signal.emit(f"[{done + 1}/{n}] {img_path.name}")
+                try:
+                    cfg = {**config, "image_path": str(img_path)}
+                    _, mask = _predict_cached(cfg)
+                    out_path = out_dir / f"{img_path.stem}_mask.png"
+                    _cv2.imwrite(str(out_path), mask.astype(np.uint16))
+                except Exception as e:
+                    import traceback
+                    self._log_signal.emit(f"  [ERROR] {e}")
+                done += 1
+                self._batch_progress_signal.emit(done, n)
+            else:
+                self._log_signal.emit(f"✓ Batch done — {n} masks saved to {out_dir.name}/")
+            self._batch_finish_signal.emit()
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _stop_batch(self):
+        self._batch_stop.set()
+        self.batch_stop_btn.setEnabled(False)
+        self.batch_lbl.setText("stopping…")
+
+    def _on_batch_progress(self, done: int, total: int):
+        self.batch_progress.setValue(int(done / total * 100))
+        self.batch_lbl.setText(f"Image {done} / {total}")
+
+    def _on_batch_done(self):
+        self.batch_btn.setEnabled(True)
+        self.batch_stop_btn.setEnabled(False)
+        self.batch_progress.setVisible(False)
+        self.batch_lbl.setText("")
 
     def _export_csv(self):
         if self._last_mask is None:

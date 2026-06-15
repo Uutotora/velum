@@ -314,6 +314,10 @@ class TrainWidget(QWidget):
         self._timer = QTimer(); self._timer.setInterval(1000)
         self._timer.timeout.connect(self._poll_progress)
 
+        # Keyboard shortcuts
+        viewer.bind_key('Control-t', lambda v: self._start_training() if self.start_btn.isEnabled() else None)
+        viewer.bind_key('Escape',    lambda v: self._stop_training()  if self.stop_btn.isEnabled()  else None)
+
         self._update_eff()
         self._refresh_history()
 
