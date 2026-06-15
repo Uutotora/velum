@@ -94,6 +94,7 @@ class PredictWidget(QWidget):
         qr.addWidget(QLabel("Checkpoint"))
         self.lora_combo = QComboBox()
         self._populate_lora_combo()
+        self.lora_combo.currentIndexChanged.connect(self._on_checkpoint_changed)
         qr.addWidget(self.lora_combo)
 
         qr.addWidget(QLabel("Image"))
@@ -110,6 +111,15 @@ class PredictWidget(QWidget):
         self.run_btn.setStyleSheet(BTN_SUCCESS)
         self.run_btn.clicked.connect(self._run_prediction)
         qr.addWidget(self.run_btn)
+
+        self.active_btn = QPushButton("▶   Predict on active layer")
+        self.active_btn.setStyleSheet(BTN_SECONDARY)
+        self.active_btn.setToolTip(
+            "Run prediction on whatever Image layer is currently\n"
+            "selected in the napari viewer — no file picker needed."
+        )
+        self.active_btn.clicked.connect(self._predict_active_layer)
+        qr.addWidget(self.active_btn)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)
@@ -241,6 +251,50 @@ class PredictWidget(QWidget):
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
+    def _on_checkpoint_changed(self, _index: int):
+        from napari_app.inference_cache import invalidate_model
+        invalidate_model()
+        self._autofill_from_sidecar()
+
+    def _autofill_from_sidecar(self):
+        """Read .json sidecar next to checkpoint and populate SAM type / resize / rank."""
+        lora_path = self._resolve_lora()
+        if not lora_path:
+            return
+        sidecar = Path(lora_path).with_suffix(".json")
+        if not sidecar.exists():
+            return
+        try:
+            import json
+            with open(sidecar) as f:
+                meta = json.load(f)
+        except Exception:
+            return
+
+        vit = meta.get("vit_name")
+        if vit and vit in ("vit_h", "vit_l", "vit_b"):
+            self.vit_name.setCurrentText(vit)
+
+        rs = meta.get("sam_image_size") or (meta.get("resize_size") or [None])[0]
+        if rs and str(rs) in ("256", "512", "768", "1024"):
+            self.resize_size.setCurrentText(str(rs))
+
+        rank = meta.get("image_encoder_lora_rank")
+        if rank and isinstance(rank, int):
+            self.lora_rank.setValue(rank)
+
+        fl = meta.get("final_loss")
+        epochs = meta.get("epochs_run", "?")
+        epoch_max = meta.get("epoch_max", "?")
+        saved_at = (meta.get("saved_at", "") or "")[:16].replace("T", " ")
+        parts = []
+        if saved_at:
+            parts.append(saved_at)
+        if fl is not None:
+            parts.append(f"loss {fl:.5f}")
+        parts.append(f"{epochs}/{epoch_max} ep")
+        self._append_log("auto: " + "  ·  ".join(parts))
+
     def _populate_lora_combo(self):
         self.lora_combo.clear()
         self._lora_paths = {}
@@ -329,6 +383,36 @@ class PredictWidget(QWidget):
 
     # ── Actions ──────────────────────────────────────────────────────────────
 
+    def _predict_active_layer(self):
+        """Run prediction on the active Image layer in the napari viewer."""
+        import napari.layers as nl
+        import tempfile, cv2, numpy as np
+
+        image_layer = None
+        for layer in self.viewer.layers:
+            if isinstance(layer, nl.Image):
+                image_layer = layer
+                break
+
+        if image_layer is None:
+            self._append_log("[ERROR] No Image layer found in viewer"); return
+
+        img = np.asarray(image_layer.data, dtype=np.float32)
+        if img.max() > 1.0:
+            img = (img / img.max() * 255).clip(0, 255).astype(np.uint8)
+        else:
+            img = (img * 255).clip(0, 255).astype(np.uint8)
+        if img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        elif img.ndim == 3 and img.shape[2] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+
+        # Write to a temp PNG so the rest of the pipeline can read image_path
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        cv2.imwrite(tmp.name, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        self.image_path.setText(tmp.name)
+        self._run_prediction()
+
     def _run_prediction(self):
         try:
             config = self._build_config()
@@ -336,15 +420,19 @@ class PredictWidget(QWidget):
             self._append_log(f"[ERROR] {e}"); return
 
         self.run_btn.setEnabled(False)
+        self.active_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.results_section.setVisible(False)
-        self._append_log(f"▶ {Path(config['image_path']).name}")
+
+        from napari_app.inference_cache import cache_status
+        self._append_log(f"▶ {Path(config['image_path']).name}  [{cache_status()}]")
 
         def run():
             try:
-                img_arr, mask = _predict(config)
+                img_arr, mask = _predict_cached(config)
                 self._done_signal.emit(img_arr, mask)
-                self._log_signal.emit(f"✓ {int(mask.max())} cells found")
+                from napari_app.inference_cache import cache_status as cs
+                self._log_signal.emit(f"✓ {int(mask.max())} cells  [{cs()}]")
             except Exception as e:
                 import traceback
                 self._log_signal.emit(f"[ERROR] {e}\n{traceback.format_exc()}")
@@ -355,6 +443,7 @@ class PredictWidget(QWidget):
 
     def _on_done(self):
         self.run_btn.setEnabled(True)
+        self.active_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
         self._populate_lora_combo()
 
@@ -376,10 +465,11 @@ class PredictWidget(QWidget):
 
     def _show_stats(self, mask, shape):
         n = int(mask.max())
-        areas = [int((mask == i).sum()) for i in range(1, n + 1)]
+        counts = np.bincount(mask.ravel())       # O(N) single pass
+        areas = counts[1:n + 1].tolist() if n > 0 else []
         avg_a = int(np.mean(areas)) if areas else 0
         med_a = int(np.median(areas)) if areas else 0
-        cov   = (mask > 0).sum() / (shape[0] * shape[1]) * 100
+        cov   = counts[1:].sum() / (shape[0] * shape[1]) * 100
         self._stats_lbl.setText(
             f"<b style='font-size:18px;color:{TEXT};'>{n}</b>"
             f"<span style='color:{DIM};'> cells detected</span><br>"
@@ -440,19 +530,13 @@ def _make_custom_lora_row(parent):
     return container
 
 
-# ── Prediction core ───────────────────────────────────────────────────────────
+# ── Prediction core (with model + embedding cache) ────────────────────────────
 
-def _predict(config):
-    import os, cv2
+def _predict_cached(config):
+    """Load image, run prediction via inference_cache, scale mask back."""
+    import cv2
     from data.utils import resize_image
-    from predict import predict_images
-
-    dev = config.get("selected_device", "cpu")
-    os.environ["CUDA_VISIBLE_DEVICES"] = "-1" if dev in ("cpu", "mps") else dev
-    if dev == "mps":
-        os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-    else:
-        os.environ.pop("PYTORCH_ENABLE_MPS_FALLBACK", None)
+    from napari_app.inference_cache import predict_cached
 
     img = cv2.imread(config["image_path"], cv2.IMREAD_UNCHANGED)
     if img is None:
@@ -465,7 +549,8 @@ def _predict(config):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     orig_h, orig_w = img.shape[:2]
-    small = predict_images(config, [resize_image(img, config["resize_size"])])[0]
+    resized = resize_image(img, config["resize_size"])
+    small = predict_cached(config, resized)
 
     if small.shape != (orig_h, orig_w):
         mask = cv2.resize(small.astype(np.float32), (orig_w, orig_h),
