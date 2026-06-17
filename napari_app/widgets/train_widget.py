@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QSpinBox, QDoubleSpinBox,
     QProgressBar, QFileDialog, QScrollArea,
-    QTextEdit, QSizePolicy, QFrame, QAbstractSpinBox,
+    QTextEdit, QSizePolicy, QFrame, QAbstractSpinBox, QButtonGroup,
 )
 from napari_app.widgets.log_window import get_log_window
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -31,9 +31,9 @@ STATE_MANAGER = TrainingStateManager(str(STORAGE_DIR))
 _DLG = QFileDialog.Option.DontUseNativeDialog
 
 PRESETS = {
-    "Fast · MPS":   {"epochs": 150, "batch_size": 1, "grad_accum": 32, "lr": 3e-3, "lora_rank": 4, "resize": "512"},
-    "Balanced":     {"epochs": 300, "batch_size": 1, "grad_accum": 32, "lr": 3e-3, "lora_rank": 4, "resize": "512"},
-    "Best quality": {"epochs": 500, "batch_size": 1, "grad_accum": 32, "lr": 1e-3, "lora_rank": 8, "resize": "1024"},
+    "Fast · MPS":   {"epochs": 150, "batch_size": 1, "grad_accum": 32, "lr": 3e-3, "lora_rank": 4, "resize": "512",  "_sub": "150e · r4 · 512"},
+    "Balanced":     {"epochs": 300, "batch_size": 1, "grad_accum": 32, "lr": 3e-3, "lora_rank": 4, "resize": "512",  "_sub": "300e · r4 · 512"},
+    "Best quality": {"epochs": 500, "batch_size": 1, "grad_accum": 32, "lr": 1e-3, "lora_rank": 8, "resize": "1024", "_sub": "500e · r8 · 1024"},
 }
 
 
@@ -94,20 +94,35 @@ def _file_row(parent, le, caption, ext, start=None):
 class LossChart(QWidget):
     def __init__(self):
         super().__init__()
-        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-        from matplotlib.figure import Figure
-        self.fig = Figure(figsize=(3, 1.6), dpi=90)
-        self.fig.patch.set_facecolor(BG)
-        self.ax = self.fig.add_subplot(111)
-        self._style()
-        self.canvas = FigureCanvasQTAgg(self.fig)
-        self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.canvas.setFixedHeight(140)
-        L = QVBoxLayout(); L.setContentsMargins(0, 0, 0, 0); L.addWidget(self.canvas)
-        self.setLayout(L)
+        self._use_pg = False
+        try:
+            import pyqtgraph as pg
+            self._pg = pg
+            self._plot = pg.PlotWidget(background=CONSOLE)
+            self._plot.setFixedHeight(96)
+            self._plot.showGrid(x=False, y=True, alpha=0.15)
+            for axis in ("bottom", "left"):
+                self._plot.getAxis(axis).setTextPen(DIM)
+                self._plot.getAxis(axis).setPen(BORDER)
+            self._curve = self._plot.plot(pen=pg.mkPen(ACCENT, width=1.6))
+            L = QVBoxLayout(); L.setContentsMargins(0, 0, 0, 0); L.addWidget(self._plot)
+            self.setLayout(L)
+            self._use_pg = True
+        except Exception:
+            from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+            from matplotlib.figure import Figure
+            self.fig = Figure(figsize=(3, 1.1), dpi=90)
+            self.fig.patch.set_facecolor(BG)
+            self.ax = self.fig.add_subplot(111)
+            self._style_mpl()
+            self.canvas = FigureCanvasQTAgg(self.fig)
+            self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self.canvas.setFixedHeight(96)
+            L = QVBoxLayout(); L.setContentsMargins(0, 0, 0, 0); L.addWidget(self.canvas)
+            self.setLayout(L)
         self.setVisible(False)
 
-    def _style(self):
+    def _style_mpl(self):
         ax = self.ax
         ax.set_facecolor(CONSOLE)
         ax.tick_params(colors=DIM, labelsize=8)
@@ -121,16 +136,19 @@ class LossChart(QWidget):
         if not history: return
         epochs = [d["epoch"] for d in history]
         losses = [d["loss"]  for d in history]
-        self.ax.cla(); self._style()
-        self.ax.plot(epochs, losses, color="#ef4444", lw=1.5)
-        self.ax.fill_between(epochs, losses, alpha=0.12, color="#ef4444")
-        if epoch_max:
-            self.ax.set_xlim(1, epoch_max)
-        self.ax.set_title(
-            f"loss {losses[-1]:.5f}   best {min(losses):.5f}",
-            color=DIM, fontsize=8, pad=2)
-        self.fig.tight_layout(pad=0.6)
-        self.canvas.draw_idle()
+        if self._use_pg:
+            self._curve.setData(epochs, losses)
+        else:
+            self.ax.cla(); self._style_mpl()
+            self.ax.plot(epochs, losses, color=ACCENT, lw=1.5)
+            self.ax.fill_between(epochs, losses, alpha=0.12, color=ACCENT)
+            if epoch_max:
+                self.ax.set_xlim(1, epoch_max)
+            self.ax.set_title(
+                f"loss {losses[-1]:.5f}   best {min(losses):.5f}",
+                color=DIM, fontsize=8, pad=2)
+            self.fig.tight_layout(pad=0.6)
+            self.canvas.draw_idle()
         self.setVisible(True)
 
 
@@ -159,12 +177,19 @@ class TrainWidget(QWidget):
         # ── Presets ───────────────────────────────────────────────────────────
         L.addWidget(section_header("Presets"))
 
-        row_pre = QHBoxLayout(); row_pre.setSpacing(8)
+        row_pre = QHBoxLayout(); row_pre.setSpacing(6)
+        self._preset_group = QButtonGroup(self); self._preset_group.setExclusive(True)
+        self._preset_btns = {}
         for name, vals in PRESETS.items():
-            b = QPushButton(name); b.setStyleSheet(BTN_PRESET)
-            b.setFixedHeight(30)
+            b = QPushButton(f"{name}\n{vals.get('_sub', '')}")
+            b.setStyleSheet(BTN_PRESET)
+            b.setFixedHeight(44)
+            b.setCheckable(True)
             b.clicked.connect(lambda _, v=vals: self._apply_preset(v))
+            self._preset_group.addButton(b)
+            self._preset_btns[name] = b
             row_pre.addWidget(b)
+        self._preset_btns["Balanced"].setChecked(True)
         L.addLayout(row_pre)
 
         self._eff_lbl = QLabel()
@@ -248,26 +273,35 @@ class TrainWidget(QWidget):
         self.epochs = QSpinBox()
         self.epochs.setRange(1, 5000); self.epochs.setValue(300)
         self.epochs.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        L.addLayout(_param_row("Epochs", self.epochs))
-
-        self.batch_size = QSpinBox()
-        self.batch_size.setRange(1, 16); self.batch_size.setValue(1)
-        self.batch_size.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self.batch_size.valueChanged.connect(self._update_eff)
-        L.addLayout(_param_row("Batch size", self.batch_size))
-
-        self.grad_accum = QSpinBox()
-        self.grad_accum.setRange(1, 128); self.grad_accum.setValue(32)
-        self.grad_accum.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self.grad_accum.valueChanged.connect(self._update_eff)
-        L.addLayout(_param_row("Grad accum", self.grad_accum,
-            "Effective batch = batch × accum. For 18 GB MPS: 1×32 = 32."))
 
         self.lr = QDoubleSpinBox()
         self.lr.setDecimals(5); self.lr.setRange(1e-6, 1.0)
         self.lr.setSingleStep(1e-4); self.lr.setValue(3e-3)
         self.lr.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        L.addLayout(_param_row("Learning rate", self.lr))
+
+        ep_lr_row = QHBoxLayout(); ep_lr_row.setSpacing(8)
+        _l1 = QLabel("Epochs"); _l1.setStyleSheet(f"color: {DIM}; font-size: 12px;"); _l1.setFixedWidth(52)
+        _l2 = QLabel("LR");     _l2.setStyleSheet(f"color: {DIM}; font-size: 12px;"); _l2.setFixedWidth(20)
+        ep_lr_row.addWidget(_l1); ep_lr_row.addWidget(self.epochs)
+        ep_lr_row.addWidget(_l2); ep_lr_row.addWidget(self.lr)
+        L.addLayout(ep_lr_row)
+
+        self.batch_size = QSpinBox()
+        self.batch_size.setRange(1, 16); self.batch_size.setValue(1)
+        self.batch_size.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.batch_size.valueChanged.connect(self._update_eff)
+
+        self.grad_accum = QSpinBox()
+        self.grad_accum.setRange(1, 128); self.grad_accum.setValue(32)
+        self.grad_accum.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.grad_accum.valueChanged.connect(self._update_eff)
+
+        ba_acc_row = QHBoxLayout(); ba_acc_row.setSpacing(8)
+        _l3 = QLabel("Batch");  _l3.setStyleSheet(f"color: {DIM}; font-size: 12px;"); _l3.setFixedWidth(52)
+        _l4 = QLabel("Accum");  _l4.setStyleSheet(f"color: {DIM}; font-size: 12px;"); _l4.setFixedWidth(46)
+        ba_acc_row.addWidget(_l3); ba_acc_row.addWidget(self.batch_size)
+        ba_acc_row.addWidget(_l4); ba_acc_row.addWidget(self.grad_accum)
+        L.addLayout(ba_acc_row)
 
         self.device = QComboBox(); self._populate_devices()
         L.addLayout(_param_row("Device", self.device))

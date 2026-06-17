@@ -15,7 +15,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from gui.pages.utils.predict_state_manager import PredictionStateManager
 from project_root import STORAGE_DIR
 from napari_app.theme import (
-    WIDGET_SS, BTN_SUCCESS, BTN_SECONDARY, BTN_BROWSE,
+    WIDGET_SS, BTN_PRIMARY, BTN_SUCCESS, BTN_SECONDARY, BTN_BROWSE,
     BG, FG, BORDER, TEXT, ACCENT, DIM, CONSOLE,
 )
 from napari_app.widgets.common import section_header, divider as _divider, param_row as _param_row
@@ -151,7 +151,7 @@ class PredictWidget(QWidget):
 
         self.run_btn = QPushButton("▶   Run Prediction")
         self.run_btn.setFixedHeight(42)
-        self.run_btn.setStyleSheet(BTN_SUCCESS)
+        self.run_btn.setStyleSheet(BTN_PRIMARY)
         self.run_btn.setToolTip("Ctrl+R")
         self.run_btn.clicked.connect(self._run_prediction)
         L.addWidget(self.run_btn)
@@ -183,16 +183,18 @@ class PredictWidget(QWidget):
         self._stats_frame = QFrame()
         self._stats_frame.setVisible(False)
         self._stats_frame.setStyleSheet(
-            f"QFrame {{ background: {FG}; border: 1px solid {BORDER}; border-radius: 5px; }}")
+            f"QFrame {{ background: {FG}; border: 1px solid {BORDER}; border-left: 2px solid {ACCENT}; border-radius: 5px; }}")
         sf = QVBoxLayout(); sf.setContentsMargins(12, 10, 12, 10); sf.setSpacing(4)
 
         self._cell_count_lbl = QLabel()
         self._cell_count_lbl.setStyleSheet(
-            f"color: {TEXT}; font-size: 20px; font-weight: 700;")
+            f"color: {TEXT}; font-size: 21px; font-weight: 700;"
+            f"font-family: 'Menlo', 'SF Mono', monospace;")
         sf.addWidget(self._cell_count_lbl)
 
         self._stats_lbl = QLabel()
-        self._stats_lbl.setStyleSheet(f"color: {DIM}; font-size: 12px;")
+        self._stats_lbl.setStyleSheet(
+            f"color: {DIM}; font-size: 11px; font-family: 'Menlo', 'SF Mono', monospace;")
         self._stats_lbl.setWordWrap(True)
         sf.addWidget(self._stats_lbl)
 

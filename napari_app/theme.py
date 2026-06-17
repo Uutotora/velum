@@ -65,6 +65,8 @@ QSpinBox, QDoubleSpinBox {{
     padding: 5px 8px;
     color: {TEXT};
     min-height: 26px;
+    font-family: "Menlo", "SF Mono", monospace;
+    font-size: 12px;
 }}
 QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {ACCENT}; }}
 QSpinBox::up-button, QSpinBox::down-button,
@@ -176,10 +178,16 @@ QPushButton {{
     color: {DIM};
     border: 1px solid {BORDER};
     border-radius: 4px;
-    padding: 5px 8px;
-    font-size: 12px;
+    padding: 6px 4px;
+    font-size: 11px;
+    text-align: center;
 }}
 QPushButton:hover {{ border-color: {ACCENT}; color: {TEXT}; }}
+QPushButton:checked {{
+    background: rgba(0, 122, 204, 0.14);
+    border-color: {ACCENT};
+    color: {TEXT};
+}}
 QPushButton:pressed {{ background: {ACCENT}; color: #fff; border-color: {ACCENT}; }}
 """
 

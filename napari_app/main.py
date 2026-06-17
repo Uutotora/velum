@@ -7,6 +7,7 @@ if project_root not in sys.path:
 
 import napari
 from PyQt6.QtWidgets import QTabWidget, QWidget, QVBoxLayout
+from PyQt6.QtCore import QLocale
 from napari_app.widgets.train_widget import TrainWidget
 from napari_app.widgets.predict_widget import PredictWidget
 
@@ -37,6 +38,9 @@ QTabBar::tab:hover:!selected {
 
 
 def main():
+    # Force en-US locale so spinboxes always use dot decimal, never comma (§01)
+    QLocale.setDefault(QLocale(QLocale.Language.English, QLocale.Country.UnitedStates))
+
     viewer = napari.Viewer(title="CellSeg1 — Cell Instance Segmentation")
 
     tabs = QTabWidget()
