@@ -53,7 +53,7 @@ def setup_training(
         batch_size=config["batch_size"],
         shuffle=True,
         num_workers=config["num_workers"],
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
         collate_fn=custom_collate_func,
     )
     scheduler = OneCycleLR(
