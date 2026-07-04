@@ -509,6 +509,43 @@ class PredictWidget(QWidget):
             "allow_tf32_on_cudnn": True, "allow_tf32_on_matmul": True,
         }
 
+    # ── Parameter access for the Assistant agent ──────────────────────────────
+
+    def current_params(self) -> dict:
+        """Live inference parameters, keyed to match advisor recommendations."""
+        return {
+            "points_per_side": self.points_per_side.value(),
+            "pred_iou_thresh": self.pred_iou_thresh.value(),
+            "stability_score_thresh": self.stability_score_thresh.value(),
+            "box_nms_thresh": self.box_nms_thresh.value(),
+            "min_mask_area": self.min_mask_area.value(),
+            "resize_size": int(self.resize_size.currentText()),
+            "lora_rank": self.lora_rank.value(),
+        }
+
+    def apply_params(self, changes: dict) -> list[str]:
+        """Apply advisor changes to the controls. Returns human-readable diffs."""
+        applied = []
+        for key, val in changes.items():
+            if key == "resize_size":
+                self.resize_size.setCurrentText(str(int(val)))
+            elif key in ("points_per_side", "min_mask_area", "lora_rank"):
+                getattr(self, key).setValue(int(val))
+            elif hasattr(self, key):
+                getattr(self, key).setValue(float(val))
+            else:
+                continue
+            applied.append(f"{key} → {val}")
+        return applied
+
+    def rerun(self):
+        """Re-run prediction on the current image (used by the Assistant)."""
+        self._run_prediction()
+
+    def last_context(self):
+        """(image_rgb, mask) of the most recent prediction, or (None, None)."""
+        return self._last_img_rgb, self._last_mask
+
     # ── Actions ───────────────────────────────────────────────────────────────
 
     def _predict_active_layer(self):
