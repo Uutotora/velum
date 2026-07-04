@@ -94,6 +94,9 @@ class PredictWidget(QWidget):
     _batch_finish_signal   = pyqtSignal()
     _refine_finish_signal  = pyqtSignal(str)
     _sample_finish_signal  = pyqtSignal()
+    _cohort_ready_signal   = pyqtSignal()
+    _benchmark_row_signal  = pyqtSignal(str)
+    _benchmark_done_signal = pyqtSignal()
 
     def __init__(self, viewer):
         super().__init__()
@@ -391,6 +394,47 @@ class PredictWidget(QWidget):
         _batch_card.addWidget(self.batch_lbl)
         L.addWidget(_batch_card)
 
+        # ── Benchmark engines vs GT (collapsed — validation over a folder) ─────
+        _bench_card = CollapsibleCard("Benchmark engines vs GT", collapsed=True)
+        _bench_card.addWidget(_field_label("Images folder"))
+        self.bench_img = QLineEdit()
+        self.bench_img.setPlaceholderText("Folder of images with ground-truth masks")
+        _bench_card.addLayout(_dir_row(self, self.bench_img, "Select images folder"))
+        _bench_card.addWidget(_field_label("Ground-truth folder"))
+        self.bench_gt = QLineEdit()
+        self.bench_gt.setPlaceholderText("Folder of label masks (matched by file name)")
+        _bench_card.addLayout(_dir_row(self, self.bench_gt, "Select GT folder"))
+
+        self.bench_cellseg1 = QCheckBox("CellSeg1 · LoRA (current checkpoint)")
+        self.bench_cellseg1.setChecked(True)
+        self.bench_cellseg1.setStyleSheet(f"color: {LABEL}; font-size: 11px;")
+        self.bench_cellpose = QCheckBox("Cellpose-SAM (zero-shot)")
+        self.bench_cellpose.setChecked(True)
+        self.bench_cellpose.setStyleSheet(f"color: {LABEL}; font-size: 11px;")
+        _bench_card.addWidget(self.bench_cellseg1)
+        _bench_card.addWidget(self.bench_cellpose)
+
+        self.bench_btn = QPushButton("Run benchmark")
+        self.bench_btn.setFixedHeight(34); self.bench_btn.setStyleSheet(BTN_SUCCESS)
+        self.bench_btn.clicked.connect(self._run_benchmark)
+        _bench_card.addWidget(self.bench_btn)
+        self.bench_progress = QLabel("")
+        self.bench_progress.setStyleSheet(
+            f"color: {LABEL}; font-size: 10px; font-family:'Menlo','SF Mono',monospace;")
+        self.bench_progress.setWordWrap(True)
+        _bench_card.addWidget(self.bench_progress)
+
+        self.bench_table = QTableWidget(0, 0)
+        self.bench_table.verticalHeader().setVisible(False)
+        self.bench_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.bench_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.bench_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.bench_table.setFixedHeight(120)
+        self.bench_table.setStyleSheet(_EVAL_TABLE_SS)
+        self.bench_table.setVisible(False)
+        _bench_card.addWidget(self.bench_table)
+        L.addWidget(_bench_card)
+
         # ── Model settings (collapsed — set once, rarely changed) ──────────────
         _model_card = CollapsibleCard("Model settings", collapsed=True)
         _model_card.addWidget(_field_label("Custom checkpoint (.pth)"))
@@ -503,6 +547,9 @@ class PredictWidget(QWidget):
         self._batch_finish_signal.connect(self._on_batch_done)
         self._refine_finish_signal.connect(self._on_refine_done)
         self._sample_finish_signal.connect(self._on_samples_done)
+        self._cohort_ready_signal.connect(self._on_cohort_ready)
+        self._benchmark_row_signal.connect(self._on_benchmark_row)
+        self._benchmark_done_signal.connect(self._on_benchmark_done)
 
         viewer.bind_key('Control-r',       lambda v: self._run_prediction())
         viewer.bind_key('Control-Shift-r', lambda v: self._predict_active_layer())
@@ -1190,28 +1237,182 @@ class PredictWidget(QWidget):
         self._append_log(f"▶ Batch: {len(images)} images → {out_dir.name}/")
 
         import cv2 as _cv2
+        px = self.pixel_size.value()
+        self._cohort_records = []
+        self._cohort_out = out_dir
 
         def run():
+            from napari_app import analysis
             n = len(images)
             done = 0
+            records = []
             for img_path in images:
                 if self._batch_stop.is_set():
                     self._log_signal.emit(f"■ Stopped at {done}/{n}"); break
                 self._log_signal.emit(f"[{done + 1}/{n}] {img_path.name}")
                 try:
                     cfg = {**config, "image_path": str(img_path)}
-                    _, mask = _predict_cached(cfg)
+                    img_arr, mask = _predict_cached(cfg)
                     _cv2.imwrite(str(out_dir / f"{img_path.stem}_mask.png"),
                                  mask.astype(np.uint16))
+                    result = analysis.compute_measurements(
+                        mask, intensity_image=img_arr, pixel_size_um=px)
+                    cov = float((mask > 0).sum()) / mask.size * 100.0
+                    records.append((img_path.name, result, cov))
                 except Exception as e:
                     self._log_signal.emit(f"  [ERROR] {e}")
                 done += 1
                 self._batch_progress_signal.emit(done, n)
             else:
-                self._log_signal.emit(f"✓ Batch done — {n} masks saved to {out_dir.name}/")
+                # completed without a break
+                try:
+                    from napari_app import cohort
+                    cell_csv, summ_csv = cohort.write_cohort_csvs(out_dir, records)
+                    pop = cohort.population_stats(records)
+                    self._cohort_records = records
+                    self._log_signal.emit(
+                        f"✓ Batch done — {n} masks + cohort CSVs in {out_dir.name}/  "
+                        f"({pop['total_cells']} cells across {pop['n_images']} images)")
+                except Exception as e:
+                    self._log_signal.emit(f"  [WARN] cohort analysis failed: {e}")
+                self._cohort_ready_signal.emit()
             self._batch_finish_signal.emit()
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _on_cohort_ready(self):
+        records = getattr(self, "_cohort_records", [])
+        if not records:
+            return
+        from napari_app.widgets.cohort_window import get_cohort_window
+        w = get_cohort_window()
+        w.set_records(records, str(getattr(self, "_cohort_out", "")))
+        w.show_and_raise()
+
+    # ── Benchmark engines vs ground truth ─────────────────────────────────────
+
+    _ENGINE_LABELS = {"cellseg1": "CellSeg1 (LoRA)", "cellpose": "Cellpose-SAM"}
+
+    def _run_benchmark(self):
+        img_dir = Path(self.bench_img.text().strip())
+        gt_dir  = Path(self.bench_gt.text().strip())
+        if not img_dir.is_dir():
+            self._append_log("[ERROR] Benchmark: images folder not found"); return
+        if not gt_dir.is_dir():
+            self._append_log("[ERROR] Benchmark: GT folder not found"); return
+        engines = []
+        if self.bench_cellseg1.isChecked(): engines.append("cellseg1")
+        if self.bench_cellpose.isChecked(): engines.append("cellpose")
+        if not engines:
+            self._append_log("[ERROR] Benchmark: select at least one engine"); return
+
+        rs = int(self.resize_size.currentText())
+        bases = {}
+        try:
+            if "cellseg1" in engines:
+                bases["cellseg1"] = self._sam_config()
+            if "cellpose" in engines:
+                from napari_app.engines import cellpose_available
+                if not cellpose_available():
+                    raise ValueError("Cellpose is not installed")
+                bases["cellpose"] = {
+                    "engine": "cellpose", "resize_size": [rs, rs], "image_path": "",
+                    "cp_diameter": self.cp_diameter.value(),
+                    "cp_flow_threshold": self.cp_flow.value(),
+                    "cp_cellprob_threshold": self.cp_cellprob.value(),
+                    "selected_device": self.device.currentText(),
+                    "clahe": self.clahe.isChecked(),
+                }
+        except ValueError as e:
+            self._append_log(f"[ERROR] Benchmark: {e}"); return
+
+        exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".npy"}
+        images = sorted(f for f in img_dir.iterdir() if f.suffix.lower() in exts)
+
+        def find_gt(stem):
+            for e in (".png", ".tif", ".tiff", ".npy"):
+                for suf in ("", "_masks", "_mask", "_gt", "_label", "_labels"):
+                    c = gt_dir / f"{stem}{suf}{e}"
+                    if c.exists():
+                        return c
+            return None
+
+        pairs = [(im, find_gt(im.stem)) for im in images]
+        pairs = [(i, g) for i, g in pairs if g is not None]
+        if not pairs:
+            self._append_log("[ERROR] Benchmark: no images with matching GT masks"); return
+
+        self.bench_btn.setEnabled(False)
+        self.bench_table.setVisible(False)
+        total = len(pairs) * len(engines)
+        self._append_log(
+            f"▶ Benchmark: {len(engines)} engine(s) × {len(pairs)} images = {total} runs")
+
+        def run():
+            from napari_app import benchmark
+            import cv2
+            per_engine = {e: [] for e in engines}
+            done = 0
+            for eng in engines:
+                for img_path, gt_path in pairs:
+                    try:
+                        cfg = {**bases[eng], "image_path": str(img_path)}
+                        _, pred = _predict_cached(cfg)
+                        if str(gt_path).lower().endswith(".npy"):
+                            gt = np.load(str(gt_path))
+                        else:
+                            gt = cv2.imread(str(gt_path), cv2.IMREAD_UNCHANGED)
+                        gt = np.ascontiguousarray(gt).astype(np.int32)
+                        if gt.shape != pred.shape:
+                            gt = cv2.resize(gt.astype(np.float32),
+                                            (pred.shape[1], pred.shape[0]),
+                                            interpolation=cv2.INTER_NEAREST).astype(np.int32)
+                        per_engine[eng].append(benchmark.evaluate(gt, pred))
+                    except Exception as ex:
+                        self._log_signal.emit(f"  [ERROR] {eng} {img_path.name}: {ex}")
+                    done += 1
+                    self._benchmark_row_signal.emit(f"{done} / {total}  ({self._ENGINE_LABELS[eng]})")
+            summaries = {self._ENGINE_LABELS[e]: benchmark.summarize(per_engine[e])
+                         for e in engines}
+            cols, rows = benchmark.results_table(summaries)
+            try:
+                benchmark.write_csv(str(img_dir / "benchmark.csv"), cols, rows)
+            except Exception:
+                pass
+            self._bench_cols, self._bench_rows = cols, rows
+            self._benchmark_done_signal.emit()
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_benchmark_row(self, text: str):
+        self.bench_progress.setText(text)
+
+    def _on_benchmark_done(self):
+        self.bench_btn.setEnabled(True)
+        cols = getattr(self, "_bench_cols", [])
+        rows = getattr(self, "_bench_rows", [])
+        if not rows:
+            self.bench_progress.setText("no results"); return
+        # best mAP wins
+        map_idx = cols.index("mAP") if "mAP" in cols else len(cols) - 1
+        best_row = max(range(len(rows)), key=lambda r: rows[r][map_idx])
+        self.bench_table.setColumnCount(len(cols))
+        self.bench_table.setRowCount(len(rows))
+        self.bench_table.setHorizontalHeaderLabels(cols)
+        for r, row in enumerate(rows):
+            for c, val in enumerate(row):
+                item = QTableWidgetItem(str(val))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if r == best_row and c == map_idx:
+                    from napari_app.theme import SUCCESS
+                    item.setForeground(QColor(SUCCESS))
+                self.bench_table.setItem(r, c, item)
+        self.bench_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch)
+        self.bench_table.setVisible(True)
+        best_name = rows[best_row][0]
+        self.bench_progress.setText(f"✓ done — best mAP: {best_name}")
+        self._append_log(f"✓ Benchmark done — winner (mAP): {best_name}. CSV saved.")
 
     def _stop_batch(self):
         self._batch_stop.set()

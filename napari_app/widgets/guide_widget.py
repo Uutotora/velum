@@ -57,7 +57,18 @@ fine-tuned to your data via LoRA. Everything below runs locally on your machine.
       precision. Prefer letting the <b>Assistant</b> tune these.</li>
   <li><b>Pixel size (µm/px)</b> — set it in the Results card to report areas in
       µm² and lengths in µm everywhere.</li>
-  <li><b>Batch prediction</b> — process a whole folder to masks; stoppable.</li>
+  <li><b>Batch prediction</b> — process a whole folder to masks; stoppable. On
+      completion it also writes cohort CSVs (per-cell + per-image) and opens a
+      <b>Cohort analysis</b> window with population statistics and a pooled
+      distribution histogram.</li>
+  <li><b>Benchmark engines vs GT</b> — run the selected engines over a folder
+      that has ground-truth masks and get a comparison table of F1 and Average
+      Precision (mAP), so you can objectively pick the best method for your data.</li>
+  <li><b>Evaluate vs GT</b> — score a single prediction against ground truth
+      (F1 and AP at IoU 0.5/0.75/0.9). Ground truth is auto-detected from a
+      <code>*_gt</code> / <code>masks/</code> sidecar and rendered as a green outline.</li>
+  <li><b>Provenance</b> — saving a mask also writes a <code>.json</code> manifest
+      (engine, parameters, versions, image hash) for reproducible analysis.</li>
   <li><b>Refine…</b> — after correcting the Labels layer by hand, fine-tunes the
       current checkpoint on your correction (50 epochs).</li>
 </ul>
