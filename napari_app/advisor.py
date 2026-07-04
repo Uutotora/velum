@@ -346,6 +346,7 @@ def ollama_create_agent(base_model: str,
     assistant is deterministic and domain-focused rather than a generic chatbot.
     Produces the model ``cellseg1-assistant``.
     """
+    params = {"temperature": 0.2, "top_p": 0.9, "repeat_penalty": 1.1}
     modelfile = (
         f"FROM {base_model}\n"
         f"SYSTEM \"\"\"{AGENT_SYSTEM}\"\"\"\n"
@@ -353,33 +354,43 @@ def ollama_create_agent(base_model: str,
         "PARAMETER top_p 0.9\n"
         "PARAMETER repeat_penalty 1.1\n"
     )
-    payload = json.dumps(
-        {"name": AGENT_MODEL_NAME, "modelfile": modelfile, "stream": True}
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        f"{OLLAMA_HOST}/api/create", data=payload,
-        headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=600) as resp:
-            for raw in resp:
-                line = raw.decode("utf-8").strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if on_progress and obj.get("status"):
-                    on_progress(obj["status"])
-                if obj.get("error"):
-                    if on_progress:
-                        on_progress(f"error: {obj['error']}")
-                    return False
-        return True
-    except Exception as e:
-        if on_progress:
-            on_progress(f"error: {e}")
-        return False
+    # Newer Ollama expects structured fields; older builds want a raw modelfile.
+    payloads = [
+        {"model": AGENT_MODEL_NAME, "from": base_model,
+         "system": AGENT_SYSTEM, "parameters": params, "stream": True},
+        {"name": AGENT_MODEL_NAME, "modelfile": modelfile, "stream": True},
+    ]
+    last_err = "unknown error"
+    for payload in payloads:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"{OLLAMA_HOST}/api/create", data=data,
+            headers={"Content-Type": "application/json"})
+        try:
+            failed = False
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                for raw in resp:
+                    line = raw.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if on_progress and obj.get("status"):
+                        on_progress(obj["status"])
+                    if obj.get("error"):
+                        last_err = obj["error"]
+                        failed = True
+                        break
+            if not failed:
+                return True
+        except Exception as e:
+            last_err = str(e)
+            continue
+    if on_progress:
+        on_progress(f"error: {last_err}")
+    return False
 
 
 def ollama_chat(model: str, messages: list[dict[str, str]],
