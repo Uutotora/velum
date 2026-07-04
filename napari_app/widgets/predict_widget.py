@@ -519,6 +519,16 @@ class PredictWidget(QWidget):
             "cells; leave off for already well-exposed images.")
         self.clahe.setStyleSheet(f"color: {LABEL}; font-size: 11px;")
         _inf_card.addWidget(self.clahe)
+
+        self.tiled = QCheckBox("Large image: tile at native resolution")
+        self.tiled.setToolTip(
+            "For whole-slide / high-content images. Instead of shrinking the "
+            "whole image to the inference size (which loses small cells), run "
+            "the engine on overlapping tiles at full resolution and stitch the "
+            "cells back together. Off for ordinary-sized images.")
+        self.tiled.setStyleSheet(f"color: {LABEL}; font-size: 11px;")
+        _inf_card.addWidget(self.tiled)
+
         self._inf_card = _inf_card
         L.addWidget(_inf_card)
 
@@ -862,6 +872,8 @@ class PredictWidget(QWidget):
                 "cp_cellprob_threshold": self.cp_cellprob.value(),
                 "selected_device": self.device.currentText(),
                 "clahe": self.clahe.isChecked(),
+                "tiled": self.tiled.isChecked(),
+                "tile_size": rs, "tile_overlap": 0,
                 # kept so downstream (refine, caching keys) stays valid
                 "vit_name": self.vit_name.currentText(),
                 "image_encoder_lora_rank": self.lora_rank.value(),
@@ -908,6 +920,8 @@ class PredictWidget(QWidget):
             "deterministic": True, "seed": 0,
             "allow_tf32_on_cudnn": True, "allow_tf32_on_matmul": True,
             "clahe": self.clahe.isChecked(),
+            "tiled": self.tiled.isChecked(),
+            "tile_size": rs, "tile_overlap": 0,
         }
 
     # ── Parameter access for the Assistant agent ──────────────────────────────
@@ -1712,6 +1726,12 @@ def _predict_cached(config):
     else:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+    # Large-image path: tile at native resolution instead of shrinking the
+    # whole image (which loses small cells). Opt-in via the "Large image" box.
+    from napari_app.tiling import should_tile
+    if config.get("tiled") and should_tile(img.shape, tile=int(config.get("tile_size") or 1024)):
+        return img, _predict_tiled(config, img)
+
     orig_h, orig_w = img.shape[:2]
     resized = resize_image(img, config["resize_size"])
     if config.get("clahe"):
@@ -1735,6 +1755,45 @@ def _predict_cached(config):
     else:
         mask = small
     return img, mask
+
+
+def _predict_tiled(config, img):
+    """Segment a large RGB image tile-by-tile at native resolution and stitch.
+
+    Reuses the exact per-image engine calls of the normal path, applied to each
+    overlapping tile; cells crossing a seam are merged by the stitcher. Returns
+    a full-resolution instance mask the same H×W as ``img``.
+    """
+    from napari_app.tiling import recommend_overlap, tiled_predict
+
+    tile = int(config.get("tile_size") or 1024)
+    overlap = int(config.get("tile_overlap") or 0)
+    if overlap <= 0:
+        overlap = recommend_overlap(float(config.get("cp_diameter") or 0), tile)
+
+    if config.get("engine") == "cellpose":
+        from napari_app.engines import predict_cellpose
+
+        def _fn(t):
+            if config.get("clahe"):
+                t = _apply_clahe(t)
+            return predict_cellpose(
+                t,
+                diameter=config.get("cp_diameter", 0),
+                flow_threshold=config.get("cp_flow_threshold", 0.4),
+                cellprob_threshold=config.get("cp_cellprob_threshold", 0.0),
+                device=config.get("selected_device", "cpu"),
+            )
+    else:
+        from napari_app.inference_cache import predict_cached
+
+        def _fn(t):
+            if config.get("clahe"):
+                t = _apply_clahe(t)
+            return predict_cached(config, t)
+
+    min_area = int(config.get("min_mask_area") or config.get("min_mask_region_area") or 0)
+    return tiled_predict(img, _fn, tile=tile, overlap=overlap, min_area=min_area)
 
 
 def _apply_clahe(rgb: np.ndarray) -> np.ndarray:
