@@ -163,11 +163,13 @@ class AnnotateWidget(QWidget):
         return img, img_path
 
     def _start(self):
+        # Interactive prompting always uses the SAM + LoRA path, regardless of
+        # the engine chosen in Predict — so build the full SAM config directly.
         try:
-            config = self.predict._build_config()
+            config = self.predict._sam_config()
         except ValueError as e:
-            self._status.setText(f"[ERROR] {e}")
-            self._log(f"[ERROR] {e}")
+            self._status.setText(f"[ERROR] {e}  (needs a LoRA checkpoint + SAM backbone)")
+            self._log(f"[ERROR] annotate: {e}")
             return
         try:
             image_rgb, img_path = self._acquire_image(config)

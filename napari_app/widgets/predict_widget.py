@@ -7,10 +7,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox,
     QFileDialog, QScrollArea, QProgressBar, QFrame,
-    QAbstractSpinBox, QCheckBox,
+    QAbstractSpinBox, QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView,
 )
 from napari_app.widgets.log_window import get_log_window
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor
 
 from gui.pages.utils.predict_state_manager import PredictionStateManager
 from project_root import STORAGE_DIR
@@ -170,6 +171,17 @@ class PredictWidget(QWidget):
             "your test-images folder — a one-click way to try the app.")
         self._sample_btn.clicked.connect(self._load_samples)
         img_card.addWidget(self._sample_btn)
+
+        sw_row = QHBoxLayout(); sw_row.setSpacing(6)
+        sw_lbl = QLabel("Sample")
+        sw_lbl.setStyleSheet(f"color: {LABEL}; font-size: 11px; font-weight: 500;")
+        sw_lbl.setFixedWidth(52)
+        sw_row.addWidget(sw_lbl)
+        self.sample_combo = QComboBox()
+        self.sample_combo.setToolTip("Switch between images in your test-images folder")
+        self.sample_combo.activated.connect(self._on_sample_selected)
+        sw_row.addWidget(self.sample_combo, stretch=1)
+        img_card.addLayout(sw_row)
         L.addWidget(img_card)
 
         # ── Run (prominent, outside cards — the main action) ──────────────────
@@ -317,12 +329,33 @@ class PredictWidget(QWidget):
         gt_row.addWidget(self._eval_btn)
         _gt_card.addLayout(gt_row)
 
-        self._eval_result = QLabel("")
-        self._eval_result.setStyleSheet(
-            f"color: {TEXT}; font-size: 11px; font-family: 'Menlo','SF Mono',monospace;"
-            f"padding-top: 4px;")
-        self._eval_result.setWordWrap(True)
-        _gt_card.addWidget(self._eval_result)
+        self._eval_summary = QLabel("")
+        self._eval_summary.setStyleSheet(
+            f"color: {LABEL}; font-size: 10px; padding-top: 4px;")
+        self._eval_summary.setWordWrap(True)
+        _gt_card.addWidget(self._eval_summary)
+
+        self._eval_table = QTableWidget(0, 2)
+        self._eval_table.setHorizontalHeaderLabels(["Metric", "Score"])
+        self._eval_table.verticalHeader().setVisible(False)
+        self._eval_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._eval_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self._eval_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._eval_table.setFixedHeight(150)
+        self._eval_table.setStyleSheet(_EVAL_TABLE_SS)
+        _hh = self._eval_table.horizontalHeader()
+        _hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        _hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._eval_table.setVisible(False)
+        _gt_card.addWidget(self._eval_table)
+
+        self._eval_hint = QLabel(
+            "F1 / AP: 1.0 = perfect match, higher is better. AP@IoU0.9 is the "
+            "strictest (needs near-exact overlap), so it is normally the lowest.")
+        self._eval_hint.setStyleSheet(f"color: {DIM}; font-size: 10px; padding-top: 2px;")
+        self._eval_hint.setWordWrap(True)
+        self._eval_hint.setVisible(False)
+        _gt_card.addWidget(self._eval_hint)
         L.addWidget(_gt_card)
 
         # ── Batch prediction (collapsed — for processing multiple images) ──────
@@ -378,6 +411,7 @@ class PredictWidget(QWidget):
             "Must match the rank used during training (default 4)"))
         self.device = QComboBox(); self._populate_devices()
         _model_card.addLayout(_param_row("Device", self.device))
+        self._model_card = _model_card
         L.addWidget(_model_card)
 
         # ── Inference parameters (collapsed — tune when needed) ────────────────
@@ -484,6 +518,7 @@ class PredictWidget(QWidget):
         self.image_path.textChanged.connect(lambda _t: self._autofill_gt())
         self._autofill_gt()
         self._on_gt_path_changed()
+        self._populate_samples()
 
         self._autofill_from_sidecar()
 
@@ -497,6 +532,8 @@ class PredictWidget(QWidget):
         # Checkpoint / SAM-specific controls are irrelevant for Cellpose.
         self._ckpt_card.setVisible(not is_cp)
         self._inf_card.setVisible(not is_cp)
+        if hasattr(self, "_model_card"):
+            self._model_card.setVisible(not is_cp)
         self.quality.setEnabled(not is_cp)
         self._cp_card.setVisible(is_cp)
         if is_cp:
@@ -560,10 +597,41 @@ class PredictWidget(QWidget):
         if not paths:
             self._append_log("[WARN] No samples were written")
             return
+        self._populate_samples()
         self.image_path.setText(paths[0])
         self.image_path.setToolTip(paths[0])
         names = ", ".join(Path(p).name for p in paths)
         self._append_log(f"✓ Saved {len(paths)} sample(s): {names}")
+
+    def _populate_samples(self):
+        """List images in the test-images folder in the switcher combo."""
+        if not hasattr(self, "sample_combo"):
+            return
+        exts = {".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp", ".npy"}
+        files = sorted(f for f in TEST_IMAGE_DIR.glob("*")
+                       if f.suffix.lower() in exts and "_gt" not in f.stem
+                       and not f.stem.endswith(("_mask", "_masks")))
+        self.sample_combo.blockSignals(True)
+        self.sample_combo.clear()
+        if not files:
+            self.sample_combo.addItem("— no samples yet —", "")
+            self.sample_combo.setEnabled(False)
+        else:
+            self.sample_combo.setEnabled(True)
+            cur = self.image_path.text().strip()
+            for f in files:
+                self.sample_combo.addItem(f.name, str(f))
+            # reflect the current image if it's one of them
+            idx = self.sample_combo.findData(cur)
+            if idx >= 0:
+                self.sample_combo.setCurrentIndex(idx)
+        self.sample_combo.blockSignals(False)
+
+    def _on_sample_selected(self, _idx: int):
+        path = self.sample_combo.currentData()
+        if path:
+            self.image_path.setText(path)
+            self.image_path.setToolTip(path)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -695,10 +763,20 @@ class PredictWidget(QWidget):
                 "sam_image_size": rs, "result_pth_path": "",
             }
 
+        return self._sam_config()
+
+    def _sam_config(self) -> dict:
+        """Full SAM + LoRA config. Used by the CellSeg1 engine and always by the
+        interactive Annotate session (which needs SAM regardless of the engine
+        selector). Requires an image, a LoRA checkpoint and a SAM backbone."""
+        img = self.image_path.text().strip()
+        if not img or not Path(img).exists():
+            raise ValueError(f"Image not found: {img}")
         lora = self._resolve_lora()
         sam  = self._resolve_sam()
         if not lora or not Path(lora).exists():
             raise ValueError(f"LoRA checkpoint not found: {lora}")
+        rs = int(self.resize_size.currentText())
         return {
             "engine": "cellseg1",
             "vit_name": self.vit_name.currentText(),
@@ -802,15 +880,22 @@ class PredictWidget(QWidget):
         self.active_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
 
-        from napari_app.inference_cache import cache_status
-        self._append_log(f"▶ {Path(config['image_path']).name}  [{cache_status()}]")
+        is_cp = config.get("engine") == "cellpose"
+        if is_cp:
+            self._append_log(f"▶ {Path(config['image_path']).name}  [Cellpose-SAM · {config['selected_device']}]")
+        else:
+            from napari_app.inference_cache import cache_status
+            self._append_log(f"▶ {Path(config['image_path']).name}  [{cache_status()}]")
 
         def run():
             try:
                 img_arr, mask = _predict_cached(config)
                 self._done_signal.emit(img_arr, mask)
-                from napari_app.inference_cache import cache_status as cs
-                self._log_signal.emit(f"✓ {int(mask.max())} cells  [{cs()}]")
+                if is_cp:
+                    self._log_signal.emit(f"✓ {int(mask.max())} cells  [Cellpose-SAM]")
+                else:
+                    from napari_app.inference_cache import cache_status as cs
+                    self._log_signal.emit(f"✓ {int(mask.max())} cells  [{cs()}]")
             except Exception as e:
                 import traceback
                 self._log_signal.emit(f"[ERROR] {e}\n{traceback.format_exc()}")
@@ -957,28 +1042,50 @@ class PredictWidget(QWidget):
             from metrics import average_precision
             # Call one threshold at a time — average_precision's internal guard
             # is not vectorised across multiple thresholds for a single image.
-            ap, f1, tp0, fp0, fn0 = {}, None, 0, 0, 0
+            ap, f1, tp0, fp0, fn0 = {}, 0.0, 0, 0, 0
             for th in (0.5, 0.75, 0.9):
                 a, tp, fp, fn = average_precision(gt, pred, threshold=[th])
-                a = float(np.atleast_1d(a)[0])
+                ap[th] = float(np.atleast_1d(a)[0])
                 tp = float(np.atleast_1d(tp)[0]); fp = float(np.atleast_1d(fp)[0])
                 fn = float(np.atleast_1d(fn)[0])
-                ap[th] = a
                 if th == 0.5:
                     denom = 2 * tp + fp + fn
                     f1 = (2 * tp / denom) if denom else 0.0
                     tp0, fp0, fn0 = int(tp), int(fp), int(fn)
-            self._eval_result.setText(
-                f"GT {int(gt.max())} cells · pred {int(pred.max())} cells\n"
-                f"F1@0.5 {f1:.3f}   AP@0.5 {ap[0.5]:.3f}\n"
-                f"AP@0.75 {ap[0.75]:.3f}   AP@0.9 {ap[0.9]:.3f}\n"
-                f"TP {tp0} · FP {fp0} · FN {fn0}  (IoU 0.5)")
+
+            rows = [
+                ("F1 @ IoU 0.5",  f1),
+                ("AP @ IoU 0.5",  ap[0.5]),
+                ("AP @ IoU 0.75", ap[0.75]),
+                ("AP @ IoU 0.9",  ap[0.9]),
+            ]
+            self._fill_eval_table(rows)
+            self._eval_summary.setText(
+                f"GT {int(gt.max())} cells vs prediction {int(pred.max())} cells   ·   "
+                f"at IoU 0.5:  TP {tp0} · FP {fp0} · FN {fn0}")
             self._append_log(
                 f"✓ Eval — F1@0.5 {f1:.3f}, AP@0.5 {ap[0.5]:.3f}, "
                 f"AP@0.75 {ap[0.75]:.3f}, AP@0.9 {ap[0.9]:.3f}")
         except Exception as e:
             import traceback
             self._append_log(f"[ERROR] eval: {e}\n{traceback.format_exc()}")
+
+    def _fill_eval_table(self, rows):
+        from napari_app.theme import SUCCESS, DANGER
+        self._eval_table.setRowCount(len(rows))
+        for r, (name, val) in enumerate(rows):
+            m = QTableWidgetItem(name)
+            m.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            v = QTableWidgetItem(f"{val:.3f}")
+            v.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            v.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            # colour the score: green ≥0.8, amber ≥0.5, red below
+            col = SUCCESS if val >= 0.8 else ("#d6a54a" if val >= 0.5 else DANGER)
+            v.setForeground(QColor(col))
+            self._eval_table.setItem(r, 0, m)
+            self._eval_table.setItem(r, 1, v)
+        self._eval_table.setVisible(True)
+        self._eval_hint.setVisible(True)
 
     def _show_ground_truth(self):
         p = self.gt_path.text().strip()
@@ -989,14 +1096,16 @@ class PredictWidget(QWidget):
             gt = cv2.imread(p, cv2.IMREAD_UNCHANGED)
             if gt is None:
                 gt = np.load(p)
+            gt = gt.astype(np.int32)
             name  = Path(self.image_path.text()).stem
             lname = f"{name}_gt"
             for lyr in list(self.viewer.layers):
                 if lyr.name == lname:
                     self.viewer.layers.remove(lyr)
-            l = self.viewer.add_labels(gt.astype(np.int32), name=lname, opacity=0.5)
+            l = self.viewer.add_labels(gt, name=lname, opacity=0.9)
             l.contour = 1
-            self._append_log(f"✓ GT loaded — {int(gt.max())} cells")
+            _color_labels_solid(l, gt, (0.0, 1.0, 0.35, 1.0))  # uniform green
+            self._append_log(f"✓ GT loaded — {int(gt.max())} cells (green outline)")
         except Exception as e:
             self._append_log(f"[ERROR] {e}")
 
@@ -1009,7 +1118,53 @@ class PredictWidget(QWidget):
         if not p: return
         import cv2
         cv2.imwrite(p, self._last_mask.astype(np.uint16))
-        self._append_log(f"✓ Saved {Path(p).name}")
+        self._write_manifest(p)
+        self._append_log(f"✓ Saved {Path(p).name}  (+ provenance .json)")
+
+    def _write_manifest(self, mask_path: str):
+        """Write a reproducibility manifest next to a saved mask.
+
+        Records engine, parameters, versions and an input hash so a result can
+        be traced back to exactly how it was produced — a basic requirement for
+        publishable analysis.
+        """
+        import json, hashlib, platform
+        from datetime import datetime
+        try:
+            engine = self._current_engine()
+            manifest = {
+                "app": "CellSeg1 napari",
+                "created": datetime.now().isoformat(timespec="seconds"),
+                "engine": engine,
+                "image": self._last_img_path,
+                "n_cells": int(self._last_mask.max()) if self._last_mask is not None else 0,
+                "pixel_size_um": self.pixel_size.value(),
+                "clahe": self.clahe.isChecked(),
+                "resize": int(self.resize_size.currentText()),
+                "device": self.device.currentText(),
+            }
+            if engine == "cellpose":
+                manifest["cellpose"] = {
+                    "diameter": self.cp_diameter.value(),
+                    "flow_threshold": self.cp_flow.value(),
+                    "cellprob_threshold": self.cp_cellprob.value(),
+                }
+            else:
+                manifest["checkpoint"] = self._resolve_lora()
+                manifest["params"] = self.current_params()
+            try:
+                import torch
+                manifest["versions"] = {"python": platform.python_version(),
+                                        "torch": torch.__version__}
+            except Exception:
+                manifest["versions"] = {"python": platform.python_version()}
+            if self._last_img_path and Path(self._last_img_path).exists():
+                h = hashlib.sha256(Path(self._last_img_path).read_bytes()).hexdigest()[:16]
+                manifest["image_sha256_16"] = h
+            with open(Path(mask_path).with_suffix(".json"), "w") as f:
+                json.dump(manifest, f, indent=2)
+        except Exception as e:
+            self._append_log(f"[WARN] manifest not written: {e}")
 
     def _run_batch(self):
         in_dir  = Path(self.batch_in.text().strip())
@@ -1202,6 +1357,39 @@ class PredictWidget(QWidget):
 
 
 # ── Custom LoRA path ──────────────────────────────────────────────────────────
+
+_EVAL_TABLE_SS = f"""
+QTableWidget {{
+    background: {CONSOLE}; color: {TEXT};
+    gridline-color: {BORDER};
+    border: 1px solid {BORDER}; border-radius: 6px;
+    font-family: 'Menlo','SF Mono',monospace; font-size: 11px;
+}}
+QHeaderView::section {{
+    background: {FG}; color: {LABEL};
+    padding: 4px 8px; border: none; border-bottom: 1px solid {BORDER};
+    font-weight: 600; font-size: 10px;
+}}
+QTableWidget::item {{ padding: 3px 8px; }}
+"""
+
+
+def _color_labels_solid(layer, mask, rgba):
+    """Paint every non-zero label in a Labels layer a single solid colour.
+
+    Used to render ground truth as one distinct (green) outline instead of a
+    rainbow of per-cell colours that would blend with the prediction layer.
+    """
+    try:
+        from napari.utils.colormaps import DirectLabelColormap
+        ids = np.unique(mask)
+        cmap = {int(i): rgba for i in ids if i != 0}
+        cmap[None] = (0.0, 0.0, 0.0, 0.0)
+        cmap[0] = (0.0, 0.0, 0.0, 0.0)
+        layer.colormap = DirectLabelColormap(color_dict=cmap)
+    except Exception:
+        pass  # older napari — fall back to default multicolour labels
+
 
 def _make_stat_chip(caption: str):
     """A compact stat tile: big value over a small uppercase caption.
