@@ -13,7 +13,7 @@ from napari_app.widgets.log_window import get_log_window
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 
-from gui.pages.utils.predict_state_manager import PredictionStateManager
+from napari_app.core.predict_state_manager import PredictionStateManager
 from project_root import STORAGE_DIR
 from napari_app.theme import (
     WIDGET_SS, BTN_PRIMARY, BTN_SUCCESS, BTN_SECONDARY, BTN_BROWSE,
@@ -1532,7 +1532,7 @@ class PredictWidget(QWidget):
 
     def _run_refine(self):
         import napari.layers as nl, tempfile, shutil, cv2
-        from gui.pages.utils.train_state_manager import TrainingStateManager
+        from napari_app.core.train_state_manager import TrainingStateManager
 
         labels_layer = next((l for l in self.viewer.layers if isinstance(l, nl.Labels)), None)
         if labels_layer is None:
@@ -1595,7 +1595,7 @@ class PredictWidget(QWidget):
         self._append_log(f"▶ Refine: 50 ep, {n_cells} cells, from {Path(lora_path).name}")
 
         def run():
-            from gui.pages.utils.train_model import train_model
+            from napari_app.core.train_model import train_model
             try:
                 train_model(config, sm, progress_queue=pq)
                 self._log_signal.emit(f"✓ Refined → {Path(refined_path).name}")

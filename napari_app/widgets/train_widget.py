@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 from napari_app.widgets.log_window import get_log_window
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
-from gui.pages.utils.train_state_manager import TrainingStateManager
+from napari_app.core.train_state_manager import TrainingStateManager
 from project_root import STORAGE_DIR
 from napari_app.theme import (
     WIDGET_SS, BTN_PRIMARY, BTN_DANGER, BTN_SECONDARY, BTN_PRESET, BTN_BROWSE,
@@ -624,7 +624,7 @@ class TrainWidget(QWidget):
         pq, se = self._progress_queue, self._stop_event
 
         def run():
-            from gui.pages.utils.train_model import train_model
+            from napari_app.core.train_model import train_model
             try:
                 train_model(config, STATE_MANAGER, progress_queue=pq, stop_event=se)
                 self._log_signal.emit("✓ Training complete")
