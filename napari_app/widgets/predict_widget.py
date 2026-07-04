@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox,
     QFileDialog, QScrollArea, QProgressBar, QFrame,
     QAbstractSpinBox, QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView,
+    QListWidget, QListWidgetItem,
 )
 from napari_app.widgets.log_window import get_log_window
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -107,6 +108,7 @@ class PredictWidget(QWidget):
         self._pred_thread   = None
         self._last_mask     = None
         self._last_img_rgb  = None
+        self._last_channel_stack = None
         self._last_measure  = None
         self._last_img_path = None
         self._was_autofilled = False
@@ -202,6 +204,28 @@ class PredictWidget(QWidget):
             f"color: {LABEL}; font-size: 10px; font-family:'Menlo','SF Mono',monospace;")
         self._dataset_lbl.setWordWrap(True)
         img_card.addWidget(self._dataset_lbl)
+
+        # ── Channel picker (multi-channel microscopy only) ─────────────────────
+        # Hidden for ordinary RGB/grayscale images so the default path is
+        # untouched; revealed only when a genuine >3-channel / multi-page stack
+        # is selected. Checked channels drive segmentation (mapped to R/G/B).
+        self._chan_lbl = QLabel("Segmentation channels")
+        self._chan_lbl.setStyleSheet(
+            f"color: {LABEL}; font-size: 11px; font-weight: 500;")
+        img_card.addWidget(self._chan_lbl)
+        self.channel_list = QListWidget()
+        self.channel_list.setToolTip(
+            "Tick the channel(s) to segment on. One → grayscale; two → red+green; "
+            "three → RGB. Each channel is percentile-normalised independently.")
+        self.channel_list.setMaximumHeight(96)
+        self.channel_list.setStyleSheet(
+            f"QListWidget {{ background:{FG}; color:{TEXT}; border:1px solid {BORDER}; "
+            f"font-size: 11px; }}")
+        img_card.addWidget(self.channel_list)
+        self._chan_lbl.setVisible(False)
+        self.channel_list.setVisible(False)
+        self._channel_names: list[str] = []
+
         L.addWidget(img_card)
 
         # ── Run (prominent, outside cards — the main action) ──────────────────
@@ -603,6 +627,7 @@ class PredictWidget(QWidget):
         self._on_engine_changed()
 
         self.image_path.textChanged.connect(lambda _t: self._autofill_gt())
+        self.image_path.textChanged.connect(lambda _t: self._refresh_channel_picker())
         self._autofill_gt()
         self._on_gt_path_changed()
         self._populate_samples()
@@ -855,6 +880,51 @@ class PredictWidget(QWidget):
             return str(c)
         raise ValueError(f"SAM backbone not found. Place {names[vit]} in {STORAGE_DIR / 'sam_backbone'}/")
 
+    def _refresh_channel_picker(self):
+        """Show/populate the channel picker when a multi-channel stack is loaded.
+
+        Probes the selected file's channel count cheaply (metadata only). The
+        picker is revealed only for a genuine multi-channel image (>3 channels,
+        or a labelled channel axis whose size is not the ordinary 1/3); normal
+        RGB/grayscale images keep it hidden and thus flow through the legacy
+        read path unchanged.
+        """
+        path = self.image_path.text().strip()
+        self._channel_names = []
+        self.channel_list.clear()
+        show = False
+        if path and Path(path).exists():
+            try:
+                from napari_app.channels import probe_channels
+                n, names = probe_channels(path)
+                if n > 3 or (1 < n < 3):   # not a normal RGB(3)/gray(1) image
+                    self._channel_names = names
+                    default = set(range(min(n, 3)))
+                    for i, name in enumerate(names):
+                        item = QListWidgetItem(f"{i}: {name}")
+                        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                        item.setCheckState(Qt.CheckState.Checked if i in default
+                                           else Qt.CheckState.Unchecked)
+                        self.channel_list.addItem(item)
+                    show = True
+            except Exception:
+                show = False
+        self._chan_lbl.setVisible(show)
+        self.channel_list.setVisible(show)
+
+    def _selected_channels(self) -> list[int] | None:
+        """Checked segmentation channels, or ``None`` when the picker is inactive.
+
+        ``None`` means "ordinary image" and keeps the default read path. When
+        the picker is shown but nothing is ticked we fall back to the first
+        channel so a run never fails on an empty selection.
+        """
+        if not self.channel_list.isVisible() or not self._channel_names:
+            return None
+        picked = [i for i in range(self.channel_list.count())
+                  if self.channel_list.item(i).checkState() == Qt.CheckState.Checked]
+        return picked or [0]
+
     def _build_config(self):
         img = self.image_path.text().strip()
         if not img or not Path(img).exists():
@@ -880,6 +950,7 @@ class PredictWidget(QWidget):
                 "vit_name": self.vit_name.currentText(),
                 "image_encoder_lora_rank": self.lora_rank.value(),
                 "sam_image_size": rs, "result_pth_path": "",
+                "channels": self._selected_channels(),
             }
 
         return self._sam_config()
@@ -924,6 +995,7 @@ class PredictWidget(QWidget):
             "clahe": self.clahe.isChecked(),
             "tiled": self.tiled.isChecked(),
             "tile_size": rs, "tile_overlap": 0,
+            "channels": self._selected_channels(),
         }
 
     # ── Parameter access for the Assistant agent ──────────────────────────────
@@ -1010,8 +1082,13 @@ class PredictWidget(QWidget):
 
         def run():
             try:
+                sink = {}
                 img_arr, mask = _predict_cached(
-                    config, on_tile=self._tile_progress_signal.emit)
+                    config, on_tile=self._tile_progress_signal.emit, sink=sink)
+                # Stash the raw channel stack (None on the ordinary path) so the
+                # measurement pass can report per-channel intensity. Set before
+                # emitting so the queued main-thread handler sees it.
+                self._last_channel_stack = sink.get("stack")
                 self._done_signal.emit(img_arr, mask)
                 if is_cp:
                     self._log_signal.emit(f"✓ {int(mask.max())} cells  [Cellpose-SAM]")
@@ -1070,10 +1147,14 @@ class PredictWidget(QWidget):
                 self._last_measure = None
             return
         from napari_app import analysis
+        stack = getattr(self, "_last_channel_stack", None)
+        ci = stack.data if stack is not None else None
+        cn = stack.names if stack is not None else None
         try:
             result = analysis.compute_measurements(
                 mask, intensity_image=self._last_img_rgb,
-                pixel_size_um=self.pixel_size.value())
+                pixel_size_um=self.pixel_size.value(),
+                channel_intensities=ci, channel_names=cn)
         except Exception as e:
             self._append_log(f"[WARN] measurement failed: {e}")
             result = None
@@ -1727,11 +1808,27 @@ def _make_custom_lora_row(parent) -> QHBoxLayout:
 
 # ── Prediction core ───────────────────────────────────────────────────────────
 
-def _predict_cached(config, on_tile=None):
-    import cv2
-    from data.utils import resize_image
-    from napari_app.inference_cache import predict_cached
+def _read_for_predict(config):
+    """Read ``config['image_path']`` into ``(rgb_uint8_HxWx3, stack_or_None)``.
 
+    Default path (no ``channels`` key): the exact legacy ``cv2`` BGR→RGB read
+    and a ``None`` stack, so ordinary RGB/grayscale images are byte-for-byte
+    unchanged. Multi-channel path (opt-in via a ``channels`` list of channel
+    indices): read the full-depth stack with tifffile, percentile-normalise and
+    project the selected channels to the RGB frame the engine expects, and also
+    return the raw :class:`~napari_app.channels.ChannelStack` for per-channel
+    intensity measurement.
+    """
+    channels = config.get("channels")
+    if channels:
+        from napari_app.channels import read_channel_stack, project_to_rgb
+        stack = read_channel_stack(config["image_path"])
+        rgb = project_to_rgb(stack, channels,
+                             low=float(config.get("channel_low", 1.0)),
+                             high=float(config.get("channel_high", 99.0)))
+        return rgb, stack
+
+    import cv2
     img = cv2.imread(config["image_path"], cv2.IMREAD_UNCHANGED)
     if img is None:
         raise ValueError(f"Cannot read: {config['image_path']}")
@@ -1741,6 +1838,17 @@ def _predict_cached(config, on_tile=None):
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
     else:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    return img, None
+
+
+def _predict_cached(config, on_tile=None, sink=None):
+    from data.utils import resize_image
+    from napari_app.inference_cache import predict_cached
+    import cv2
+
+    img, stack = _read_for_predict(config)
+    if sink is not None:
+        sink["stack"] = stack
 
     # Large-image path: tile at native resolution instead of shrinking the
     # whole image (which loses small cells). Opt-in via the "Large image" box.
