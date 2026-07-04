@@ -216,17 +216,31 @@ class PredictWidget(QWidget):
         self._results_card = SectionCard("Results", accent_color=SUCCESS)
         self._results_card.setVisible(False)
 
-        self._cell_count_lbl = QLabel()
+        count_row = QHBoxLayout(); count_row.setSpacing(8); count_row.setContentsMargins(0, 2, 0, 4)
+        self._cell_count_lbl = QLabel("—")
         self._cell_count_lbl.setStyleSheet(
-            f"color: {TEXT}; font-size: 24px; font-weight: 700;"
-            f"font-family: 'Menlo', 'SF Mono', monospace; letter-spacing: -0.5px;")
-        self._results_card.addWidget(self._cell_count_lbl)
+            f"color: {SUCCESS}; font-size: 34px; font-weight: 800;"
+            f"letter-spacing: -1px; background: transparent;")
+        _count_cap = QLabel("cells\ndetected")
+        _count_cap.setStyleSheet(
+            f"color: {DIM}; font-size: 11px; font-weight: 600;"
+            f"letter-spacing: 0.5px; background: transparent;")
+        count_row.addWidget(self._cell_count_lbl)
+        count_row.addWidget(_count_cap)
+        count_row.addStretch()
+        self._results_card.addLayout(count_row)
 
+        # Stat chips — three compact tiles reading left-to-right by importance.
+        chips = QHBoxLayout(); chips.setSpacing(7); chips.setContentsMargins(0, 2, 0, 2)
+        self._chip_diam, _f1 = _make_stat_chip("MEDIAN Ø")
+        self._chip_area, _f2 = _make_stat_chip("MEAN AREA")
+        self._chip_cov,  _f3 = _make_stat_chip("COVERAGE")
+        for f in (_f1, _f2, _f3):
+            chips.addWidget(f)
+        self._results_card.addLayout(chips)
+        # kept for code paths that still write a one-line summary
         self._stats_lbl = QLabel()
-        self._stats_lbl.setStyleSheet(
-            f"color: {LABEL}; font-size: 11px; font-family: 'Menlo', 'SF Mono', monospace;")
-        self._stats_lbl.setWordWrap(True)
-        self._results_card.addWidget(self._stats_lbl)
+        self._stats_lbl.setVisible(False)
 
         px_row = QHBoxLayout(); px_row.setSpacing(8)
         px_row.addWidget(_field_label("Pixel size"))
@@ -276,18 +290,39 @@ class PredictWidget(QWidget):
         self._results_card.addWidget(self._measure_btn)
         L.addWidget(self._results_card)
 
-        # ── Ground truth overlay (collapsed — optional comparison tool) ────────
-        _gt_card = CollapsibleCard("Ground truth overlay", collapsed=True)
+        # ── Ground truth & evaluation (collapsed — validation tool) ────────────
+        _gt_card = CollapsibleCard("Ground truth & evaluation", collapsed=True)
         _gt_card.addWidget(_field_label("GT mask file"))
         self.gt_path = QLineEdit()
-        self.gt_path.setPlaceholderText("Optional — compare prediction with ground truth")
+        self.gt_path.setPlaceholderText("Auto-detected from a *_gt / masks sidecar, or pick one")
+        self.gt_path.textChanged.connect(lambda _t: self._on_gt_path_changed())
         _gt_card.addLayout(_file_row(self, self.gt_path, "Select ground truth mask",
             "Images (*.png *.tif *.tiff *.npy)"))
+        self._gt_status = QLabel("")
+        self._gt_status.setStyleSheet(f"color: {LABEL}; font-size: 10px; padding: 1px 0;")
+        self._gt_status.setWordWrap(True)
+        _gt_card.addWidget(self._gt_status)
+
+        gt_row = QHBoxLayout(); gt_row.setSpacing(6)
         gt_btn = QPushButton("Show GT layer")
-        gt_btn.setFixedHeight(32)
-        gt_btn.setStyleSheet(BTN_SECONDARY)
+        gt_btn.setFixedHeight(32); gt_btn.setStyleSheet(BTN_SECONDARY)
         gt_btn.clicked.connect(self._show_ground_truth)
-        _gt_card.addWidget(gt_btn)
+        gt_row.addWidget(gt_btn)
+        self._eval_btn = QPushButton("Evaluate vs GT")
+        self._eval_btn.setFixedHeight(32); self._eval_btn.setStyleSheet(BTN_SUCCESS)
+        self._eval_btn.setToolTip(
+            "Instance-level accuracy of the prediction against ground truth: "
+            "F1 and Average Precision (AP) at IoU 0.5 / 0.75 / 0.9.")
+        self._eval_btn.clicked.connect(self._evaluate_gt)
+        gt_row.addWidget(self._eval_btn)
+        _gt_card.addLayout(gt_row)
+
+        self._eval_result = QLabel("")
+        self._eval_result.setStyleSheet(
+            f"color: {TEXT}; font-size: 11px; font-family: 'Menlo','SF Mono',monospace;"
+            f"padding-top: 4px;")
+        self._eval_result.setWordWrap(True)
+        _gt_card.addWidget(self._eval_result)
         L.addWidget(_gt_card)
 
         # ── Batch prediction (collapsed — for processing multiple images) ──────
@@ -445,6 +480,10 @@ class PredictWidget(QWidget):
 
         self.engine.currentIndexChanged.connect(self._on_engine_changed)
         self._on_engine_changed()
+
+        self.image_path.textChanged.connect(lambda _t: self._autofill_gt())
+        self._autofill_gt()
+        self._on_gt_path_changed()
 
         self._autofill_from_sidecar()
 
@@ -813,8 +852,9 @@ class PredictWidget(QWidget):
         if mask is None or int(mask.max()) == 0:
             self._results_card.setVisible(mask is not None)
             if mask is not None:
-                self._cell_count_lbl.setText("0  cells detected")
-                self._stats_lbl.setText("No cells found — try the Assistant tab for tips.")
+                self._cell_count_lbl.setText("0")
+                for chip in (self._chip_diam, self._chip_area, self._chip_cov):
+                    chip.setText("—")
                 self._last_measure = None
             return
         from napari_app import analysis
@@ -828,10 +868,15 @@ class PredictWidget(QWidget):
         self._last_measure = result
 
         n = int(mask.max())
-        self._cell_count_lbl.setText(f"{n}  cells detected")
+        self._cell_count_lbl.setText(str(n))
         if result:
             cov = float((mask > 0).sum()) / mask.size * 100.0
-            self._stats_lbl.setText(f"{analysis.summary_line(result)}  ·  {cov:.1f}% coverage")
+            s = result["summary"]
+            au = next((u for k, _l, u in result["columns"] if k == "area"), "px²")
+            lu = next((u for k, _l, u in result["columns"] if k == "diameter"), "px")
+            self._chip_diam.setText(f"{s.get('diameter', {}).get('median', 0):.1f} {lu}")
+            self._chip_area.setText(f"{s.get('area', {}).get('mean', 0):.0f} {au}")
+            self._chip_cov.setText(f"{cov:.1f}%")
         self._results_card.setVisible(True)
 
         from napari_app.widgets.measurements_window import get_measurements_window
@@ -847,6 +892,93 @@ class PredictWidget(QWidget):
         mw.set_result(self._last_measure,
                       Path(self._last_img_path).name if self._last_img_path else "")
         mw.show_and_raise()
+
+    # ── Ground truth: auto-detect + evaluate ──────────────────────────────────
+
+    def _gt_sidecar(self, image_path: str):
+        """Find a ground-truth mask that ships next to ``image_path``, if any."""
+        if not image_path:
+            return None
+        p = Path(image_path)
+        stem, exts = p.stem, (".png", ".tif", ".tiff", ".npy")
+        candidates = []
+        for suffix in ("_gt", "_masks", "_mask", "_label", "_labels"):
+            for e in exts:
+                candidates.append(p.with_name(stem + suffix + e))
+        # sibling masks/ folder with a same-named file
+        for folder in ("masks", "gt", "labels"):
+            for e in exts:
+                candidates.append(p.parent / folder / (stem + e))
+                candidates.append(p.parent.parent / folder / (stem + e))
+        for c in candidates:
+            if c.exists():
+                return str(c)
+        return None
+
+    def _autofill_gt(self):
+        """Populate the GT field from a sidecar when the image changes."""
+        found = self._gt_sidecar(self.image_path.text().strip())
+        if found and self.gt_path.text().strip() != found:
+            self.gt_path.setText(found)
+
+    def _on_gt_path_changed(self):
+        p = self.gt_path.text().strip()
+        if p and Path(p).exists():
+            self._gt_status.setText(f"✓ ground truth: {Path(p).name}")
+            self._eval_btn.setEnabled(True)
+        else:
+            self._gt_status.setText("No ground truth set." if not p else "GT file not found.")
+            self._eval_btn.setEnabled(bool(p) and Path(p).exists())
+
+    def _load_gt_mask(self):
+        import cv2
+        p = self.gt_path.text().strip()
+        if not p or not Path(p).exists():
+            raise ValueError("GT file not found")
+        gt = np.load(p) if p.lower().endswith(".npy") else cv2.imread(p, cv2.IMREAD_UNCHANGED)
+        if gt is None:
+            raise ValueError(f"Cannot read GT: {p}")
+        return np.ascontiguousarray(gt).astype(np.int32)
+
+    def _evaluate_gt(self):
+        if self._last_mask is None:
+            self._append_log("[ERROR] Run a prediction first"); return
+        try:
+            gt = self._load_gt_mask()
+        except ValueError as e:
+            self._append_log(f"[ERROR] {e}"); return
+
+        pred = self._last_mask.astype(np.int32)
+        if gt.shape != pred.shape:
+            import cv2
+            gt = cv2.resize(gt.astype(np.float32), (pred.shape[1], pred.shape[0]),
+                            interpolation=cv2.INTER_NEAREST).astype(np.int32)
+        try:
+            from metrics import average_precision
+            # Call one threshold at a time — average_precision's internal guard
+            # is not vectorised across multiple thresholds for a single image.
+            ap, f1, tp0, fp0, fn0 = {}, None, 0, 0, 0
+            for th in (0.5, 0.75, 0.9):
+                a, tp, fp, fn = average_precision(gt, pred, threshold=[th])
+                a = float(np.atleast_1d(a)[0])
+                tp = float(np.atleast_1d(tp)[0]); fp = float(np.atleast_1d(fp)[0])
+                fn = float(np.atleast_1d(fn)[0])
+                ap[th] = a
+                if th == 0.5:
+                    denom = 2 * tp + fp + fn
+                    f1 = (2 * tp / denom) if denom else 0.0
+                    tp0, fp0, fn0 = int(tp), int(fp), int(fn)
+            self._eval_result.setText(
+                f"GT {int(gt.max())} cells · pred {int(pred.max())} cells\n"
+                f"F1@0.5 {f1:.3f}   AP@0.5 {ap[0.5]:.3f}\n"
+                f"AP@0.75 {ap[0.75]:.3f}   AP@0.9 {ap[0.9]:.3f}\n"
+                f"TP {tp0} · FP {fp0} · FN {fn0}  (IoU 0.5)")
+            self._append_log(
+                f"✓ Eval — F1@0.5 {f1:.3f}, AP@0.5 {ap[0.5]:.3f}, "
+                f"AP@0.75 {ap[0.75]:.3f}, AP@0.9 {ap[0.9]:.3f}")
+        except Exception as e:
+            import traceback
+            self._append_log(f"[ERROR] eval: {e}\n{traceback.format_exc()}")
 
     def _show_ground_truth(self):
         p = self.gt_path.text().strip()
@@ -1070,6 +1202,31 @@ class PredictWidget(QWidget):
 
 
 # ── Custom LoRA path ──────────────────────────────────────────────────────────
+
+def _make_stat_chip(caption: str):
+    """A compact stat tile: big value over a small uppercase caption.
+
+    Returns (value_label, frame) — keep the label to update, add the frame.
+    """
+    frame = QFrame()
+    frame.setObjectName("StatChip")
+    frame.setStyleSheet(
+        f"QFrame#StatChip {{ background: {CONSOLE}; border: 1px solid {BORDER};"
+        f" border-radius: 8px; }}")
+    v = QVBoxLayout(frame)
+    v.setContentsMargins(11, 8, 11, 8); v.setSpacing(1)
+    val = QLabel("—")
+    val.setStyleSheet(
+        f"color: {TEXT}; font-size: 15px; font-weight: 700;"
+        f"font-family: 'Menlo','SF Mono',monospace; background: transparent;")
+    cap = QLabel(caption)
+    cap.setStyleSheet(
+        f"color: {DIM}; font-size: 9px; font-weight: 600; letter-spacing: 0.8px;"
+        f"background: transparent;")
+    v.addWidget(val)
+    v.addWidget(cap)
+    return val, frame
+
 
 def _make_custom_lora_row(parent) -> QHBoxLayout:
     parent.lora_custom = QLineEdit()

@@ -49,19 +49,47 @@ QLineEdit[readOnly="true"] {{ color: {LABEL}; }}
 QComboBox {{
     background: {FG};
     border: 1px solid {BORDER};
-    border-radius: 5px;
-    padding: 5px 9px;
+    border-radius: 6px;
+    padding: 5px 10px;
     color: {TEXT};
-    min-height: 28px;
+    min-height: 30px;
 }}
-QComboBox:focus {{ border-color: {ACCENT}; }}
-QComboBox::drop-down {{ border: none; width: 20px; }}
+QComboBox:hover {{ border-color: {LABEL}; }}
+QComboBox:focus, QComboBox:on {{ border-color: {ACCENT}; }}
+QComboBox::drop-down {{
+    subcontrol-origin: padding; subcontrol-position: center right;
+    border: none; width: 22px;
+}}
+QComboBox::down-arrow {{
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid {LABEL};
+    margin-right: 8px;
+}}
 QComboBox QAbstractItemView {{
     background: {FG}; color: {TEXT};
     border: 1px solid {BORDER};
+    border-radius: 6px;
+    padding: 4px;
     selection-background-color: {ACCENT};
+    selection-color: #ffffff;
     outline: none;
     font-size: 13px;
+}}
+QComboBox QAbstractItemView::item {{
+    min-height: 26px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    color: {TEXT};
+}}
+QComboBox QAbstractItemView::item:hover {{
+    background: rgba(77, 143, 255, 0.16);
+    color: {TEXT};
+}}
+QComboBox QAbstractItemView::item:selected {{
+    background: {ACCENT};
+    color: #ffffff;
 }}
 
 QSpinBox, QDoubleSpinBox {{

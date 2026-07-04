@@ -46,13 +46,58 @@ def _synthetic_field(h: int = 512, w: int = 512, n: int = 60, seed: int = 0) -> 
     return _to_uint8_rgb(field)
 
 
+def _synthetic_labeled(h: int = 512, w: int = 512, n: int = 48, seed: int = 1):
+    """A synthetic field of well-separated cells with an exact label mask.
+
+    Returns (image_rgb uint8, label_mask int32). Because we place every cell
+    ourselves, the mask is a perfect ground truth — useful for validating the
+    Evaluate-vs-GT metrics.
+    """
+    rng = np.random.default_rng(seed)
+    field = np.zeros((h, w), dtype=np.float64)
+    labels = np.zeros((h, w), dtype=np.int32)
+    yy, xx = np.mgrid[0:h, 0:w]
+    placed: list[tuple[float, float, float]] = []
+    lab = 0
+    attempts = 0
+    while lab < n and attempts < n * 40:
+        attempts += 1
+        r = rng.uniform(9, 16)
+        cy, cx = rng.uniform(r + 4, h - r - 4), rng.uniform(r + 4, w - r - 4)
+        if any((cy - py) ** 2 + (cx - px) ** 2 < (r + pr + 5) ** 2 for py, px, pr in placed):
+            continue
+        placed.append((cy, cx, r))
+        lab += 1
+        d2 = ((yy - cy) / r) ** 2 + ((xx - cx) / r) ** 2
+        field += rng.uniform(0.6, 1.0) * np.exp(-d2)
+        labels[d2 <= 1.0] = lab
+    field += rng.normal(0, 0.015, field.shape)
+    return _to_uint8_rgb(np.clip(field, 0, None)), labels
+
+
 def fetch_samples(dest_dir) -> list[str]:
-    """Write sample images into ``dest_dir``; return the paths written."""
+    """Write sample images into ``dest_dir``; return the paths written.
+
+    Also writes a labelled phantom image alongside its exact ground-truth mask
+    (``sample_phantom.png`` + ``sample_phantom_gt.png``) so the Ground-truth /
+    Evaluate feature has something to auto-fill and score against.
+    """
     import cv2
 
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
     saved: list[str] = []
+
+    # Labelled phantom with matching ground truth (deterministic).
+    try:
+        img, gt = _synthetic_labeled()
+        img_p = dest / "sample_phantom.png"
+        gt_p = dest / "sample_phantom_gt.png"
+        cv2.imwrite(str(img_p), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(str(gt_p), gt.astype(np.uint16))
+        saved.append(str(img_p))
+    except Exception:
+        pass
 
     # Real microscopy images bundled with / fetched by scikit-image (via pooch).
     # Curated for cell/nucleus segmentation: fluorescence nuclei, a single cell,
