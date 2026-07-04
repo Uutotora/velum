@@ -38,7 +38,7 @@ for a credible product · P1 differentiation · P2 later.
 - **Touch:** `napari_app/widgets/predict_widget.py` (worker + `_predict_tiled`).
 - **Verify:** unit-test the callback is threaded through; note GUI not driven.
 
-### [ ] Real multi-channel support  · M
+### [x] Real multi-channel support  · M
 - **Goal:** stop collapsing fluorescence to RGB; let the user map channels
   (e.g. nucleus/cytoplasm) and normalise per channel.
 - **Why:** real microscopy is N-channel (DAPI + membrane + markers);

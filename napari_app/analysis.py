@@ -65,10 +65,49 @@ def _to_gray(intensity_image: np.ndarray | None) -> np.ndarray | None:
     return arr.astype(np.float64)
 
 
+def _channel_columns(mask, channel_intensities, channel_names):
+    """Per-channel mean-intensity schema + per-label means for a raw stack.
+
+    Returns ``(schema_entries, means)`` where ``schema_entries`` is a list of
+    ``(key, label, "intens")`` and ``means`` is a parallel list of arrays
+    indexed by label (element ``k`` = mean intensity of cell ``k``). Both are
+    empty / ``None`` when no aligned multi-channel stack is supplied, so the
+    single-image path is unaffected.
+    """
+    if channel_intensities is None:
+        return [], None
+    stack = np.asarray(channel_intensities)
+    if stack.ndim == 2:
+        stack = stack[:, :, None]
+    if stack.ndim != 3 or stack.shape[:2] != mask.shape:
+        # Misaligned / malformed → ignore rather than crash.
+        return [], None
+
+    c = stack.shape[2]
+    names = list(channel_names) if channel_names else [f"Channel {i}" for i in range(c)]
+    if len(names) != c:
+        names = [f"Channel {i}" for i in range(c)]
+
+    labels = mask.ravel().astype(np.int64)
+    n = int(labels.max()) + 1 if labels.size else 1
+    counts = np.bincount(labels, minlength=n).astype(np.float64)
+    counts[counts == 0] = 1.0
+
+    schema, means = [], []
+    for i in range(c):
+        sums = np.bincount(labels, weights=stack[:, :, i].ravel().astype(np.float64),
+                           minlength=n)
+        means.append(sums / counts)
+        schema.append((f"ch{i}_mean", f"{names[i]} mean", "intens"))
+    return schema, means
+
+
 def compute_measurements(
     mask: np.ndarray,
     intensity_image: np.ndarray | None = None,
     pixel_size_um: float = 0.0,
+    channel_intensities: np.ndarray | None = None,
+    channel_names: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Measure every labelled object in ``mask``.
@@ -78,6 +117,13 @@ def compute_measurements(
     mask : 2-D int array, 0 = background, positive ints = cell ids.
     intensity_image : optional H×W or H×W×C image aligned to ``mask``.
     pixel_size_um : micrometres per pixel; 0 keeps everything in pixels.
+    channel_intensities : optional raw ``H×W×C`` stack aligned to ``mask``.
+        When given, a per-channel mean-intensity column is appended for every
+        channel (values are the *raw* stack intensities, not the normalised
+        display image). This is the multi-channel path; leave it ``None`` for
+        the ordinary single-image behaviour.
+    channel_names : optional labels for those channels (defaults to
+        ``Channel 0..C-1``).
 
     Returns a dict with:
       columns  : list of (key, label, unit_string)
@@ -94,8 +140,10 @@ def compute_measurements(
         # Misaligned intensity image → ignore rather than crash.
         gray = None
 
+    ch_schema, ch_means = _channel_columns(mask, channel_intensities, channel_names)
+
     has_intens = gray is not None
-    schema = _SCHEMA + (_INTENSITY_SCHEMA if has_intens else [])
+    schema = _SCHEMA + (_INTENSITY_SCHEMA if has_intens else []) + ch_schema
 
     px = float(pixel_size_um) if pixel_size_um and pixel_size_um > 0 else 0.0
     columns = [(key, label, _unit_for(kind, px)) for key, label, kind in schema]
@@ -149,6 +197,9 @@ def compute_measurements(
                 round(min_i, 2),
                 round(mean_i * area, 1),
             ]
+        if ch_means is not None:
+            lbl = int(p.label)
+            row += [round(float(means[lbl]), 2) for means in ch_means]
         rows.append(row)
 
     rows.sort(key=lambda r: r[0])
