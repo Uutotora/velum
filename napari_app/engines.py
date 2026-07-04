@@ -31,8 +31,11 @@ def cellpose_available() -> bool:
 
 def _cellpose_device(device: str):
     """Map the app's device string to a torch device cellpose accepts."""
+    import os
     import torch
     if device == "mps" and torch.backends.mps.is_available():
+        # Let unsupported ops fall back to CPU instead of crashing.
+        os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
         return dict(gpu=True, device=torch.device("mps"))
     if device not in ("cpu", "mps") and torch.cuda.is_available():
         return dict(gpu=True)          # a CUDA index → let cellpose pick
