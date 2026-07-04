@@ -42,6 +42,7 @@ class AnnotateWidget(QWidget):
         self._label_img = None
         self._labels_layer = None
         self._image_layer = None
+        self._pts_layer = None
         self._cb = None
         self._busy = False
 
@@ -50,6 +51,8 @@ class AnnotateWidget(QWidget):
         self._points: list = []
         self._plabels: list = []
         self._last_low = None
+        self._prompt_coords: list = []
+        self._prompt_face: list = []
 
         self.setStyleSheet(WIDGET_SS)
         outer = QVBoxLayout(); outer.setSpacing(0); outer.setContentsMargins(0, 0, 0, 0)
@@ -61,8 +64,10 @@ class AnnotateWidget(QWidget):
         # ── Session card ───────────────────────────────────────────────────────
         sess_card = SectionCard("Interactive session")
         intro = QLabel(
-            "Click cells to segment them one by one with SAM prompts. "
-            "Uses the checkpoint and image selected in the Predict tab.")
+            "AI-assisted labelling. You click one point on a cell and SAM outlines "
+            "the whole cell for you — you do not draw the outline by hand. Each "
+            "click adds one cell. Start a session, then click cells in the viewer. "
+            "(Uses the checkpoint + image from the Predict tab.)")
         intro.setStyleSheet(f"color:{LABEL}; font-size:11px; background:transparent;")
         intro.setWordWrap(True)
         sess_card.addWidget(intro)
@@ -90,13 +95,21 @@ class AnnotateWidget(QWidget):
         # ── Controls card ──────────────────────────────────────────────────────
         ctl_card = SectionCard("Controls")
         legend = QLabel(
-            "Left-click — segment a new cell\n"
-            "Shift + click — grow the last cell\n"
-            "Ctrl / ⌘ + click — carve the last cell")
+            "Click        →  segment a new cell (green dot)\n"
+            "Shift+click  →  add to the last cell\n"
+            "Ctrl/⌘+click →  remove from the last cell (red dot)\n"
+            "Drag         →  pan (never segments)")
         legend.setStyleSheet(
             f"color:{LABEL}; font-size:11px; background:transparent;"
             f"font-family:'Menlo','SF Mono',monospace;")
+        legend.setWordWrap(True)
         ctl_card.addWidget(legend)
+        manual = QLabel(
+            "Prefer to draw by hand? Select the *_annotate_masks layer and use "
+            "napari's paintbrush (top-left tools).")
+        manual.setStyleSheet(f"color:{DIM}; font-size:10px; background:transparent;")
+        manual.setWordWrap(True)
+        ctl_card.addWidget(manual)
 
         row = QHBoxLayout(); row.setSpacing(6)
         self._undo_btn = QPushButton("Undo last")
@@ -214,6 +227,16 @@ class AnnotateWidget(QWidget):
         self._labels_layer = self.viewer.add_labels(
             self._label_img.copy(), name=f"{stem}_annotate_masks", opacity=0.6)
         self._labels_layer.contour = 1
+        try:
+            self._pts_layer = self.viewer.add_points(
+                np.empty((0, 2)), name=f"{stem}_clicks", size=12, border_width=0)
+        except Exception:
+            self._pts_layer = None
+        # keep the Labels layer active so the click callback (and manual brush) work
+        try:
+            self.viewer.layers.selection.active = self._labels_layer
+        except Exception:
+            pass
         self.viewer.reset_view()
 
         self._cb = self._make_callback()
@@ -249,13 +272,42 @@ class AnnotateWidget(QWidget):
         self._points = []
         self._plabels = []
         self._last_low = None
+        self._prompt_coords = []
+        self._prompt_face = []
+        self._refresh_points()
+
+    def _refresh_points(self):
+        if self._pts_layer is None:
+            return
+        try:
+            if self._prompt_coords:
+                self._pts_layer.data = np.asarray(self._prompt_coords, dtype=float)
+                self._pts_layer.face_color = np.asarray(self._prompt_face, dtype=float)
+            else:
+                self._pts_layer.data = np.empty((0, 2))
+        except Exception:
+            pass
 
     def _make_callback(self):
+        # Generator callback: only act on a genuine click, never on a drag/pan.
         def callback(viewer, event):
-            if event.button != 1 or self._busy or self._session is None:
+            if event.button != 1 or self._session is None:
                 return
+            mods = set(event.modifiers or ())
+            if "Alt" in mods:
+                return  # leave Alt free for panning / other tools
+            start = event.position
+            yield
+            moved = 0.0
+            while event.type == "mouse_move":
+                p = event.position
+                moved += abs(p[0] - start[0]) + abs(p[1] - start[1])
+                yield
+            if moved > 8 or self._busy:
+                return  # it was a drag (pan) or we're busy — ignore
+
             try:
-                dy, dx = self._image_layer.world_to_data(event.position)[:2]
+                dy, dx = self._image_layer.world_to_data(start)[:2]
             except Exception:
                 return
             x, y = int(round(dx)), int(round(dy))
@@ -263,20 +315,23 @@ class AnnotateWidget(QWidget):
             if not (0 <= x < w and 0 <= y < h):
                 return
 
-            mods = set(event.modifiers or ())
             grow = "Shift" in mods
             carve = bool({"Control", "Meta"} & mods)
-
             if (grow or carve) and self._active_id > 0 and self._points:
                 self._points.append((x, y))
                 self._plabels.append(0 if carve else 1)
             else:
-                # New object
                 self._active_id = int(self._label_img.max()) + 1
                 self._points = [(x, y)]
                 self._plabels = [1]
                 self._last_low = None
+                self._prompt_coords = []
+                self._prompt_face = []
 
+            self._prompt_coords.append([y, x])
+            self._prompt_face.append([0.85, 0.15, 0.15, 1.0] if carve
+                                     else [0.15, 0.95, 0.4, 1.0])
+            self._refresh_points()
             self._run_predict()
         return callback
 

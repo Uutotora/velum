@@ -97,6 +97,8 @@ class PredictWidget(QWidget):
     _cohort_ready_signal   = pyqtSignal()
     _benchmark_row_signal  = pyqtSignal(str)
     _benchmark_done_signal = pyqtSignal()
+    _dataset_progress_signal = pyqtSignal(str)
+    _dataset_done_signal   = pyqtSignal(object)
 
     def __init__(self, viewer):
         super().__init__()
@@ -106,6 +108,7 @@ class PredictWidget(QWidget):
         self._last_img_rgb  = None
         self._last_measure  = None
         self._last_img_path = None
+        self._was_autofilled = False
         self._lora_paths    = {}
         self._batch_stop    = threading.Event()
         self._refine_timer  = QTimer()
@@ -166,25 +169,38 @@ class PredictWidget(QWidget):
             self.image_path.setText(str(img))
         img_card.addLayout(_file_row(self, self.image_path, "Select image",
             "Images (*.png *.tif *.tiff *.jpg *.bmp *.npy)"))
-        self._sample_btn = QPushButton("⬇  Load sample microscopy images")
-        self._sample_btn.setFixedHeight(30)
-        self._sample_btn.setStyleSheet(BTN_SECONDARY)
-        self._sample_btn.setToolTip(
-            "Fetch a few real microscopy samples (bundled with scikit-image) into "
-            "your test-images folder — a one-click way to try the app.")
-        self._sample_btn.clicked.connect(self._load_samples)
-        img_card.addWidget(self._sample_btn)
-
+        # Switcher first — the everyday action is *selecting* a loaded image.
         sw_row = QHBoxLayout(); sw_row.setSpacing(6)
         sw_lbl = QLabel("Sample")
         sw_lbl.setStyleSheet(f"color: {LABEL}; font-size: 11px; font-weight: 500;")
         sw_lbl.setFixedWidth(52)
         sw_row.addWidget(sw_lbl)
         self.sample_combo = QComboBox()
-        self.sample_combo.setToolTip("Switch between images in your test-images folder")
+        self.sample_combo.setToolTip("Switch between images already in your test-images folder")
         self.sample_combo.activated.connect(self._on_sample_selected)
         sw_row.addWidget(self.sample_combo, stretch=1)
         img_card.addLayout(sw_row)
+
+        # A single "Get images" menu button — download once, then use the switcher.
+        from PyQt6.QtWidgets import QMenu
+        self._sample_btn = QPushButton("⬇  Get images  ▾")
+        self._sample_btn.setFixedHeight(30)
+        self._sample_btn.setStyleSheet(BTN_SECONDARY)
+        _menu = QMenu(self._sample_btn)
+        _menu.setStyleSheet(
+            f"QMenu {{ background:{FG}; color:{TEXT}; border:1px solid {BORDER}; }}"
+            f"QMenu::item:selected {{ background:{ACCENT}; color:#fff; }}")
+        _menu.addAction("Quick samples (offline, instant)", self._load_samples)
+        _menu.addAction("Download BBBC039 nuclei dataset (real, with ground truth)",
+                        self._download_dataset)
+        self._sample_btn.setMenu(_menu)
+        img_card.addWidget(self._sample_btn)
+
+        self._dataset_lbl = QLabel("")
+        self._dataset_lbl.setStyleSheet(
+            f"color: {LABEL}; font-size: 10px; font-family:'Menlo','SF Mono',monospace;")
+        self._dataset_lbl.setWordWrap(True)
+        img_card.addWidget(self._dataset_lbl)
         L.addWidget(img_card)
 
         # ── Run (prominent, outside cards — the main action) ──────────────────
@@ -257,20 +273,30 @@ class PredictWidget(QWidget):
         self._stats_lbl = QLabel()
         self._stats_lbl.setVisible(False)
 
-        px_row = QHBoxLayout(); px_row.setSpacing(8)
-        px_row.addWidget(_field_label("Pixel size"))
-        px_row.addStretch()
+        _cal_lbl = QLabel("PIXEL CALIBRATION")
+        _cal_lbl.setStyleSheet(
+            f"color: {LABEL}; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
+            f"padding: 6px 0 2px 0;")
+        self._results_card.addWidget(_cal_lbl)
         self.pixel_size = QDoubleSpinBox()
         self.pixel_size.setDecimals(4)
         self.pixel_size.setRange(0.0, 1000.0)
         self.pixel_size.setValue(0.0)
-        self.pixel_size.setSpecialValueText("— (pixels)")
-        self.pixel_size.setFixedWidth(120)
-        self.pixel_size.setToolTip("µm per pixel — set to show areas in µm². Leave 0 for px².")
+        self.pixel_size.setSingleStep(0.05)
+        self.pixel_size.setSuffix("  µm / pixel")
+        self.pixel_size.setSpecialValueText("off  —  measure in pixels")
+        self.pixel_size.setMinimumHeight(34)
+        self.pixel_size.setToolTip(
+            "Microns per pixel from your microscope. Set it to report areas in "
+            "µm² and sizes in µm. Leave at 0 to measure in pixels.")
         self.pixel_size.valueChanged.connect(self._on_pixel_size_changed)
-        px_row.addWidget(self.pixel_size)
-        px_row.addWidget(_field_label("µm/px"))
-        self._results_card.addLayout(px_row)
+        self._results_card.addWidget(self.pixel_size)
+        _cal_hint = QLabel(
+            "Enter your microscope's µm-per-pixel to get real-world units. "
+            "0 = pixels.")
+        _cal_hint.setStyleSheet(f"color: {DIM}; font-size: 10px; padding-bottom: 2px;")
+        _cal_hint.setWordWrap(True)
+        self._results_card.addWidget(_cal_hint)
 
         _line = QFrame(); _line.setFrameShape(QFrame.Shape.HLine)
         _line.setStyleSheet(f"background: {BORDER}; border: none;"); _line.setFixedHeight(1)
@@ -550,6 +576,8 @@ class PredictWidget(QWidget):
         self._cohort_ready_signal.connect(self._on_cohort_ready)
         self._benchmark_row_signal.connect(self._on_benchmark_row)
         self._benchmark_done_signal.connect(self._on_benchmark_done)
+        self._dataset_progress_signal.connect(lambda s: self._dataset_lbl.setText(s))
+        self._dataset_done_signal.connect(self._on_dataset_done)
 
         viewer.bind_key('Control-r',       lambda v: self._run_prediction())
         viewer.bind_key('Control-Shift-r', lambda v: self._predict_active_layer())
@@ -637,6 +665,36 @@ class PredictWidget(QWidget):
         self._sample_paths = paths
         self._sample_finish_signal.emit()
 
+    def _download_dataset(self):
+        if getattr(self, "_dataset_thread", None) and self._dataset_thread.is_alive():
+            return
+        self._dataset_lbl.setText("Starting BBBC039 download (~45 MB, one time)…")
+
+        def run():
+            try:
+                from napari_app.sample_data import download_bbbc039
+                paths = download_bbbc039(
+                    TEST_IMAGE_DIR, limit=20,
+                    progress=lambda s: self._dataset_progress_signal.emit(s))
+                self._dataset_done_signal.emit(paths)
+            except Exception as e:
+                self._dataset_progress_signal.emit(f"[ERROR] {e}")
+                self._dataset_done_signal.emit([])
+
+        self._dataset_thread = threading.Thread(target=run, daemon=True)
+        self._dataset_thread.start()
+
+    def _on_dataset_done(self, paths):
+        if not paths:
+            self._append_log("[WARN] BBBC039 download produced no images")
+            return
+        self._dataset_lbl.setText(
+            f"✓ {len(paths)} BBBC039 images + ground truth ready. Use the Sample list.")
+        self._populate_samples()
+        self.image_path.setText(paths[0])
+        self.image_path.setToolTip(paths[0])
+        self._append_log(f"✓ BBBC039: {len(paths)} images with GT → test_images/BBBC039/")
+
     def _on_samples_done(self):
         self._sample_btn.setEnabled(True)
         self._sample_btn.setText("⬇  Load sample microscopy images")
@@ -655,9 +713,9 @@ class PredictWidget(QWidget):
         if not hasattr(self, "sample_combo"):
             return
         exts = {".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp", ".npy"}
-        files = sorted(f for f in TEST_IMAGE_DIR.glob("*")
+        files = sorted(f for f in TEST_IMAGE_DIR.rglob("*")
                        if f.suffix.lower() in exts and "_gt" not in f.stem
-                       and not f.stem.endswith(("_mask", "_masks")))
+                       and not f.stem.endswith(("_mask", "_masks", "_label", "_labels")))
         self.sample_combo.blockSignals(True)
         self.sample_combo.clear()
         if not files:
@@ -1048,10 +1106,20 @@ class PredictWidget(QWidget):
         return None
 
     def _autofill_gt(self):
-        """Populate the GT field from a sidecar when the image changes."""
+        """Keep the GT field in sync with the current image.
+
+        Sets it to a detected sidecar mask, or clears it when the new image has
+        none — so switching images never leaves a stale ground truth behind.
+        """
         found = self._gt_sidecar(self.image_path.text().strip())
-        if found and self.gt_path.text().strip() != found:
-            self.gt_path.setText(found)
+        current = self.gt_path.text().strip()
+        if found:
+            if current != found:
+                self.gt_path.setText(found)
+        elif current and self._was_autofilled:
+            # only clear values we set ourselves, not a manual pick
+            self.gt_path.clear()
+        self._was_autofilled = bool(found)
 
     def _on_gt_path_changed(self):
         p = self.gt_path.text().strip()

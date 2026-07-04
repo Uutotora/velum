@@ -46,6 +46,13 @@ def main():
 
     viewer = napari.Viewer(title="CellSeg1 — Cell Instance Segmentation")
 
+    # Stop wheel-scroll from accidentally changing spin boxes / combos.
+    from PyQt6.QtWidgets import QApplication
+    from napari_app.ui_utils import install_wheel_guard
+    app = QApplication.instance()
+    if app is not None:
+        install_wheel_guard(app)
+
     tabs = QTabWidget()
     tabs.setStyleSheet(TAB_SS)
 

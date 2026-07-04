@@ -75,6 +75,87 @@ def _synthetic_labeled(h: int = 512, w: int = 512, n: int = 48, seed: int = 1):
     return _to_uint8_rgb(np.clip(field, 0, None)), labels
 
 
+# Broad Bioimage Benchmark Collection 039 — nuclei of U2OS cells (fluorescence),
+# 200 fields with expert ground truth. Directly downloadable, no login.
+BBBC039_IMAGES = "https://data.broadinstitute.org/bbbc/BBBC039/images.zip"
+BBBC039_MASKS = "https://data.broadinstitute.org/bbbc/BBBC039/masks.zip"
+
+
+def _bbbc039_instances(mask_rgba: np.ndarray) -> np.ndarray:
+    """Turn a BBBC039 3-class mask into an instance label image.
+
+    The class channel encodes 0=background, 1=interior, 2=boundary. Connected
+    components of the interior (boundaries keep touching nuclei apart) give one
+    label per nucleus.
+    """
+    from scipy.ndimage import label as cclabel
+    ch = mask_rgba[..., 2] if mask_rgba.ndim == 3 else mask_rgba
+    inst, _n = cclabel(ch == 1)
+    return inst.astype(np.uint16)
+
+
+def download_bbbc039(dest_dir, limit: int = 20, progress=None) -> list[str]:
+    """Download a subset of BBBC039 with instance ground truth.
+
+    Writes ``<stem>.png`` images and matching ``<stem>_gt.png`` masks into
+    ``dest_dir/BBBC039`` so ground truth auto-fills and benchmarking works.
+    Returns the image paths written.
+    """
+    import io
+    import urllib.request
+    import zipfile
+    import cv2
+
+    dest = Path(dest_dir) / "BBBC039"
+    dest.mkdir(parents=True, exist_ok=True)
+
+    def _fetch(url, what):
+        if progress:
+            progress(f"Downloading {what}…")
+        with urllib.request.urlopen(url, timeout=300) as r:
+            return r.read()
+
+    imgs = zipfile.ZipFile(io.BytesIO(_fetch(BBBC039_IMAGES, "images")))
+    masks = zipfile.ZipFile(io.BytesIO(_fetch(BBBC039_MASKS, "masks")))
+
+    def _clean(names, ext):
+        return sorted(n for n in names
+                      if n.lower().endswith(ext) and not n.startswith("__MACOSX"))
+
+    img_members = _clean(imgs.namelist(), (".tif", ".tiff"))
+    mask_by_stem = {Path(n).stem: n for n in _clean(masks.namelist(), ".png")}
+
+    saved: list[str] = []
+    for member in img_members:
+        if len(saved) >= limit:
+            break
+        stem = Path(member).stem
+        if stem not in mask_by_stem:
+            continue
+        try:
+            raw = np.frombuffer(imgs.read(member), np.uint8)
+            img = cv2.imdecode(raw, cv2.IMREAD_UNCHANGED)
+            if img is None:
+                import tifffile
+                img = tifffile.imread(io.BytesIO(imgs.read(member)))
+            img8 = _to_uint8_rgb(img)
+            mraw = np.frombuffer(masks.read(mask_by_stem[stem]), np.uint8)
+            mrgba = cv2.imdecode(mraw, cv2.IMREAD_UNCHANGED)
+            inst = _bbbc039_instances(mrgba)
+
+            short = stem.split("_")[1] if "_" in stem else stem[:8]
+            img_p = dest / f"bbbc039_{short}.png"
+            gt_p = dest / f"bbbc039_{short}_gt.png"
+            cv2.imwrite(str(img_p), cv2.cvtColor(img8, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(str(gt_p), inst)
+            saved.append(str(img_p))
+            if progress:
+                progress(f"Extracted {len(saved)}/{limit}  ({int(inst.max())} nuclei)")
+        except Exception:
+            continue
+    return saved
+
+
 def fetch_samples(dest_dir) -> list[str]:
     """Write sample images into ``dest_dir``; return the paths written.
 
