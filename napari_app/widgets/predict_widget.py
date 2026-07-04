@@ -91,6 +91,7 @@ class PredictWidget(QWidget):
     _done_signal           = pyqtSignal(object, object)
     _finish_signal         = pyqtSignal()
     _batch_progress_signal = pyqtSignal(int, int)
+    _tile_progress_signal  = pyqtSignal(int, int)
     _batch_finish_signal   = pyqtSignal()
     _refine_finish_signal  = pyqtSignal(str)
     _sample_finish_signal  = pyqtSignal()
@@ -580,6 +581,7 @@ class PredictWidget(QWidget):
         self._done_signal.connect(self._show_results)
         self._finish_signal.connect(self._on_done)
         self._batch_progress_signal.connect(self._on_batch_progress)
+        self._tile_progress_signal.connect(self._on_tile_progress)
         self._batch_finish_signal.connect(self._on_batch_done)
         self._refine_finish_signal.connect(self._on_refine_done)
         self._sample_finish_signal.connect(self._on_samples_done)
@@ -1008,7 +1010,8 @@ class PredictWidget(QWidget):
 
         def run():
             try:
-                img_arr, mask = _predict_cached(config)
+                img_arr, mask = _predict_cached(
+                    config, on_tile=self._tile_progress_signal.emit)
                 self._done_signal.emit(img_arr, mask)
                 if is_cp:
                     self._log_signal.emit(f"✓ {int(mask.max())} cells  [Cellpose-SAM]")
@@ -1027,6 +1030,11 @@ class PredictWidget(QWidget):
         self.run_btn.setEnabled(True)
         self.active_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
+        # Reset to the indeterminate spinner so the next (non-tiled) run looks
+        # unchanged; a tiled run flips it back to determinate via _on_tile_progress.
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setFormat("")
+        self.progress_bar.setTextVisible(False)
         self._populate_lora_combo()
 
     def _show_results(self, img_arr, mask):
@@ -1505,6 +1513,14 @@ class PredictWidget(QWidget):
         self.batch_progress.setValue(int(done / total * 100))
         self.batch_lbl.setText(f"Image {done} / {total}")
 
+    def _on_tile_progress(self, done: int, total: int):
+        # Turn the indeterminate spinner into a determinate "tile 7/48" bar so a
+        # long whole-slide run reads as progressing, not hung.
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(done)
+        self.progress_bar.setFormat(f"tile {done}/{total}")
+        self.progress_bar.setTextVisible(True)
+
     def _on_batch_done(self):
         self.batch_btn.setEnabled(True)
         self.batch_stop_btn.setEnabled(False)
@@ -1711,7 +1727,7 @@ def _make_custom_lora_row(parent) -> QHBoxLayout:
 
 # ── Prediction core ───────────────────────────────────────────────────────────
 
-def _predict_cached(config):
+def _predict_cached(config, on_tile=None):
     import cv2
     from data.utils import resize_image
     from napari_app.inference_cache import predict_cached
@@ -1730,7 +1746,7 @@ def _predict_cached(config):
     # whole image (which loses small cells). Opt-in via the "Large image" box.
     from napari_app.tiling import should_tile
     if config.get("tiled") and should_tile(img.shape, tile=int(config.get("tile_size") or 1024)):
-        return img, _predict_tiled(config, img)
+        return img, _predict_tiled(config, img, on_tile=on_tile)
 
     orig_h, orig_w = img.shape[:2]
     resized = resize_image(img, config["resize_size"])
@@ -1757,12 +1773,13 @@ def _predict_cached(config):
     return img, mask
 
 
-def _predict_tiled(config, img):
+def _predict_tiled(config, img, on_tile=None):
     """Segment a large RGB image tile-by-tile at native resolution and stitch.
 
     Reuses the exact per-image engine calls of the normal path, applied to each
     overlapping tile; cells crossing a seam are merged by the stitcher. Returns
-    a full-resolution instance mask the same H×W as ``img``.
+    a full-resolution instance mask the same H×W as ``img``. ``on_tile(done,
+    total)`` is forwarded to the tiler for per-tile progress reporting.
     """
     from napari_app.tiling import recommend_overlap, tiled_predict
 
@@ -1793,7 +1810,8 @@ def _predict_tiled(config, img):
             return predict_cached(config, t)
 
     min_area = int(config.get("min_mask_area") or config.get("min_mask_region_area") or 0)
-    return tiled_predict(img, _fn, tile=tile, overlap=overlap, min_area=min_area)
+    return tiled_predict(img, _fn, tile=tile, overlap=overlap, min_area=min_area,
+                         on_tile=on_tile)
 
 
 def _apply_clahe(rgb: np.ndarray) -> np.ndarray:

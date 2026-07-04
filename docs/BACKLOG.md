@@ -28,7 +28,7 @@ for a credible product · P1 differentiation · P2 later.
 
 ## P0 — ship-blockers
 
-### [ ] Tiling progress in the UI  · S
+### [x] Tiling progress in the UI  · S
 - **Goal:** the progress bar reflects per-tile progress during a tiled run.
 - **Why:** a whole-slide run is minutes long; an indeterminate spinner reads
   as "hung" and users kill it.
