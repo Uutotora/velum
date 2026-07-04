@@ -123,8 +123,25 @@ class PredictWidget(QWidget):
         L.setSpacing(0)
         L.setContentsMargins(14, 8, 14, 16)
 
+        # ── Engine ────────────────────────────────────────────────────────────
+        engine_card = SectionCard("Engine")
+        self.engine = QComboBox()
+        self.engine.addItem("CellSeg1 · LoRA (one-shot, fine-tuned)", "cellseg1")
+        self.engine.addItem("Cellpose-SAM (zero-shot, generalist)",   "cellpose")
+        self.engine.setToolTip(
+            "CellSeg1: SAM + LoRA — best when you've fine-tuned on your own data.\n"
+            "Cellpose-SAM: a 2025 generalist foundation model — strong accuracy "
+            "out-of-the-box with no checkpoint or training.")
+        engine_card.addWidget(self.engine)
+        self._engine_hint = QLabel("")
+        self._engine_hint.setStyleSheet(f"color: {LABEL}; font-size: 11px; padding-top: 3px;")
+        self._engine_hint.setWordWrap(True)
+        engine_card.addWidget(self._engine_hint)
+        L.addWidget(engine_card)
+
         # ── Checkpoint ────────────────────────────────────────────────────────
-        ckpt_card = SectionCard("Checkpoint")
+        self._ckpt_card = SectionCard("Checkpoint")
+        ckpt_card = self._ckpt_card
         self.lora_combo = QComboBox()
         self._populate_lora_combo()
         self.lora_combo.currentIndexChanged.connect(self._on_checkpoint_changed)
@@ -363,7 +380,31 @@ class PredictWidget(QWidget):
             "cells; leave off for already well-exposed images.")
         self.clahe.setStyleSheet(f"color: {LABEL}; font-size: 11px;")
         _inf_card.addWidget(self.clahe)
+        self._inf_card = _inf_card
         L.addWidget(_inf_card)
+
+        # ── Cellpose-SAM settings (shown only for the Cellpose engine) ─────────
+        self._cp_card = SectionCard("Cellpose-SAM settings")
+        self.cp_diameter = QSpinBox()
+        self.cp_diameter.setRange(0, 500); self.cp_diameter.setValue(0)
+        self.cp_diameter.setSpecialValueText("auto")
+        self.cp_diameter.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self._cp_card.addLayout(_param_row("Cell diameter", self.cp_diameter,
+            "Expected cell diameter in pixels. 0 = let the model estimate it."))
+        self.cp_flow = QDoubleSpinBox()
+        self.cp_flow.setRange(0.0, 3.0); self.cp_flow.setDecimals(2)
+        self.cp_flow.setSingleStep(0.1); self.cp_flow.setValue(0.4)
+        self.cp_flow.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self._cp_card.addLayout(_param_row("Flow threshold", self.cp_flow,
+            "Max allowed flow error per mask. Lower = fewer, cleaner cells."))
+        self.cp_cellprob = QDoubleSpinBox()
+        self.cp_cellprob.setRange(-6.0, 6.0); self.cp_cellprob.setDecimals(2)
+        self.cp_cellprob.setSingleStep(0.5); self.cp_cellprob.setValue(0.0)
+        self.cp_cellprob.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self._cp_card.addLayout(_param_row("Cell prob. thresh", self.cp_cellprob,
+            "Lower to detect more (dimmer) cells; raise to keep only confident ones."))
+        self._cp_card.setVisible(False)
+        L.addWidget(self._cp_card)
 
         L.addStretch()
         inner.setLayout(L)
@@ -402,7 +443,35 @@ class PredictWidget(QWidget):
         self.quality.setCurrentText("Balanced")
         self.quality.currentTextChanged.connect(self._apply_quality)
 
+        self.engine.currentIndexChanged.connect(self._on_engine_changed)
+        self._on_engine_changed()
+
         self._autofill_from_sidecar()
+
+    # ── Engine switching ──────────────────────────────────────────────────────
+
+    def _current_engine(self) -> str:
+        return self.engine.currentData() or "cellseg1"
+
+    def _on_engine_changed(self, _idx=None):
+        is_cp = self._current_engine() == "cellpose"
+        # Checkpoint / SAM-specific controls are irrelevant for Cellpose.
+        self._ckpt_card.setVisible(not is_cp)
+        self._inf_card.setVisible(not is_cp)
+        self.quality.setEnabled(not is_cp)
+        self._cp_card.setVisible(is_cp)
+        if is_cp:
+            from napari_app.engines import cellpose_available
+            if cellpose_available():
+                self._engine_hint.setText(
+                    "Zero-shot generalist — no checkpoint needed. First run downloads "
+                    "the model weights (~a few hundred MB).")
+            else:
+                self._engine_hint.setText(
+                    "⚠ Cellpose is not installed. Run:  pip install cellpose")
+        else:
+            self._engine_hint.setText(
+                "SAM + LoRA. Pick a checkpoint below; fine-tune your own in the Train tab.")
 
     # ── Quality presets & samples ─────────────────────────────────────────────
 
@@ -563,15 +632,36 @@ class PredictWidget(QWidget):
         raise ValueError(f"SAM backbone not found. Place {names[vit]} in {STORAGE_DIR / 'sam_backbone'}/")
 
     def _build_config(self):
-        lora = self._resolve_lora()
-        img  = self.image_path.text().strip()
-        sam  = self._resolve_sam()
-        if not lora or not Path(lora).exists():
-            raise ValueError(f"LoRA checkpoint not found: {lora}")
+        img = self.image_path.text().strip()
         if not img or not Path(img).exists():
             raise ValueError(f"Image not found: {img}")
         rs = int(self.resize_size.currentText())
+
+        # Cellpose-SAM needs no LoRA/SAM checkpoint — a much shorter config.
+        if self._current_engine() == "cellpose":
+            from napari_app.engines import cellpose_available
+            if not cellpose_available():
+                raise ValueError("Cellpose is not installed — run: pip install cellpose")
+            return {
+                "engine": "cellpose", "image_path": img,
+                "resize_size": [rs, rs],
+                "cp_diameter": self.cp_diameter.value(),
+                "cp_flow_threshold": self.cp_flow.value(),
+                "cp_cellprob_threshold": self.cp_cellprob.value(),
+                "selected_device": self.device.currentText(),
+                "clahe": self.clahe.isChecked(),
+                # kept so downstream (refine, caching keys) stays valid
+                "vit_name": self.vit_name.currentText(),
+                "image_encoder_lora_rank": self.lora_rank.value(),
+                "sam_image_size": rs, "result_pth_path": "",
+            }
+
+        lora = self._resolve_lora()
+        sam  = self._resolve_sam()
+        if not lora or not Path(lora).exists():
+            raise ValueError(f"LoRA checkpoint not found: {lora}")
         return {
+            "engine": "cellseg1",
             "vit_name": self.vit_name.currentText(),
             "model_path": sam, "result_pth_path": lora, "image_path": img,
             "image_encoder_lora_rank": self.lora_rank.value(),
@@ -709,7 +799,7 @@ class PredictWidget(QWidget):
         self.viewer.add_image(img_arr, name=f"{name}_image")
         if mask is not None and mask.max() > 0:
             lyr = self.viewer.add_labels(mask.astype(np.int32), name=f"{name}_masks", opacity=0.7)
-            lyr.contour = 2
+            lyr.contour = 1
         self._recompute_measurements()
         self.viewer.reset_view()
 
@@ -773,7 +863,7 @@ class PredictWidget(QWidget):
                 if lyr.name == lname:
                     self.viewer.layers.remove(lyr)
             l = self.viewer.add_labels(gt.astype(np.int32), name=lname, opacity=0.5)
-            l.contour = 2
+            l.contour = 1
             self._append_log(f"✓ GT loaded — {int(gt.max())} cells")
         except Exception as e:
             self._append_log(f"[ERROR] {e}")
@@ -1012,7 +1102,18 @@ def _predict_cached(config):
     resized = resize_image(img, config["resize_size"])
     if config.get("clahe"):
         resized = _apply_clahe(resized)
-    small   = predict_cached(config, resized)
+
+    if config.get("engine") == "cellpose":
+        from napari_app.engines import predict_cellpose
+        small = predict_cellpose(
+            resized,
+            diameter=config.get("cp_diameter", 0),
+            flow_threshold=config.get("cp_flow_threshold", 0.4),
+            cellprob_threshold=config.get("cp_cellprob_threshold", 0.0),
+            device=config.get("selected_device", "cpu"),
+        )
+    else:
+        small = predict_cached(config, resized)
 
     if small.shape != (orig_h, orig_w):
         mask = cv2.resize(small.astype(np.float32), (orig_w, orig_h),

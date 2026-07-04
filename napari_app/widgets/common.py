@@ -57,14 +57,18 @@ def param_row(label_text: str, widget, tip: str = "", label_width: int = 110) ->
 # ── Card widgets ──────────────────────────────────────────────────────────────
 
 def _make_card_frame(accent: str) -> QFrame:
-    """QFrame styled as a card with a 6px colored left accent border."""
+    """QFrame styled as a card: a thin border fully enclosing the block.
+
+    ``accent`` is kept for API compatibility but no longer drawn as a heavy
+    left bar — the accent now lives only in the header band, so every card is
+    cleanly framed on all four sides.
+    """
     f = QFrame()
     f.setObjectName("CardFrame")
     f.setStyleSheet(
         f"QFrame#CardFrame {{"
         f"  background: {FG};"
         f"  border: 1px solid {BORDER};"
-        f"  border-left: 6px solid {accent};"
         f"  border-radius: 8px;"
         f"}}"
     )

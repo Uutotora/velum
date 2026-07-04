@@ -100,10 +100,11 @@ class AssistantWidget(QWidget):
         L = QVBoxLayout(); L.setSpacing(0); L.setContentsMargins(14, 8, 14, 16)
 
         # ── Diagnostics card ───────────────────────────────────────────────────
-        diag_card = SectionCard("Diagnostics")
+        diag_card = SectionCard("Diagnostics  ·  no model needed")
         intro = QLabel(
-            "Inspect the latest prediction and get concrete, one-click tuning "
-            "fixes. Runs entirely on your machine.")
+            "Works fully offline — no AI model required. It analyses your image "
+            "and mask directly and proposes concrete, one-click tuning fixes. "
+            "(The chat below is separate and optional.)")
         intro.setStyleSheet(f"color:{LABEL}; font-size:11px; background:transparent;")
         intro.setWordWrap(True)
         diag_card.addWidget(intro)
@@ -178,7 +179,13 @@ class AssistantWidget(QWidget):
         L.addWidget(model_card)
 
         # ── Chat card ──────────────────────────────────────────────────────────
-        chat_card = SectionCard("Ask the assistant")
+        chat_card = SectionCard("Ask the assistant  ·  optional local LLM")
+        chat_intro = QLabel(
+            "Natural-language Q&A. Needs a local model (above). Without one, "
+            "questions are answered by the offline diagnostic engine.")
+        chat_intro.setStyleSheet(f"color:{DIM}; font-size:10px; background:transparent;")
+        chat_intro.setWordWrap(True)
+        chat_card.addWidget(chat_intro)
         self._chat_view = QTextEdit()
         self._chat_view.setReadOnly(True); self._chat_view.setFixedHeight(220)
         self._chat_view.setStyleSheet(

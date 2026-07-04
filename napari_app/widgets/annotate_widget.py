@@ -211,7 +211,7 @@ class AnnotateWidget(QWidget):
         self._image_layer = self.viewer.add_image(img, name=f"{stem}_annotate")
         self._labels_layer = self.viewer.add_labels(
             self._label_img.copy(), name=f"{stem}_annotate_masks", opacity=0.6)
-        self._labels_layer.contour = 2
+        self._labels_layer.contour = 1
         self.viewer.reset_view()
 
         self._cb = self._make_callback()

@@ -54,13 +54,22 @@ def fetch_samples(dest_dir) -> list[str]:
     dest.mkdir(parents=True, exist_ok=True)
     saved: list[str] = []
 
-    candidates = []
+    # Real microscopy images bundled with / fetched by scikit-image (via pooch).
+    # Curated for cell/nucleus segmentation: fluorescence nuclei, a single cell,
+    # an H&E tissue section, and a 2-D slice of a 3-D cell volume.
+    candidates: list = []
     try:
         from skimage import data
         candidates = [
-            ("human_mitosis", data.human_mitosis),
-            ("cell", data.cell),
+            ("nuclei_fluorescence", data.human_mitosis),   # many dividing nuclei
+            ("single_cell",         data.cell),            # one cell, brightfield
+            ("tissue_he",           data.immunohistochemistry),  # stained tissue
         ]
+
+        def _cells3d_slice():
+            vol = data.cells3d()          # (z, c, y, x)
+            return vol[vol.shape[0] // 2, 1]  # mid-z, nuclei channel
+        candidates.append(("cell_nuclei_slice", _cells3d_slice))
     except Exception:
         candidates = []
 
