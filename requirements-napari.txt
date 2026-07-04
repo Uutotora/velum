@@ -1,0 +1,22 @@
+# Dependencies for the napari desktop app (napari_app/).
+# segment_anything and peft are vendored in this repo — no pip needed for them.
+# Install into a dedicated env, e.g.:
+#   mamba create -n cellseg1 python=3.11 -y
+#   mamba run -n cellseg1 pip install -r requirements-napari.txt
+torch
+torchvision
+napari
+PyQt6
+opencv-python
+scikit-image
+scipy
+numpy
+pillow
+tifffile
+nibabel
+albumentations
+tqdm
+matplotlib
+pandas
+pyqtgraph
+pyyaml
