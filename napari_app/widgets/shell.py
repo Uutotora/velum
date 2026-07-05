@@ -11,7 +11,7 @@ hosted in a QStackedWidget.
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QRect, QPropertyAnimation, QEasingCurve
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QHBoxLayout, QVBoxLayout, QLabel, QToolButton,
     QStackedWidget, QButtonGroup, QSizePolicy,
@@ -51,6 +51,18 @@ class _Rail(QFrame):
         self.setStyleSheet(
             f"#Rail {{ background: {BG_APP}; border-right: 1px solid {BORDER}; }}")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+        # Sliding active indicator — a teal bar pinned to the left edge that
+        # animates to the selected icon.
+        self._active_idx = 0
+        self._indicator = QFrame(self)
+        self._indicator.setObjectName("RailIndicator")
+        self._indicator.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._indicator.setStyleSheet(
+            f"#RailIndicator {{ background:{TEAL};"
+            f" border-top-right-radius:2px; border-bottom-right-radius:2px; }}")
+        self._indicator.setFixedWidth(3)
+        self._indicator.hide()
 
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 14, 0, 16)
@@ -103,6 +115,7 @@ class _Rail(QFrame):
         return b
 
     def select(self, idx: int):
+        self._active_idx = idx
         for i, (b, icon_name) in enumerate(self._buttons):
             active = i == idx
             b.setChecked(active)
@@ -111,6 +124,38 @@ class _Rail(QFrame):
                 glow(b, TEAL, blur=16)
             else:
                 clear_effect(b)
+        self._place_indicator(animate=True)
+
+    def _place_indicator(self, animate: bool = True):
+        if not (0 <= self._active_idx < len(self._buttons)):
+            return
+        b = self._buttons[self._active_idx][0]
+        if b.height() <= 1:
+            return  # layout not settled yet
+        bar_h = 22
+        y = b.y() + (b.height() - bar_h) // 2
+        target = QRect(0, y, 3, bar_h)
+        self._indicator.show()
+        self._indicator.raise_()
+        cur = self._indicator.geometry()
+        if animate and cur.height() > 1 and cur != target:
+            anim = QPropertyAnimation(self._indicator, b"geometry", self)
+            anim.setDuration(220)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            anim.setStartValue(cur)
+            anim.setEndValue(target)
+            anim.start()
+            self._ind_anim = anim
+        else:
+            self._indicator.setGeometry(target)
+
+    def resizeEvent(self, e):
+        self._place_indicator(animate=False)
+        super().resizeEvent(e)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._place_indicator(animate=False)
 
     def set_status(self, color: str = SUCCESS, tip: str = ""):
         self._dot.setPixmap(_dot_pixmap(color))

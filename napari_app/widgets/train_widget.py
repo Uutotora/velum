@@ -176,7 +176,7 @@ class TrainWidget(QWidget):
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         inner = QWidget()
-        L = QVBoxLayout(); L.setSpacing(0); L.setContentsMargins(12, 8, 12, 16)
+        L = QVBoxLayout(); L.setSpacing(0); L.setContentsMargins(14, 8, 14, 16)
 
         # ── Presets card ──────────────────────────────────────────────────────
         presets_card = SectionCard("Presets", icon="spark")
@@ -249,7 +249,7 @@ class TrainWidget(QWidget):
         self.vit_name.addItems(["vit_h", "vit_l", "vit_b"])
         self.vit_name.currentTextChanged.connect(self._on_vit_changed)
         _model_card.addLayout(_param_row("SAM type", self.vit_name,
-            "vit_h = best quality (~2.5 GB), vit_b = fastest (~375 MB)"))
+            "vit_h = best quality (~2.5 GB), vit_b = fastest (~375 MB)", label_width=92))
 
         self.sam_path = QLineEdit()
         self.sam_path.setPlaceholderText("auto-detected")
@@ -262,54 +262,51 @@ class TrainWidget(QWidget):
         self.lora_rank.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.lora_rank.valueChanged.connect(self._update_eff)
         _model_card.addLayout(_param_row("LoRA rank", self.lora_rank,
-            "Adapter size. Higher = more parameters = better accuracy, more memory."))
+            "Adapter size. Higher = more parameters = better accuracy, more memory.", label_width=92))
         L.addWidget(_model_card)
 
         # ── Training parameters card ──────────────────────────────────────────
+        # One aligned column: every label shares a fixed width so the fields
+        # line up perfectly (no more mixed full-width / two-up rows).
         params_card = SectionCard("Training parameters", icon="settings")
+        _LW = 92
 
         self.resize_size = QComboBox()
         for v in ["256", "512", "768", "1024"]:
             self.resize_size.addItem(v)
         self.resize_size.setCurrentText("512")
         params_card.addLayout(_param_row("Resize", self.resize_size,
-            "Match prediction resize for best results."))
+            "Match prediction resize for best results.", label_width=_LW))
 
         self.epochs = QSpinBox()
         self.epochs.setRange(1, 5000); self.epochs.setValue(300)
         self.epochs.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        params_card.addLayout(_param_row("Epochs", self.epochs,
+            "Total number of training epochs.", label_width=_LW))
 
         self.lr = QDoubleSpinBox()
         self.lr.setDecimals(5); self.lr.setRange(1e-6, 1.0)
         self.lr.setSingleStep(1e-4); self.lr.setValue(3e-3)
         self.lr.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-
-        ep_lr_row = QHBoxLayout(); ep_lr_row.setSpacing(8)
-        _l1 = QLabel("Epochs"); _l1.setStyleSheet(f"color: {LABEL}; font-size: 11px; font-weight: 500;"); _l1.setFixedWidth(50)
-        _l2 = QLabel("LR");     _l2.setStyleSheet(f"color: {LABEL}; font-size: 11px; font-weight: 500;"); _l2.setFixedWidth(18)
-        ep_lr_row.addWidget(_l1); ep_lr_row.addWidget(self.epochs)
-        ep_lr_row.addWidget(_l2); ep_lr_row.addWidget(self.lr)
-        params_card.addLayout(ep_lr_row)
+        params_card.addLayout(_param_row("Learning rate", self.lr,
+            "Base learning rate (OneCycle schedule).", label_width=_LW))
 
         self.batch_size = QSpinBox()
         self.batch_size.setRange(1, 16); self.batch_size.setValue(1)
         self.batch_size.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.batch_size.valueChanged.connect(self._update_eff)
+        params_card.addLayout(_param_row("Batch", self.batch_size,
+            "Images per step.", label_width=_LW))
 
         self.grad_accum = QSpinBox()
         self.grad_accum.setRange(1, 128); self.grad_accum.setValue(32)
         self.grad_accum.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.grad_accum.valueChanged.connect(self._update_eff)
-
-        ba_acc_row = QHBoxLayout(); ba_acc_row.setSpacing(8)
-        _l3 = QLabel("Batch");  _l3.setStyleSheet(f"color: {LABEL}; font-size: 11px; font-weight: 500;"); _l3.setFixedWidth(50)
-        _l4 = QLabel("Accum");  _l4.setStyleSheet(f"color: {LABEL}; font-size: 11px; font-weight: 500;"); _l4.setFixedWidth(44)
-        ba_acc_row.addWidget(_l3); ba_acc_row.addWidget(self.batch_size)
-        ba_acc_row.addWidget(_l4); ba_acc_row.addWidget(self.grad_accum)
-        params_card.addLayout(ba_acc_row)
+        params_card.addLayout(_param_row("Grad accum", self.grad_accum,
+            "Gradient accumulation. Effective batch = batch × accum.", label_width=_LW))
 
         self.device = QComboBox(); self._populate_devices()
-        params_card.addLayout(_param_row("Device", self.device))
+        params_card.addLayout(_param_row("Device", self.device, label_width=_LW))
         L.addWidget(params_card)
 
         # ── Run — no card, button is the visual anchor ─────────────────────────
