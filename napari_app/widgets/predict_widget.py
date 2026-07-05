@@ -174,7 +174,8 @@ class PredictWidget(QWidget):
         if img:
             self.image_path.setText(str(img))
         img_card.addLayout(_file_row(self, self.image_path, "Select image",
-            "Images (*.png *.tif *.tiff *.jpg *.bmp *.npy)"))
+            "Images (*.png *.tif *.tiff *.jpg *.bmp *.npy "
+            "*.ome.tif *.ome.tiff *.nd2 *.czi *.lif)"))
         # Switcher first — the everyday action is *selecting* a loaded image.
         sw_row = QHBoxLayout(); sw_row.setSpacing(6)
         sw_lbl = QLabel("Sample")
@@ -323,6 +324,10 @@ class PredictWidget(QWidget):
             "Microns per pixel from your microscope. Set it to report areas in "
             "µm² and sizes in µm. Leave at 0 to measure in pixels.")
         self.pixel_size.valueChanged.connect(self._on_pixel_size_changed)
+        # µm/pixel starts as auto-filled-from-metadata; a manual edit makes the
+        # field "owned" by the user so opening another file won't clobber it.
+        self._pixel_size_is_auto = True
+        self._setting_pixel_auto = False
         self._results_card.addWidget(self.pixel_size)
         _cal_hint = QLabel(
             "Enter your microscope's µm-per-pixel to get real-world units. "
@@ -642,6 +647,7 @@ class PredictWidget(QWidget):
 
         self.image_path.textChanged.connect(lambda _t: self._autofill_gt())
         self.image_path.textChanged.connect(lambda _t: self._refresh_channel_picker())
+        self.image_path.textChanged.connect(lambda _t: self._autofill_pixel_size())
         self._autofill_gt()
         self._on_gt_path_changed()
         self._populate_samples()
@@ -763,7 +769,8 @@ class PredictWidget(QWidget):
         """List images in the test-images folder in the switcher combo."""
         if not hasattr(self, "sample_combo"):
             return
-        exts = {".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp", ".npy"}
+        exts = {".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp", ".npy",
+                ".nd2", ".czi", ".lif"}
         files = sorted(f for f in TEST_IMAGE_DIR.rglob("*")
                        if f.suffix.lower() in exts and "_gt" not in f.stem
                        and not f.stem.endswith(("_mask", "_masks", "_label", "_labels")))
@@ -1148,7 +1155,38 @@ class PredictWidget(QWidget):
             motion.count_up(self._cell_count_lbl, int(mask.max()))
         self.viewer.reset_view()
 
+    def _autofill_pixel_size(self):
+        """Fill the µm/pixel field from the selected file's metadata.
+
+        OME-TIFF / ND2 / CZI / LIF carry a physical pixel size; when they do and
+        the user hasn't manually set the field, we pre-fill it so measurements
+        come out in real units without hunting for the scope's calibration.
+        A file without calibration (plain PNG/TIFF) leaves the field untouched,
+        and a value the user typed themselves is never overwritten.
+        """
+        if not getattr(self, "_pixel_size_is_auto", True):
+            return
+        path = self.image_path.text().strip()
+        if not path or not Path(path).exists():
+            return
+        try:
+            from napari_app.channels import read_pixel_size_um
+            um = read_pixel_size_um(path)
+        except Exception:
+            um = None
+        if not um or um <= 0:
+            return
+        self._setting_pixel_auto = True
+        try:
+            self.pixel_size.setValue(float(um))
+        finally:
+            self._setting_pixel_auto = False
+
     def _on_pixel_size_changed(self, _value=None):
+        # A change we didn't originate means the user edited the field; stop
+        # auto-filling it from metadata on subsequent file selections.
+        if not getattr(self, "_setting_pixel_auto", False):
+            self._pixel_size_is_auto = False
         if self._last_mask is not None:
             self._recompute_measurements()
 
@@ -1861,7 +1899,11 @@ def _read_for_predict(config):
     intensity measurement.
     """
     channels = config.get("channels")
-    if channels:
+    # Native microscopy formats (.nd2/.czi/.lif) can't be read by cv2, so they
+    # always go through the channel-stack path — projecting the first channels
+    # by default when the user hasn't picked any explicitly.
+    is_native = Path(config["image_path"]).suffix.lower() in (".nd2", ".czi", ".lif")
+    if channels or is_native:
         from napari_app.channels import read_channel_stack, project_to_rgb
         stack = read_channel_stack(config["image_path"])
         rgb = project_to_rgb(stack, channels,
