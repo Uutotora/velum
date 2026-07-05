@@ -51,13 +51,9 @@ def section_header(text: str) -> QWidget:
     row = QHBoxLayout(container)
     row.setContentsMargins(0, 22, 0, 8)
     row.setSpacing(9)
-    bar = QFrame()
-    bar.setFixedSize(3, 13)
-    bar.setStyleSheet(f"background: {ACCENT}; border-radius: 1px;")
     lbl = QLabel(text.upper())
     lbl.setStyleSheet(
         f"color: {LABEL}; font-size: 11px; font-weight: 700; letter-spacing: 1.4px;")
-    row.addWidget(bar)
     row.addWidget(lbl)
     row.addStretch()
     return container
@@ -114,13 +110,8 @@ def _make_header(title: str, icon_name: str | None = None,
     if clickable:
         hdr.setCursor(Qt.CursorShape.PointingHandCursor)
     row = QHBoxLayout(hdr)
-    row.setContentsMargins(13, 10, 12, 10)
+    row.setContentsMargins(14, 10, 12, 10)
     row.setSpacing(9)
-
-    tick = QFrame()
-    tick.setFixedSize(3, 13)
-    tick.setStyleSheet(f"background:{accent}; border-radius:2px;")
-    row.addWidget(tick)
 
     if icon_name:
         ic = QLabel()
@@ -294,9 +285,6 @@ class CollapsibleSection(QWidget):
         hrow.setContentsMargins(0, 22, 0, 8)
         hrow.setSpacing(9)
 
-        bar = QFrame()
-        bar.setFixedSize(3, 13)
-        bar.setStyleSheet(f"background: {ACCENT}; border-radius: 1px;")
         self._lbl = QLabel(title.upper())
         self._lbl.setStyleSheet(
             f"color: {LABEL}; font-size: 11px; font-weight: 700; letter-spacing: 1.4px;")
@@ -304,7 +292,6 @@ class CollapsibleSection(QWidget):
         self._arrow.setPixmap(icons.pixmap("chevron_down", DIM, 13))
         self._arrow.setFixedSize(14, 14)
 
-        hrow.addWidget(bar)
         hrow.addWidget(self._lbl)
         hrow.addStretch()
         hrow.addWidget(self._arrow)

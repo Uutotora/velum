@@ -31,10 +31,6 @@ class LogWindow(QWidget):
         hdr_row.setContentsMargins(13, 0, 10, 0)
         hdr_row.setSpacing(9)
 
-        tick = QFrame()
-        tick.setFixedSize(3, 12)
-        tick.setStyleSheet(f"background:{ACCENT}; border-radius:2px;")
-
         lbl = QLabel("LOG")
         lbl.setStyleSheet(
             f"color:{DIM}; font-size:10px; font-weight:700; letter-spacing:1.4px; background:transparent;")
@@ -57,7 +53,6 @@ class LogWindow(QWidget):
         clear_btn.setFixedHeight(24)
         clear_btn.setStyleSheet(_btn_ss)
 
-        hdr_row.addWidget(tick)
         hdr_row.addWidget(lbl)
         hdr_row.addStretch()
         hdr_row.addWidget(wrap_btn)

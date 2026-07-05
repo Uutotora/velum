@@ -304,7 +304,7 @@ class AnnotateWidget(QWidget):
         self._status.setText(f"● live  ·  {message}")
         self._status.setStyleSheet(
             f"color:{SUCCESS}; font-size:11px; background:transparent;"
-            f"font-family:'Menlo','SF Mono',monospace;")
+            f"font-family:{MONO};")
         for b in (self._stop_btn, self._clear_btn, self._undo_btn):
             b.setEnabled(True)
         self._update_count()
@@ -318,7 +318,7 @@ class AnnotateWidget(QWidget):
         self._status.setText("Session ended. Labels layer kept for editing/training.")
         self._status.setStyleSheet(
             f"color:{DIM}; font-size:11px; background:transparent;"
-            f"font-family:'Menlo','SF Mono',monospace;")
+            f"font-family:{MONO};")
 
     def _detach_callback(self):
         if self._cb is not None and self._cb in self.viewer.mouse_drag_callbacks:

@@ -42,13 +42,22 @@ class ChangeCard(QFrame):
         self.setObjectName("Finding")
         self.setStyleSheet(
             f"QFrame#Finding {{ background:{INPUT}; border:1px solid {BORDER};"
-            f" border-left:4px solid {color}; border-radius:8px; }}")
-        L = QVBoxLayout(); L.setContentsMargins(13, 11, 13, 11); L.setSpacing(5)
+            f" border-radius:8px; }}")
+        L = QVBoxLayout(); L.setContentsMargins(13, 11, 13, 11); L.setSpacing(6)
 
+        # Title row: a small severity dot + the title (no heavy left stripe).
+        trow = QHBoxLayout(); trow.setContentsMargins(0, 0, 0, 0); trow.setSpacing(9)
+        dot_wrap = QWidget(); dot_wrap.setFixedWidth(8)
+        dwl = QVBoxLayout(dot_wrap); dwl.setContentsMargins(0, 4, 0, 0); dwl.setSpacing(0)
+        dot = QLabel(); dot.setFixedSize(8, 8)
+        dot.setStyleSheet(f"background:{color}; border-radius:4px;")
+        dwl.addWidget(dot); dwl.addStretch()
         t = QLabel(title)
         t.setStyleSheet(f"color:{TEXT}; font-size:12px; font-weight:600; background:transparent;")
         t.setWordWrap(True)
-        L.addWidget(t)
+        trow.addWidget(dot_wrap)
+        trow.addWidget(t, stretch=1)
+        L.addLayout(trow)
 
         if detail:
             d = QLabel(detail)
@@ -177,7 +186,7 @@ class AssistantWidget(QWidget):
         self._model_status = QLabel("")
         self._model_status.setStyleSheet(
             f"color:{DIM}; font-size:10px; background:transparent;"
-            f"font-family:'Menlo','SF Mono',monospace;")
+            f"font-family:{MONO};")
         self._model_status.setWordWrap(True)
         model_card.addWidget(self._model_status)
         L.addWidget(model_card)
@@ -249,7 +258,7 @@ class AssistantWidget(QWidget):
         self._clear_findings()
         for f in diag["findings"]:
             self._findings_box.addWidget(ChangeCard(
-                f"{_SEV_ICON.get(f.severity,'•')}  {f.title}", f.detail, f.changes,
+                f.title, f.detail, f.changes,
                 _SEV_COLOR.get(f.severity, ACCENT), f.action,
                 self._apply, self._apply_rerun))
 

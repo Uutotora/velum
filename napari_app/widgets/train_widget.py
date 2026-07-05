@@ -18,7 +18,7 @@ from napari_app.core.train_state_manager import TrainingStateManager
 from project_root import STORAGE_DIR
 from napari_app.theme import (
     WIDGET_SS, BTN_PRIMARY, BTN_DANGER, BTN_SECONDARY, BTN_PRESET, BTN_BROWSE,
-    BG, FG, BORDER, TEXT, ACCENT, DIM, LABEL, CONSOLE,
+    BG, FG, BORDER, TEXT, ACCENT, DIM, LABEL, CONSOLE, MONO,
 )
 from napari_app.widgets.common import (
     section_header, divider as _divider, param_row as _param_row,
@@ -198,7 +198,7 @@ class TrainWidget(QWidget):
 
         self._eff_lbl = QLabel()
         self._eff_lbl.setStyleSheet(
-            f"color: {DIM}; font-size: 10px; font-family: 'Menlo','SF Mono',monospace; padding: 2px 0;")
+            f"color: {DIM}; font-size: 10px; font-family: {MONO}; padding: 2px 0;")
         presets_card.addWidget(self._eff_lbl)
         L.addWidget(presets_card)
 

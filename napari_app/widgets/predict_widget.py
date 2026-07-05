@@ -204,7 +204,7 @@ class PredictWidget(QWidget):
 
         self._dataset_lbl = QLabel("")
         self._dataset_lbl.setStyleSheet(
-            f"color: {LABEL}; font-size: 10px; font-family:'Menlo','SF Mono',monospace;")
+            f"color: {LABEL}; font-size: 10px; font-family:{MONO};")
         self._dataset_lbl.setWordWrap(True)
         img_card.addWidget(self._dataset_lbl)
 
@@ -481,7 +481,7 @@ class PredictWidget(QWidget):
         _bench_card.addWidget(self.bench_btn)
         self.bench_progress = QLabel("")
         self.bench_progress.setStyleSheet(
-            f"color: {LABEL}; font-size: 10px; font-family:'Menlo','SF Mono',monospace;")
+            f"color: {LABEL}; font-size: 10px; font-family:{MONO};")
         self.bench_progress.setWordWrap(True)
         _bench_card.addWidget(self.bench_progress)
 
