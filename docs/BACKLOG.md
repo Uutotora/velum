@@ -51,14 +51,25 @@ for a credible product · P1 differentiation · P2 later.
 - **Verify:** unit tests on channel parsing/normalisation with synthetic
   multi-channel arrays.
 
-### [ ] Microscopy formats (OME-TIFF / ND2 / CZI / LIF)  · M
+### [x] Microscopy formats (OME-TIFF / ND2 / CZI / LIF)  · M
 - **Goal:** open the formats microscopes actually produce, with pixel size
   read from metadata.
 - **Why:** users can't get their data in today; PNG/plain-TIFF only.
 - **Acceptance:** at least OME-TIFF + ND2 open with correct dims and
   auto-filled µm/pixel; unknown formats degrade gracefully.
-- **Touch:** `data/utils.py`, image-load path in the widget.
-- **Verify:** tests on a tiny fixture per format (or mock the reader).
+- **Touch:** `napari_app/channels.py` (format router + pixel-size readers),
+  `napari_app/widgets/predict_widget.py` (auto-fill µm/pixel, file filter).
+- **Done:** `read_channel_stack` routes `.nd2/.czi/.lif` to optional readers
+  (`nd2`/`czifile`/`readlif`) sharing one `stack_from_axes_array` transform;
+  `read_pixel_size_um` reads OME-XML `PhysicalSizeX` + baseline TIFF resolution
+  tags (unit-converted to µm) and native ND2/CZI/LIF voxel metadata; the
+  Predict widget pre-fills its µm/pixel field from metadata (never clobbering a
+  manual value). A missing reader raises a friendly `MissingReaderError`
+  ("pip install nd2") and unknown formats report no calibration instead of
+  crashing. 21 new pure-logic tests (`tests/test_formats.py`) cover unit
+  conversion, OME/TIFF pixel size, the shared transform, ND2 via a fake module,
+  and graceful degradation. **Not verified here:** real ND2/CZI/LIF files (libs
+  not installed) and live GUI auto-fill.
 
 ### [ ] Packaging + dependency lock  · S
 - **Goal:** `pip install -e .` works; deps are pinned; napari entry point.

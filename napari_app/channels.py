@@ -28,15 +28,27 @@ from typing import Sequence, Union
 import numpy as np
 
 
+class MissingReaderError(RuntimeError):
+    """A microscopy format needs an optional reader that isn't installed.
+
+    Raised (instead of crashing with an ``ImportError``) so the UI can show a
+    single actionable line — "install ``nd2`` to open .nd2 files" — and unknown
+    formats degrade gracefully rather than taking the app down.
+    """
+
+
 @dataclass(frozen=True)
 class ChannelStack:
     """A microscopy image kept at full channel depth.
 
     ``data`` is ``H×W×C`` float32 (channel-last, never normalised). ``names``
     labels each channel for the UI/measurements; it always has length ``C``.
+    ``pixel_size_um`` is the physical pixel size in microns read from the file's
+    metadata (``None`` when unknown), so measurements can auto-fill µm/pixel.
     """
     data: np.ndarray
     names: list[str]
+    pixel_size_um: float | None = None
 
     @property
     def n_channels(self) -> int:
@@ -56,7 +68,8 @@ def _default_names(n: int) -> list[str]:
 
 def to_channel_stack(array: np.ndarray,
                      channel_axis: int | None = None,
-                     names: Sequence[str] | None = None) -> ChannelStack:
+                     names: Sequence[str] | None = None,
+                     pixel_size_um: float | None = None) -> ChannelStack:
     """Canonicalise an arbitrary image array to a channel-last ``ChannelStack``.
 
     ``channel_axis`` pins which axis holds channels; when ``None`` it is
@@ -98,7 +111,38 @@ def to_channel_stack(array: np.ndarray,
             raise ValueError(f"names has {len(names)} entries for {c} channels")
     else:
         names = _default_names(c)
-    return ChannelStack(data=data, names=names)
+    return ChannelStack(data=data, names=names, pixel_size_um=pixel_size_um)
+
+
+def stack_from_axes_array(arr: np.ndarray,
+                          axes: str,
+                          names: Sequence[str] | None = None,
+                          pixel_size_um: float | None = None) -> ChannelStack:
+    """Build a :class:`ChannelStack` from an array plus its tifffile-style axis
+    string (e.g. ``"ZCYX"``).
+
+    Non-spatial, non-channel axes (Z/T/S/P/...) are reduced to their first
+    plane; the ``C`` axis (when present) becomes the channel axis, otherwise a
+    3-D plane falls back to the shape heuristic. Shared by every reader
+    (TIFF/OME/ND2/CZI/LIF) so channel-axis handling lives in one place.
+    """
+    if not axes or len(axes) != arr.ndim:
+        return to_channel_stack(arr, names=names, pixel_size_um=pixel_size_um)
+
+    arr, axes = _reduce_extra_axes(arr, axes)
+    if "C" in axes:
+        cax = axes.index("C")
+    elif arr.ndim == 3:
+        # No labelled channel axis but a 3-D plane → fall back to the heuristic.
+        return to_channel_stack(arr, names=names, pixel_size_um=pixel_size_um)
+    else:
+        cax = None
+
+    stack = to_channel_stack(arr, channel_axis=cax, pixel_size_um=pixel_size_um)
+    if names is not None and len(names) == stack.n_channels:
+        stack = ChannelStack(data=stack.data, names=list(names),
+                             pixel_size_um=pixel_size_um)
+    return stack
 
 
 def _reduce_extra_axes(arr: np.ndarray, axes: str) -> tuple[np.ndarray, str]:
@@ -130,6 +174,12 @@ def read_channel_stack(path: Union[str, Path]) -> ChannelStack:
     suffix = path.suffix.lower()
     if suffix in (".tif", ".tiff"):
         return _read_tiff_stack(path)
+    if suffix == ".nd2":
+        return _read_nd2_stack(path)
+    if suffix == ".czi":
+        return _read_czi_stack(path)
+    if suffix == ".lif":
+        return _read_lif_stack(path)
     from data.utils import read_file_to_numpy
     return to_channel_stack(read_file_to_numpy(path))
 
@@ -142,23 +192,62 @@ def _read_tiff_stack(path: Path) -> ChannelStack:
         arr = series.asarray()
         axes = series.axes or ""
         names = _ome_channel_names(tf)
+        pixel_size = _tiff_pixel_size_um(tf)
 
-    if not axes or len(axes) != arr.ndim:
-        return to_channel_stack(arr, names=None)
+    return stack_from_axes_array(arr, axes, names=names, pixel_size_um=pixel_size)
 
-    arr, axes = _reduce_extra_axes(arr, axes)
-    if "C" in axes:
-        cax = axes.index("C")
-    elif arr.ndim == 3:
-        # No labelled channel axis but a 3-D plane → fall back to the heuristic.
-        return to_channel_stack(arr)
-    else:
-        cax = None
 
-    stack = to_channel_stack(arr, channel_axis=cax)
-    if names is not None and len(names) == stack.n_channels:
-        stack = ChannelStack(data=stack.data, names=list(names))
-    return stack
+def _require(module: str, fmt: str, package: str | None = None):
+    """Import an optional reader or raise a friendly :class:`MissingReaderError`.
+
+    ``package`` names the pip distribution when it differs from the import name,
+    so the message tells the user exactly what to install to open ``fmt``.
+    """
+    try:
+        return __import__(module)
+    except ImportError as exc:  # pragma: no cover - trivial, exercised via mocks
+        pkg = package or module
+        raise MissingReaderError(
+            f"Reading {fmt} files needs the optional '{pkg}' package. "
+            f"Install it with:  pip install {pkg}") from exc
+
+
+def _read_nd2_stack(path: Path) -> ChannelStack:
+    """Read a Nikon ``.nd2`` file via the optional ``nd2`` package."""
+    nd2 = _require("nd2", ".nd2")
+    with nd2.ND2File(str(path)) as f:
+        arr = np.asarray(f.asarray())
+        axes = "".join(getattr(f, "sizes", {}).keys())
+        names = _nd2_channel_names(f)
+        pixel_size = _nd2_pixel_size_um(f)
+    return stack_from_axes_array(arr, axes, names=names, pixel_size_um=pixel_size)
+
+
+def _read_czi_stack(path: Path) -> ChannelStack:
+    """Read a Zeiss ``.czi`` file via the optional ``czifile`` package."""
+    czifile = _require("czifile", ".czi")
+    with czifile.CziFile(str(path)) as f:
+        arr = np.asarray(f.asarray())
+        axes = f.axes or ""
+        pixel_size = _czi_pixel_size_um(f)
+    # czifile pads with singleton acquisition axes (B/V/M/0/...); drop every
+    # length-1 axis that isn't a real Y/X/C plane so the axis string aligns.
+    drop = tuple(i for i, s in enumerate(arr.shape)
+                 if s == 1 and (i >= len(axes) or axes[i] not in "YXC"))
+    arr = np.squeeze(arr, axis=drop)
+    axes = "".join(axes[i] for i in range(len(axes)) if i not in drop)
+    return stack_from_axes_array(arr, axes, pixel_size_um=pixel_size)
+
+
+def _read_lif_stack(path: Path) -> ChannelStack:
+    """Read a Leica ``.lif`` file (first image) via the optional ``readlif``."""
+    readlif = _require("readlif.reader", ".lif", package="readlif")
+    lif = readlif.LifFile(str(path))
+    img = lif.get_image(0)
+    frames = [np.asarray(p) for p in img.get_iter_c()]  # one plane per channel
+    arr = np.stack(frames, axis=0)                      # C,H,W
+    pixel_size = _lif_pixel_size_um(img)
+    return stack_from_axes_array(arr, "CYX", pixel_size_um=pixel_size)
 
 
 def _ome_channel_names(tf) -> list[str] | None:
@@ -172,6 +261,141 @@ def _ome_channel_names(tf) -> list[str] | None:
         return names or None
     except Exception:
         return None
+
+
+# ── physical pixel size (µm/pixel) ───────────────────────────────────────────
+
+# Conversion factors to microns for the unit strings microscopy metadata uses.
+_UM_PER_UNIT = {
+    "m": 1e6, "meter": 1e6, "metre": 1e6,
+    "cm": 1e4, "centimeter": 1e4,
+    "mm": 1e3, "millimeter": 1e3,
+    "µm": 1.0, "um": 1.0, "micron": 1.0, "micrometer": 1.0, "micrometre": 1.0,
+    "nm": 1e-3, "nanometer": 1e-3,
+    "å": 1e-4, "angstrom": 1e-4, "a": 1e-4,
+    "in": 25400.0, "inch": 25400.0,
+}
+
+
+def physical_size_to_um(value: float, unit: str | None) -> float | None:
+    """Convert a physical pixel size given in ``unit`` to microns.
+
+    Returns ``None`` for a non-positive size or an unrecognised unit rather than
+    guessing, so a bad/absent unit never silently poisons measurements. A
+    missing unit defaults to microns (the OME-TIFF default is ``µm``).
+    """
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    if not unit:
+        return value  # OME default unit is micron
+    factor = _UM_PER_UNIT.get(unit.strip().lower().rstrip("s"))
+    if factor is None:
+        return None
+    return value * factor
+
+
+def read_pixel_size_um(path: Union[str, Path]) -> float | None:
+    """Best-effort physical pixel size (µm/pixel) from a file's metadata.
+
+    Reads OME-XML ``PhysicalSizeX`` / TIFF resolution tags for TIFFs and the
+    native voxel metadata for ND2/CZI/LIF. Returns ``None`` when the file
+    carries no calibration (e.g. a plain PNG) so the UI leaves the field at 0.
+    """
+    path = Path(path)
+    suffix = path.suffix.lower()
+    try:
+        if suffix in (".tif", ".tiff"):
+            import tifffile
+            with tifffile.TiffFile(path) as tf:
+                return _tiff_pixel_size_um(tf)
+        if suffix in (".nd2", ".czi", ".lif"):
+            return read_channel_stack(path).pixel_size_um
+    except Exception:
+        return None
+    return None
+
+
+def _tiff_pixel_size_um(tf) -> float | None:
+    """Pixel size from OME-XML first, then baseline TIFF resolution tags."""
+    ome = _ome_pixel_size_um(getattr(tf, "ome_metadata", None))
+    if ome is not None:
+        return ome
+    try:
+        page = tf.pages[0]
+        tags = page.tags
+    except Exception:
+        return None
+    res = tags.get("XResolution")
+    if res is None or not res.value:
+        return None
+    num, den = res.value if isinstance(res.value, tuple) else (res.value, 1)
+    if not num:
+        return None
+    pixels_per_unit = num / den                       # e.g. pixels per cm
+    unit_tag = tags.get("ResolutionUnit")
+    unit_code = getattr(unit_tag, "value", 2)
+    unit_code = int(getattr(unit_code, "value", unit_code))
+    unit = {2: "inch", 3: "cm"}.get(unit_code)
+    if unit is None:                                  # 1 = no absolute unit
+        return None
+    unit_um = _UM_PER_UNIT[unit]
+    return unit_um / pixels_per_unit                  # µm per pixel
+
+
+def _ome_pixel_size_um(meta: str | None) -> float | None:
+    """Parse ``PhysicalSizeX`` (+ its unit) out of an OME-XML string."""
+    if not meta:
+        return None
+    import re
+    m = re.search(r'PhysicalSizeX="([^"]+)"', meta)
+    if not m:
+        return None
+    unit = re.search(r'PhysicalSizeXUnit="([^"]+)"', meta)
+    return physical_size_to_um(m.group(1), unit.group(1) if unit else None)
+
+
+def _nd2_channel_names(f) -> list[str] | None:
+    try:
+        names = [c.channel.name for c in f.metadata.channels]
+        return [n for n in names if n] or None
+    except Exception:
+        return None
+
+
+def _nd2_pixel_size_um(f) -> float | None:
+    try:
+        vs = f.voxel_size()          # named tuple in microns (x, y, z)
+        return physical_size_to_um(vs.x, "um")
+    except Exception:
+        return None
+
+
+def _czi_pixel_size_um(f) -> float | None:
+    """CZI stores scaling in metres under Scaling/Items/Distance[Id='X']."""
+    try:
+        import re
+        meta = f.metadata() if callable(getattr(f, "metadata", None)) else f.metadata
+        m = re.search(
+            r'<Distance[^>]*Id="X"[^>]*>.*?<Value>([^<]+)</Value>', meta, re.S)
+        if not m:
+            return None
+        return physical_size_to_um(float(m.group(1)) * 1e6, "um")  # m → µm
+    except Exception:
+        return None
+
+
+def _lif_pixel_size_um(img) -> float | None:
+    try:
+        px_per_um = float(img.scale[0])   # readlif: pixels per micron on X
+        if px_per_um > 0:
+            return 1.0 / px_per_um
+    except Exception:
+        pass
+    return None
 
 
 def probe_channels(path: Union[str, Path]) -> tuple[int, list[str]]:
