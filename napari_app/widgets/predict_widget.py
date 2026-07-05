@@ -1824,6 +1824,28 @@ def _make_custom_lora_row(parent) -> QHBoxLayout:
 
 # ── Prediction core ───────────────────────────────────────────────────────────
 
+def _to_display_uint8(img: np.ndarray) -> np.ndarray:
+    """Coerce an image to 8-bit for engines that require uint8 (e.g. SAM).
+
+    uint8 input is returned unchanged (the default path stays byte-for-byte).
+    Higher bit-depth or float input (16-bit PNG/TIFF, e.g. a fluorescence image
+    or a uint16 label/GT file) is percentile-stretched (1–99%) into 0–255 —
+    the same normalisation the multi-channel path already uses — so SAM no
+    longer raises "Input type uint16 is not supported".
+    """
+    if img.dtype == np.uint8:
+        return img
+    a = img.astype(np.float32)
+    lo = float(np.percentile(a, 1.0))
+    hi = float(np.percentile(a, 99.0))
+    if hi <= lo:
+        lo, hi = float(a.min()), float(a.max())
+    if hi <= lo:
+        return np.zeros(img.shape, dtype=np.uint8)
+    a = (a - lo) / (hi - lo)
+    return (np.clip(a, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
 def _read_for_predict(config):
     """Read ``config['image_path']`` into ``(rgb_uint8_HxWx3, stack_or_None)``.
 
@@ -1854,6 +1876,9 @@ def _read_for_predict(config):
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
     else:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    # SAM (and the downstream cv2/torchvision transforms) require uint8; 16-bit
+    # and float images crash otherwise. uint8 is returned unchanged.
+    img = _to_display_uint8(img)
     return img, None
 
 
