@@ -140,7 +140,7 @@ class AssistantWidget(QWidget):
         self._model_combo = QComboBox()
         mrow.addWidget(self._model_combo, stretch=1)
         self._tune_btn = QPushButton("Tune for CellSeg1")
-        self._tune_btn.setFixedHeight(30); self._tune_btn.setStyleSheet(BTN_SECONDARY)
+        self._tune_btn.setFixedHeight(32); self._tune_btn.setStyleSheet(BTN_SECONDARY)
         self._tune_btn.setToolTip(
             "Bake a task-specialised agent (cellseg1-assistant) from the selected "
             "model: pins the domain persona and a low temperature for precise advice.")

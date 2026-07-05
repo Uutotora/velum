@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextCursor
 
-from napari_app.theme import BG, BORDER, TEXT, DIM, CONSOLE, WIDGET_SS
+from napari_app.theme import BG, BORDER, BORDER_STRONG, TEXT, DIM, ACCENT, CONSOLE, WIDGET_SS
 
 
 class LogWindow(QWidget):
@@ -23,31 +23,41 @@ class LogWindow(QWidget):
         L.setSpacing(0)
 
         # ── Header bar ────────────────────────────────────────────────────────
+        from PyQt6.QtWidgets import QFrame
         hdr = QWidget()
-        hdr.setFixedHeight(32)
+        hdr.setFixedHeight(36)
         hdr.setStyleSheet(f"background:{BG}; border-bottom:1px solid {BORDER};")
         hdr_row = QHBoxLayout()
-        hdr_row.setContentsMargins(12, 0, 8, 0)
-        hdr_row.setSpacing(8)
+        hdr_row.setContentsMargins(13, 0, 10, 0)
+        hdr_row.setSpacing(9)
+
+        tick = QFrame()
+        tick.setFixedSize(3, 12)
+        tick.setStyleSheet(f"background:{ACCENT}; border-radius:2px;")
 
         lbl = QLabel("LOG")
         lbl.setStyleSheet(
-            f"color:{DIM}; font-size:10px; letter-spacing:1.5px; background:transparent;")
+            f"color:{DIM}; font-size:10px; font-weight:700; letter-spacing:1.4px; background:transparent;")
+
+        _btn_ss = (
+            f"QPushButton {{ color:{DIM}; background:transparent;"
+            f" border:1px solid {BORDER_STRONG}; border-radius:5px;"
+            f" padding:0 10px; font-size:11px; font-weight:600; }}"
+            f"QPushButton:hover {{ color:{TEXT}; border-color:{ACCENT}; }}"
+            f"QPushButton:checked {{ color:{TEXT}; border-color:{ACCENT}; }}")
 
         wrap_btn = QPushButton("Wrap")
         wrap_btn.setCheckable(True)
         wrap_btn.setChecked(True)
-        wrap_btn.setFixedHeight(22)
-        wrap_btn.setStyleSheet(
-            f"color:{DIM}; background:transparent;"
-            f"border:1px solid {BORDER}; border-radius:3px;"
-            f"padding:0 8px; font-size:11px;")
+        wrap_btn.setFixedHeight(24)
+        wrap_btn.setStyleSheet(_btn_ss)
         wrap_btn.toggled.connect(self._set_wrap)
 
         clear_btn = QPushButton("Clear")
-        clear_btn.setFixedHeight(22)
-        clear_btn.setStyleSheet(wrap_btn.styleSheet())
+        clear_btn.setFixedHeight(24)
+        clear_btn.setStyleSheet(_btn_ss)
 
+        hdr_row.addWidget(tick)
         hdr_row.addWidget(lbl)
         hdr_row.addStretch()
         hdr_row.addWidget(wrap_btn)

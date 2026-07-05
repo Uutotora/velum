@@ -218,7 +218,7 @@ class TrainWidget(QWidget):
         data_card.addLayout(_folder_row(self, self.mask_dir, str(TRAIN_MASK_DIR)))
 
         use_layers_btn = QPushButton("  Use active napari layers as training data")
-        use_layers_btn.setFixedHeight(30)
+        use_layers_btn.setFixedHeight(32)
         use_layers_btn.setStyleSheet(BTN_SECONDARY)
         use_layers_btn.setIcon(icons.icon("download", LABEL, 14))
         use_layers_btn.setToolTip(

@@ -168,7 +168,7 @@ class AnnotateWidget(QWidget):
 
         row = QHBoxLayout(); row.setSpacing(7)
         self._undo_btn = QPushButton("  Undo last")
-        self._undo_btn.setFixedHeight(30)
+        self._undo_btn.setFixedHeight(32)
         self._undo_btn.setStyleSheet(BTN_SECONDARY)
         self._undo_btn.setIcon(icons.icon("undo", LABEL, 14))
         self._undo_btn.setEnabled(False)
@@ -176,7 +176,7 @@ class AnnotateWidget(QWidget):
         row.addWidget(self._undo_btn)
 
         self._clear_btn = QPushButton("Clear all")
-        self._clear_btn.setFixedHeight(30)
+        self._clear_btn.setFixedHeight(32)
         self._clear_btn.setStyleSheet(BTN_SECONDARY)
         self._clear_btn.setEnabled(False)
         self._clear_btn.clicked.connect(self._clear_all)
@@ -184,7 +184,7 @@ class AnnotateWidget(QWidget):
         ctl_card.addLayout(row)
 
         self._stop_btn = QPushButton("End session")
-        self._stop_btn.setFixedHeight(30)
+        self._stop_btn.setFixedHeight(32)
         self._stop_btn.setStyleSheet(BTN_DANGER)
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)

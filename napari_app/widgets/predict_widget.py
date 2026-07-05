@@ -189,7 +189,7 @@ class PredictWidget(QWidget):
         # A single "Get images" menu button — download once, then use the switcher.
         from PyQt6.QtWidgets import QMenu
         self._sample_btn = QPushButton("  Get images")
-        self._sample_btn.setFixedHeight(30)
+        self._sample_btn.setFixedHeight(32)
         self._sample_btn.setStyleSheet(BTN_SECONDARY)
         self._sample_btn.setIcon(icons.icon("download", LABEL, 14))
         _menu = QMenu(self._sample_btn)
@@ -232,7 +232,7 @@ class PredictWidget(QWidget):
         L.addWidget(img_card)
 
         # ── Run (prominent, outside cards — the main action) ──────────────────
-        L.addSpacing(20)
+        L.addSpacing(14)
 
         self.run_btn = QPushButton("  Run Prediction")
         self.run_btn.setFixedHeight(44)
