@@ -91,9 +91,10 @@ def icon_size(px: int = 18) -> QSize:
 # ── Brand mark ──────────────────────────────────────────────────────────────
 _BRAND_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none">'
-    '<circle cx="20" cy="20" r="17" stroke="#4d8fff" stroke-width="2.4"/>'
-    '<circle cx="20" cy="20" r="7.5" stroke="#4d8fff" stroke-width="2.4"/>'
-    '<circle cx="20" cy="20" r="2.7" fill="#22b47f"/></svg>'
+    '<rect x="2.5" y="2.5" width="35" height="35" rx="11" fill="#4d8fff"/>'
+    '<polygon points="30,20 25,28.66 15,28.66 10,20 15,11.34 25,11.34" '
+    'fill="none" stroke="#ffffff" stroke-width="2.1" stroke-linejoin="round"/>'
+    '<circle cx="20" cy="20" r="3.1" fill="#2fe0a0"/></svg>'
 )
 
 

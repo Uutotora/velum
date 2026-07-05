@@ -6,7 +6,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 import napari
-from PyQt6.QtCore import QLocale
+from PyQt6.QtCore import QLocale, Qt
 from napari_app.widgets.train_widget import TrainWidget
 from napari_app.widgets.predict_widget import PredictWidget
 from napari_app.widgets.assistant_widget import AssistantWidget
@@ -47,7 +47,13 @@ def main():
     shell.setStyleSheet(WIDGET_SS)
 
     dock = viewer.window.add_dock_widget(shell, name="CellSeg1", area="right")
-    dock.setMinimumWidth(400)
+    dock.setMinimumWidth(340)
+    # Open the dock comfortably wide so content never squeezes behind the rail.
+    try:
+        win = viewer.window._qt_window
+        win.resizeDocks([dock], [500], Qt.Orientation.Horizontal)
+    except Exception:
+        pass
 
     napari.run()
 

@@ -221,7 +221,7 @@ class AssistantWidget(QWidget):
 
         scroll.setWidget(inner)
         outer.addWidget(scroll)
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(260)
 
         self._token_signal.connect(self._append_token)
         self._chat_done.connect(self._on_chat_done)

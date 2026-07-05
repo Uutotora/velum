@@ -204,7 +204,7 @@ class AnnotateWidget(QWidget):
 
         scroll.setWidget(inner)
         outer.addWidget(scroll)
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(260)
 
         self._ready_signal.connect(self._on_ready)
         self._result_signal.connect(self._on_result)

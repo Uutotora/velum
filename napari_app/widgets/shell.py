@@ -2,11 +2,12 @@
 and a status footer, replacing the old top tab bar.
 
 Behaviour (all presentational):
-- Collapsed to a slim icon rail by default.
-- Hovering the rail expands it **over** the content (no reflow) to reveal
+- Collapsed to a slim ICON-ONLY rail by default — labels are hidden, not
+  clipped, so it always looks clean.
+- Hovering the rail expands it **over** the content (no reflow) and reveals the
   labels; leaving collapses it again.
-- A pin keeps it expanded and switches to push mode, so the content reflows
-  to the narrower width instead of being overlaid.
+- A pin keeps it expanded and switches to push mode, so the content reflows to
+  the narrower width instead of being overlaid.
 - Switching sections cross-fades the panel.
 
 No business logic — the five tab widgets are the same instances as before,
@@ -27,15 +28,15 @@ from napari_app.theme import (
     MONO, R_SM,
 )
 
-RAIL_COLLAPSED = 62
-RAIL_EXPANDED = 202
-INNER_W = 202
+RAIL_COLLAPSED = 56
+RAIL_EXPANDED = 212
+INNER_W = 212
 
 _NAV_SS = f"""
 QToolButton {{
     background: transparent; border: none; border-left: 3px solid transparent;
     color: {LABEL}; font-size: 13px; font-weight: 600; text-align: left;
-    padding: 10px 12px 10px 18px; border-radius: {R_SM}px;
+    padding: 10px 12px 10px 16px; border-radius: {R_SM}px;
 }}
 QToolButton:hover {{ background: {FG}; color: {TEXT}; }}
 QToolButton:checked {{
@@ -56,6 +57,7 @@ class _Rail(QFrame):
         self.setStyleSheet(
             f"#Rail {{ background: {BG_APP}; border-right: 1px solid {BORDER}; }}")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._expanded = False
 
         # Fixed-width inner content; the rail clips it as it animates.
         self.inner = QWidget(self)
@@ -69,22 +71,23 @@ class _Rail(QFrame):
         brand.setFixedHeight(58)
         brand.setStyleSheet(f"border-bottom: 1px solid {BORDER};")
         hb = QHBoxLayout(brand)
-        hb.setContentsMargins(15, 0, 10, 0)
+        hb.setContentsMargins(14, 0, 10, 0)
         hb.setSpacing(11)
         logo = QLabel()
-        logo.setPixmap(icons.brand_pixmap(26))
+        logo.setPixmap(icons.brand_pixmap(28))
         logo.setFixedSize(28, 28)
         hb.addWidget(logo)
-        name_box = QVBoxLayout()
-        name_box.setContentsMargins(0, 0, 0, 0)
-        name_box.setSpacing(0)
+        self._brand_box = QWidget()
+        nb = QVBoxLayout(self._brand_box)
+        nb.setContentsMargins(0, 0, 0, 0)
+        nb.setSpacing(0)
         nm = QLabel("CellSeg1")
         nm.setStyleSheet(f"color:{TEXT}; font-size:13.5px; font-weight:700; background:transparent;")
         ver = QLabel("v1.0 · lab")
         ver.setStyleSheet(f"color:{DIM}; font-size:10px; font-family:{MONO}; background:transparent;")
-        name_box.addWidget(nm)
-        name_box.addWidget(ver)
-        hb.addLayout(name_box)
+        nb.addWidget(nm)
+        nb.addWidget(ver)
+        hb.addWidget(self._brand_box)
         hb.addStretch()
         self.pin = QToolButton()
         self.pin.setCheckable(True)
@@ -101,7 +104,7 @@ class _Rail(QFrame):
         # ── nav ──
         nav = QWidget()
         self._nav_l = QVBoxLayout(nav)
-        self._nav_l.setContentsMargins(9, 12, 9, 12)
+        self._nav_l.setContentsMargins(8, 12, 8, 12)
         self._nav_l.setSpacing(3)
         v.addWidget(nav)
         v.addStretch()
@@ -110,7 +113,7 @@ class _Rail(QFrame):
         foot = QWidget()
         foot.setStyleSheet(f"border-top: 1px solid {BORDER};")
         fb = QHBoxLayout(foot)
-        fb.setContentsMargins(19, 12, 12, 12)
+        fb.setContentsMargins(20, 12, 12, 12)
         fb.setSpacing(11)
         self._dot = QLabel()
         self._dot.setFixedSize(9, 9)
@@ -125,31 +128,39 @@ class _Rail(QFrame):
 
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
-        self._buttons: list[tuple[QToolButton, str]] = []
+        self._buttons: list[tuple[QToolButton, str, str]] = []
 
     # nav construction --------------------------------------------------------
     def add_nav(self, icon_name: str, label: str) -> QToolButton:
         b = QToolButton()
-        b.setText("  " + label)
         b.setIcon(icons.icon(icon_name, LABEL))
         b.setIconSize(QSize(18, 18))
         b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         b.setCheckable(True)
         b.setCursor(Qt.CursorShape.PointingHandCursor)
-        b.setFixedWidth(INNER_W - 18)
+        b.setFixedWidth(INNER_W - 16)
         b.setMinimumHeight(40)
         b.setStyleSheet(_NAV_SS)
         b.setToolTip(label)
         self.group.addButton(b)
         self._nav_l.addWidget(b)
-        self._buttons.append((b, icon_name))
+        self._buttons.append((b, icon_name, label))
         return b
 
     def select(self, idx: int):
-        for i, (b, icon_name) in enumerate(self._buttons):
+        for i, (b, icon_name, _label) in enumerate(self._buttons):
             active = i == idx
             b.setChecked(active)
             b.setIcon(icons.icon(icon_name, TEXT if active else LABEL))
+
+    def set_expanded(self, expanded: bool):
+        """Show labels only when expanded — collapsed rail is icons-only."""
+        self._expanded = expanded
+        for b, _icon, label in self._buttons:
+            b.setText(("  " + label) if expanded else "")
+        self._brand_box.setVisible(expanded)
+        self.pin.setVisible(expanded)
+        self._status.setVisible(expanded)
 
     def _sync_pin_icon(self, on: bool):
         self.pin.setIcon(icons.icon("pin", ACCENT if on else DIM))
@@ -204,6 +215,7 @@ class Shell(QWidget):
         self.rail.hoverIn.connect(self._expand)
         self.rail.hoverOut.connect(self._collapse)
 
+        self.rail.set_expanded(False)   # start clean: icons only
         self.rail.select(0)
         self.stack.setCurrentIndex(0)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -218,7 +230,7 @@ class Shell(QWidget):
     # rail expand / collapse --------------------------------------------------
     def _animate_rail(self, to: int):
         anim = QVariantAnimation(self)
-        anim.setDuration(220)
+        anim.setDuration(200)
         anim.setStartValue(self._w)
         anim.setEndValue(to)
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -232,14 +244,17 @@ class Shell(QWidget):
 
     def _expand(self):
         if not self._pinned:
+            self.rail.set_expanded(True)
             self._animate_rail(RAIL_EXPANDED)
 
     def _collapse(self):
         if not self._pinned:
+            self.rail.set_expanded(False)
             self._animate_rail(RAIL_COLLAPSED)
 
     def _toggle_pin(self, checked: bool):
         self._pinned = checked
+        self.rail.set_expanded(checked)
         margin = RAIL_EXPANDED if checked else RAIL_COLLAPSED
         self._lay.setContentsMargins(margin, 0, 0, 0)
         self._animate_rail(margin)

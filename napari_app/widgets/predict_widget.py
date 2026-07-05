@@ -610,7 +610,7 @@ class PredictWidget(QWidget):
         outer.addLayout(_footer)
 
         self.setLayout(outer)
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(260)
 
         self._log_signal.connect(self._append_log)
         self._done_signal.connect(self._show_results)

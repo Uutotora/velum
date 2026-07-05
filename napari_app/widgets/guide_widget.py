@@ -166,4 +166,4 @@ class GuideWidget(QWidget):
         browser.setHtml(_HTML)
         L.addWidget(browser)
         self.setLayout(L)
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(260)
