@@ -86,3 +86,28 @@ def icon(name: str, color: str = TEXT, size: int = 18, stroke: float = 1.6) -> Q
 
 def icon_size(px: int = 18) -> QSize:
     return QSize(px, px)
+
+
+# ── Brand mark ──────────────────────────────────────────────────────────────
+_BRAND_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none">'
+    '<circle cx="20" cy="20" r="17" stroke="#4d8fff" stroke-width="2.4"/>'
+    '<circle cx="20" cy="20" r="7.5" stroke="#4d8fff" stroke-width="2.4"/>'
+    '<circle cx="20" cy="20" r="2.7" fill="#22b47f"/></svg>'
+)
+
+
+@lru_cache(maxsize=8)
+def brand_pixmap(size: int = 26, dpr: float = 2.0) -> QPixmap:
+    """The CellSeg1 concentric-cell logo mark."""
+    px = QPixmap(int(size * dpr), int(size * dpr))
+    px.setDevicePixelRatio(dpr)
+    px.fill(Qt.GlobalColor.transparent)
+    if not _HAVE_SVG:
+        return px
+    r = QSvgRenderer(QByteArray(_BRAND_SVG.encode("utf-8")))
+    p = QPainter(px)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    r.render(p, QRectF(0, 0, size, size))
+    p.end()
+    return px

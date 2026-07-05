@@ -6,38 +6,14 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 import napari
-from PyQt6.QtWidgets import QTabWidget, QWidget, QVBoxLayout
 from PyQt6.QtCore import QLocale
 from napari_app.widgets.train_widget import TrainWidget
 from napari_app.widgets.predict_widget import PredictWidget
 from napari_app.widgets.assistant_widget import AssistantWidget
 from napari_app.widgets.annotate_widget import AnnotateWidget
 from napari_app.widgets.guide_widget import GuideWidget
-
-TAB_SS = """
-QTabWidget::pane {
-    border: none;
-    background: #14192a;
-}
-QTabBar::tab {
-    background: #0e1220;
-    color: #5e6d88;
-    padding: 8px 24px;
-    border: none;
-    border-bottom: 2px solid transparent;
-    font-size: 12px;
-    font-weight: 500;
-}
-QTabBar::tab:selected {
-    color: #dce4f0;
-    border-bottom: 2px solid #4d8fff;
-    background: #14192a;
-}
-QTabBar::tab:hover:!selected {
-    color: #8a9bbe;
-    background: #181f30;
-}
-"""
+from napari_app.widgets.shell import Shell
+from napari_app.theme import WIDGET_SS
 
 
 def main():
@@ -53,22 +29,25 @@ def main():
     if app is not None:
         install_wheel_guard(app)
 
-    tabs = QTabWidget()
-    tabs.setStyleSheet(TAB_SS)
-
     predict_widget   = PredictWidget(viewer)
     train_widget     = TrainWidget(viewer)
     assistant_widget = AssistantWidget(viewer, predict_widget)
     annotate_widget  = AnnotateWidget(viewer, predict_widget)
+    guide_widget     = GuideWidget(viewer)
 
-    tabs.addTab(predict_widget,   "Predict")
-    tabs.addTab(annotate_widget,  "Annotate")
-    tabs.addTab(assistant_widget, "Assistant")
-    tabs.addTab(train_widget,     "Train")
-    tabs.addTab(GuideWidget(viewer), "Guide")
+    # Left icon-rail shell (brand header + status footer). Same widgets, same
+    # wiring — only the navigation chrome changed from top tabs to a rail.
+    shell = Shell([
+        ("predict",   "Predict",   predict_widget),
+        ("annotate",  "Annotate",  annotate_widget),
+        ("assistant", "Assistant", assistant_widget),
+        ("train",     "Train",     train_widget),
+        ("guide",     "Guide",     guide_widget),
+    ])
+    shell.setStyleSheet(WIDGET_SS)
 
-    dock = viewer.window.add_dock_widget(tabs, name="CellSeg1", area="right")
-    dock.setMinimumWidth(340)
+    dock = viewer.window.add_dock_widget(shell, name="CellSeg1", area="right")
+    dock.setMinimumWidth(400)
 
     napari.run()
 
