@@ -98,6 +98,25 @@ def animate_width(widget, start: int, end: int, duration: int = 240):
         return None
 
 
+def pulse(widget, duration: int = 1700, lo: float = 0.4, hi: float = 1.0):
+    """Gently pulse a widget's opacity forever — an ambient 'live' indicator."""
+    try:
+        eff = QGraphicsOpacityEffect(widget)
+        widget.setGraphicsEffect(eff)
+        anim = QPropertyAnimation(eff, b"opacity", widget)
+        anim.setDuration(duration)
+        anim.setStartValue(hi)
+        anim.setKeyValueAt(0.5, lo)
+        anim.setEndValue(hi)
+        anim.setLoopCount(-1)
+        anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        anim.start()
+        widget._pulse_anim = anim
+        return anim
+    except Exception:
+        return None
+
+
 class HoverElevate(QObject):
     """Event filter: lift a card's shadow on hover for a tactile feel."""
 

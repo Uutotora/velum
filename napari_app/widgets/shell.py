@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from napari_app import icons
-from napari_app.motion import fade_in
+from napari_app.motion import fade_in, pulse
 from napari_app.theme import (
     BG_APP, BG, FG, BORDER, TEXT, LABEL, DIM, ACCENT, ACCENT_SOFT, SUCCESS,
     MONO, R_SM,
@@ -115,6 +115,7 @@ class _Rail(QFrame):
         self._dot = QLabel()
         self._dot.setFixedSize(9, 9)
         self._dot.setStyleSheet(f"background:{SUCCESS}; border-radius:4px;")
+        pulse(self._dot)
         self._status = QLabel(_device_label())
         self._status.setStyleSheet(f"color:{LABEL}; font-size:11.5px; font-family:{MONO}; background:transparent;")
         fb.addWidget(self._dot)
