@@ -23,11 +23,12 @@ jobs:
           cache: pip
 
       - name: Install test dependencies
-        # The pure-logic test suite needs only these — no torch / napari,
-        # so CI stays fast (< 1 min). Heavier GPU/GUI tests run separately.
+        # Installs the `test` dependency-group declared in pyproject.toml —
+        # the pure-logic deps only (no torch / napari), so CI stays fast
+        # (< 1 min). Heavier GPU/GUI tests run separately.
         run: |
           python -m pip install --upgrade pip
-          pip install numpy scipy scikit-image opencv-python-headless pytest
+          pip install --group test
 
       - name: Run tests
         run: pytest -q

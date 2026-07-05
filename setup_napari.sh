@@ -27,7 +27,8 @@ fi
 
 echo "==> [2/3] Installing Python dependencies (this can take a few minutes)…"
 $CONDA run -n cellseg1 python -m pip install --upgrade pip
-$CONDA run -n cellseg1 python -m pip install -r requirements-napari.txt
+# Editable install from pyproject.toml (single source of truth for deps).
+$CONDA run -n cellseg1 python -m pip install -e "$DIR"
 
 echo "==> [3/3] Downloading SAM vit_h backbone weights (~2.5 GB, one time)…"
 BACKBONE_DIR="$DIR/streamlit_storage/sam_backbone"

@@ -55,14 +55,20 @@ checkpoints/ streamlit_storage/   bundled weights + sample data (misnamed
 
 ## Environment & how to run things
 
-There is **no** dependency manager wired up yet (a backlog item). Use the
-existing conda env:
+Packaging is a real `pyproject.toml` (setuptools): `pip install -e .` installs
+the app + a `cellseg1` launcher + a `napari.manifest` plugin entry point. Runtime
+deps live in `[project.dependencies]`; exact known-good pins are in
+`requirements.txt` (the lock). The pure-logic **test** deps are a PEP 735
+dependency-group (`pip install --group test` — no torch/napari). Use the existing
+conda env for actual work:
 
 - **Python with all deps:** `/opt/homebrew/Caskroom/miniforge/base/envs/cellseg1/bin/python`
   (Python 3.11; numpy/torch/skimage/cv2/napari/tifffile/pytest present).
 - **Run the tests:** `<that python> -m pytest`  (fast, < 1 s, no GPU).
-- **Run the app:** `bash run_napari.sh`  (needs a real display + SAM weights;
-  **cannot be driven headless** in CI or an agent sandbox).
+- **Install from source:** `pip install -e .`  (or `bash setup_napari.sh` to
+  also create the env + fetch SAM weights).
+- **Run the app:** `bash run_napari.sh` or `cellseg1`  (needs a real display +
+  SAM weights; **cannot be driven headless** in CI or an agent sandbox).
 
 ### Verifying changes without a display
 
