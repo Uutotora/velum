@@ -102,7 +102,7 @@ QLineEdit {{
     color: {TEXT};
     selection-background-color: {ACCENT};
     selection-color: #ffffff;
-    min-height: 28px;
+    min-height: 30px;
 }}
 QLineEdit:hover {{ border-color: {BORDER_STRONG}; }}
 QLineEdit:focus {{ border-color: {ACCENT}; }}
@@ -120,15 +120,16 @@ QComboBox:hover {{ border-color: {BORDER_STRONG}; }}
 QComboBox:focus, QComboBox:on {{ border-color: {ACCENT}; }}
 QComboBox::drop-down {{
     subcontrol-origin: padding; subcontrol-position: center right;
-    border: none; width: 24px;
+    border: none; width: 26px;
 }}
 QComboBox::down-arrow {{
-    image: none;
+    image: none; width: 0; height: 0;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
     border-top: 5px solid {LABEL};
-    margin-right: 9px;
+    margin-right: 11px;
 }}
+QComboBox::down-arrow:hover {{ border-top-color: {TEXT}; }}
 QComboBox QAbstractItemView {{
     background: {CARD_HEADER}; color: {TEXT};
     border: 1px solid {BORDER_STRONG};
@@ -151,7 +152,7 @@ QSpinBox, QDoubleSpinBox {{
     border-radius: {R_SM}px;
     padding: 6px 10px;
     color: {TEXT};
-    min-height: 28px;
+    min-height: 30px;
     font-family: {MONO};
     font-size: 12px;
 }}
@@ -217,6 +218,8 @@ QMenu {{
 }}
 QMenu::item {{ padding: 6px 14px; border-radius: 5px; }}
 QMenu::item:selected {{ background: {ACCENT}; color: #ffffff; }}
+
+QPushButton::menu-indicator {{ image: none; width: 0; height: 0; }}
 
 QToolButton {{
     background: transparent; border: none; color: {LABEL};

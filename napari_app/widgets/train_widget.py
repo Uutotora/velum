@@ -340,13 +340,14 @@ class TrainWidget(QWidget):
         self.progress_bar.setFixedHeight(3); self.progress_bar.setRange(0, 100)
         L.addWidget(self.progress_bar)
 
+        from napari_app.theme import MONO as _MONO
         status_row = QHBoxLayout(); status_row.setContentsMargins(0, 4, 0, 0)
-        self.epoch_lbl = QLabel("—")
+        self.epoch_lbl = QLabel("")
         self.epoch_lbl.setStyleSheet(
-            f"color: {LABEL}; font-size: 11px; font-family: 'Menlo','SF Mono',monospace;")
-        self.loss_lbl = QLabel("—")
+            f"color: {LABEL}; font-size: 11px; font-family: {_MONO};")
+        self.loss_lbl = QLabel("")
         self.loss_lbl.setStyleSheet(
-            f"color: {LABEL}; font-size: 11px; font-family: 'Menlo','SF Mono',monospace;")
+            f"color: {LABEL}; font-size: 11px; font-family: {_MONO};")
         status_row.addWidget(self.epoch_lbl)
         status_row.addStretch()
         status_row.addWidget(self.loss_lbl)

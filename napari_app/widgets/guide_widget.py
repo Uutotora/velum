@@ -12,12 +12,13 @@ from PyQt6.QtCore import Qt
 
 from napari_app.theme import (
     BG, FG, BORDER, BORDER_STRONG, CARD_HEADER, TEXT, DIM, LABEL, ACCENT,
-    SUCCESS, CONSOLE, MONO, WIDGET_SS,
+    SUCCESS, CONSOLE, MONO, SANS, WIDGET_SS,
 )
 
 
 _HTML = f"""
 <style>
+  body, p, li, ol, ul, h1, h2, h3 {{ font-family:{SANS}; }}
   h1 {{ color:{TEXT}; font-size:22px; font-weight:800; letter-spacing:-0.5px; margin:2px 0 2px 0; }}
   h2 {{ color:{ACCENT}; font-size:13px; font-weight:700; letter-spacing:1px; text-transform:uppercase;
         margin:22px 0 8px 0; border-bottom:1px solid {BORDER}; padding-bottom:5px; }}
