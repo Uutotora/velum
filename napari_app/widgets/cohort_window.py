@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from napari_app.theme import (
-    BG, FG, BORDER, TEXT, DIM, LABEL, ACCENT, SUCCESS, CONSOLE,
+    BG, FG, BORDER, TEXT, DIM, LABEL, ACCENT, SUCCESS, CONSOLE, MONO,
     WIDGET_SS, BTN_SECONDARY, BTN_PRIMARY,
 )
 from napari_app.widgets.measurements_window import Histogram, _TABLE_SS
@@ -49,7 +49,7 @@ class CohortWindow(QWidget):
 
         self._pop = QLabel("")
         self._pop.setStyleSheet(
-            f"color:{LABEL}; font-size:11px; font-family:'Menlo','SF Mono',monospace;"
+            f"color:{LABEL}; font-size:11px; font-family:{MONO};"
             f"background:transparent;")
         self._pop.setWordWrap(True)
         root.addWidget(self._pop)
@@ -79,7 +79,7 @@ class CohortWindow(QWidget):
         right.addWidget(self._hist)
         self._feat_stats = QLabel("")
         self._feat_stats.setStyleSheet(
-            f"color:{DIM}; font-size:11px; font-family:'Menlo','SF Mono',monospace;"
+            f"color:{DIM}; font-size:11px; font-family:{MONO};"
             f"background:transparent;")
         self._feat_stats.setWordWrap(True)
         right.addWidget(self._feat_stats)

@@ -19,8 +19,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
 from napari_app.theme import (
-    BG, FG, BORDER, TEXT, DIM, LABEL, ACCENT, SUCCESS, CONSOLE, WIDGET_SS,
-    BTN_SECONDARY, BTN_PRIMARY,
+    BG, FG, BORDER, BORDER_STRONG, CARD_HEADER, TEXT, DIM, LABEL, ACCENT,
+    ACCENT_SOFT, SUCCESS, CONSOLE, MONO, WIDGET_SS, BTN_SECONDARY, BTN_PRIMARY,
 )
 
 _DLG = QFileDialog.Option.DontUseNativeDialog
@@ -108,7 +108,7 @@ class MeasurementsWindow(QWidget):
 
         self._subline = QLabel("")
         self._subline.setStyleSheet(
-            f"color:{LABEL}; font-size:11px; font-family:'Menlo','SF Mono',monospace;"
+            f"color:{LABEL}; font-size:11px; font-family:{MONO};"
             f"background:transparent;")
         self._subline.setWordWrap(True)
         root.addWidget(self._subline)
@@ -140,7 +140,7 @@ class MeasurementsWindow(QWidget):
 
         self._stat_lbl = QLabel("")
         self._stat_lbl.setStyleSheet(
-            f"color:{DIM}; font-size:11px; font-family:'Menlo','SF Mono',monospace;"
+            f"color:{DIM}; font-size:11px; font-family:{MONO};"
             f"background:transparent;")
         self._stat_lbl.setWordWrap(True)
         right.addWidget(self._stat_lbl)
@@ -281,26 +281,27 @@ class MeasurementsWindow(QWidget):
 _TABLE_SS = f"""
 QTableWidget {{
     background: {CONSOLE};
-    alternate-background-color: #12182a;
+    alternate-background-color: #0f131b;
     color: {TEXT};
     gridline-color: {BORDER};
     border: 1px solid {BORDER};
-    border-radius: 6px;
-    font-family: 'Menlo','SF Mono',monospace;
+    border-radius: 8px;
+    font-family: {MONO};
     font-size: 11px;
 }}
-QTableWidget::item:selected {{ background: rgba(77,143,255,0.28); color: {TEXT}; }}
+QTableWidget::item:selected {{ background: {ACCENT_SOFT}; color: {TEXT}; }}
 QHeaderView::section {{
-    background: {FG};
+    background: {CARD_HEADER};
     color: {LABEL};
-    padding: 4px 6px;
+    padding: 5px 7px;
     border: none;
     border-right: 1px solid {BORDER};
     border-bottom: 1px solid {BORDER};
-    font-weight: 600;
+    font-weight: 700;
     font-size: 10px;
+    letter-spacing: 0.4px;
 }}
-QTableCornerButton::section {{ background: {FG}; border: none; }}
+QTableCornerButton::section {{ background: {CARD_HEADER}; border: none; }}
 """
 
 

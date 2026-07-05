@@ -10,22 +10,25 @@ from __future__ import annotations
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextBrowser
 from PyQt6.QtCore import Qt
 
-from napari_app.theme import BG, FG, BORDER, TEXT, DIM, LABEL, ACCENT, SUCCESS, CONSOLE, WIDGET_SS
+from napari_app.theme import (
+    BG, FG, BORDER, BORDER_STRONG, CARD_HEADER, TEXT, DIM, LABEL, ACCENT,
+    SUCCESS, CONSOLE, MONO, WIDGET_SS,
+)
 
 
 _HTML = f"""
 <style>
-  h1 {{ color:{TEXT}; font-size:19px; margin:2px 0 2px 0; }}
-  h2 {{ color:{ACCENT}; font-size:14px; margin:18px 0 6px 0;
-        border-bottom:1px solid {BORDER}; padding-bottom:3px; }}
+  h1 {{ color:{TEXT}; font-size:22px; font-weight:800; letter-spacing:-0.5px; margin:2px 0 2px 0; }}
+  h2 {{ color:{ACCENT}; font-size:13px; font-weight:700; letter-spacing:1px; text-transform:uppercase;
+        margin:22px 0 8px 0; border-bottom:1px solid {BORDER}; padding-bottom:5px; }}
   h3 {{ color:{TEXT}; font-size:12.5px; margin:12px 0 3px 0; }}
-  p, li {{ color:{LABEL}; font-size:12px; line-height:1.5; }}
+  p, li {{ color:{LABEL}; font-size:12.5px; line-height:1.6; }}
   b {{ color:{TEXT}; }}
-  code {{ background:{CONSOLE}; color:{SUCCESS}; padding:1px 5px;
-          border-radius:3px; font-family:'Menlo','SF Mono',monospace; font-size:11px; }}
-  .kbd {{ background:{FG}; color:{TEXT}; border:1px solid {BORDER};
-          border-radius:4px; padding:1px 6px; font-family:'Menlo',monospace; font-size:11px; }}
-  .lead {{ color:{DIM}; font-size:12px; }}
+  code {{ background:{CONSOLE}; color:{SUCCESS}; padding:1px 6px;
+          border-radius:4px; font-family:{MONO}; font-size:11px; }}
+  .kbd {{ background:{CARD_HEADER}; color:{TEXT}; border:1px solid {BORDER_STRONG};
+          border-bottom-width:2px; border-radius:5px; padding:1px 7px; font-family:{MONO}; font-size:11px; }}
+  .lead {{ color:{DIM}; font-size:12.5px; line-height:1.6; }}
   .tip {{ color:{SUCCESS}; }}
 </style>
 

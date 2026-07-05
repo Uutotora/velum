@@ -24,6 +24,7 @@ from napari_app.widgets.common import (
     section_header, divider as _divider, param_row as _param_row,
     CollapsibleSection, SectionCard, CollapsibleCard,
 )
+from napari_app import icons
 
 TRAIN_IMAGE_DIR  = STORAGE_DIR / "train_images"
 TRAIN_MASK_DIR   = STORAGE_DIR / "train_masks"
@@ -178,7 +179,7 @@ class TrainWidget(QWidget):
         L = QVBoxLayout(); L.setSpacing(0); L.setContentsMargins(12, 8, 12, 16)
 
         # ── Presets card ──────────────────────────────────────────────────────
-        presets_card = SectionCard("Presets")
+        presets_card = SectionCard("Presets", icon="spark")
 
         row_pre = QHBoxLayout(); row_pre.setSpacing(6)
         self._preset_group = QButtonGroup(self); self._preset_group.setExclusive(True)
@@ -206,7 +207,7 @@ class TrainWidget(QWidget):
         TRAIN_MASK_DIR.mkdir(parents=True, exist_ok=True)
         LORA_OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-        data_card = SectionCard("Training data")
+        data_card = SectionCard("Training data", icon="folder")
 
         data_card.addWidget(_field_label("Images folder"))
         self.image_dir = QLineEdit(str(TRAIN_IMAGE_DIR))
@@ -216,9 +217,10 @@ class TrainWidget(QWidget):
         self.mask_dir = QLineEdit(str(TRAIN_MASK_DIR))
         data_card.addLayout(_folder_row(self, self.mask_dir, str(TRAIN_MASK_DIR)))
 
-        use_layers_btn = QPushButton("⬇  Use active napari layers as training data")
+        use_layers_btn = QPushButton("  Use active napari layers as training data")
         use_layers_btn.setFixedHeight(30)
         use_layers_btn.setStyleSheet(BTN_SECONDARY)
+        use_layers_btn.setIcon(icons.icon("download", LABEL, 14))
         use_layers_btn.setToolTip(
             "Exports the Image + Labels layers currently open in napari\n"
             "into the training folders above. Use napari's label brush\n"
@@ -241,7 +243,7 @@ class TrainWidget(QWidget):
         L.addWidget(data_card)
 
         # ── Model settings (collapsible card) ─────────────────────────────────
-        _model_card = CollapsibleCard("Model settings", collapsed=True)
+        _model_card = CollapsibleCard("Model settings", collapsed=True, icon="settings")
 
         self.vit_name = QComboBox()
         self.vit_name.addItems(["vit_h", "vit_l", "vit_b"])
@@ -264,7 +266,7 @@ class TrainWidget(QWidget):
         L.addWidget(_model_card)
 
         # ── Training parameters card ──────────────────────────────────────────
-        params_card = SectionCard("Training parameters")
+        params_card = SectionCard("Training parameters", icon="settings")
 
         self.resize_size = QComboBox()
         for v in ["256", "512", "768", "1024"]:
@@ -314,9 +316,10 @@ class TrainWidget(QWidget):
         L.addSpacing(14)
 
         btn_row = QHBoxLayout(); btn_row.setSpacing(8)
-        self.start_btn = QPushButton("▶   Start Training")
+        self.start_btn = QPushButton("  Start Training")
         self.start_btn.setFixedHeight(44)
         self.start_btn.setStyleSheet(BTN_PRIMARY)
+        self.start_btn.setIcon(icons.icon("run", "#ffffff", 16))
         self.start_btn.setToolTip("Ctrl+T")
         self.start_btn.clicked.connect(self._start_training)
         btn_row.addWidget(self.start_btn)
@@ -353,7 +356,7 @@ class TrainWidget(QWidget):
         L.addWidget(self.loss_chart)
 
         # ── Training history card ─────────────────────────────────────────────
-        hist_card = SectionCard("Training history")
+        hist_card = SectionCard("Training history", icon="log")
         self.history_box = QTextEdit()
         self.history_box.setReadOnly(True)
         self.history_box.setFixedHeight(96)
@@ -369,7 +372,8 @@ class TrainWidget(QWidget):
         outer.addWidget(_divider())
         _footer = QHBoxLayout()
         _footer.setContentsMargins(16, 4, 16, 6)
-        _log_btn = QPushButton("Log ↗")
+        _log_btn = QPushButton("  Log")
+        _log_btn.setIcon(icons.icon("log", DIM, 13))
         _log_btn.setStyleSheet(
             f"color: {DIM}; background: transparent; border: none; font-size: 11px;")
         _log_btn.setToolTip("Open the floating log window")
