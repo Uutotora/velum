@@ -76,12 +76,13 @@ class ChangeCard(QFrame):
             c.setWordWrap(True)
             L.addWidget(c)
 
-            btns = QHBoxLayout(); btns.setSpacing(6)
-            a = QPushButton("Apply"); a.setFixedHeight(28); a.setStyleSheet(BTN_SECONDARY)
+            btns = QHBoxLayout(); btns.setSpacing(7); btns.setContentsMargins(0, 3, 0, 0)
+            a = QPushButton("Apply"); a.setFixedHeight(34); a.setStyleSheet(BTN_SECONDARY)
             a.clicked.connect(lambda: on_apply(changes))
             btns.addWidget(a)
-            r = QPushButton(action or "Apply & re-run")
-            r.setFixedHeight(28); r.setStyleSheet(BTN_PRIMARY)
+            # Escape '&' so Qt renders it literally (not as a mnemonic).
+            r = QPushButton((action or "Apply & re-run").replace("&", "&&"))
+            r.setFixedHeight(34); r.setStyleSheet(BTN_PRIMARY)
             r.clicked.connect(lambda: on_apply_rerun(changes))
             btns.addWidget(r); btns.addStretch()
             L.addLayout(btns)
@@ -112,28 +113,34 @@ class AssistantWidget(QWidget):
         inner = QWidget()
         L = QVBoxLayout(inner); L.setSpacing(0); L.setContentsMargins(14, 8, 14, 16)
 
-        # ── Diagnostics card ───────────────────────────────────────────────────
-        diag_card = SectionCard("Diagnostics  ·  no model needed", icon="diagnose")
-        intro = QLabel(
-            "Works fully offline — no AI model required. It analyses your image "
-            "and mask directly and proposes concrete, one-click tuning fixes. "
-            "(The chat below is separate and optional.)")
-        intro.setStyleSheet(f"color:{LABEL}; font-size:12px; background:transparent;")
-        intro.setWordWrap(True)
-        diag_card.addWidget(intro)
-        diag_btn = QPushButton("  Diagnose current result")
-        diag_btn.setFixedHeight(38); diag_btn.setStyleSheet(BTN_PRIMARY)
-        diag_btn.setIcon(icons.icon("diagnose", "#ffffff", 15))
-        diag_btn.clicked.connect(self._run_diagnose)
-        diag_card.addWidget(diag_btn)
-        L.addWidget(diag_card)
+        # ── Chat (the hero surface, on top) ────────────────────────────────────
+        chat_card = SectionCard("Assistant", icon="assistant")
+        self._chat = ChatView()
+        self._chat.setMinimumHeight(360)
+        chat_card.addWidget(self._chat)
 
-        self._findings_box = QVBoxLayout()
-        self._findings_box.setSpacing(8); self._findings_box.setContentsMargins(0, 8, 0, 0)
-        L.addLayout(self._findings_box)
+        in_row = QHBoxLayout(); in_row.setSpacing(7); in_row.setContentsMargins(0, 9, 0, 0)
+        self._diag_btn = QPushButton()
+        self._diag_btn.setFixedSize(36, 36); self._diag_btn.setStyleSheet(BTN_SECONDARY)
+        self._diag_btn.setIcon(icons.icon("diagnose", LABEL, 16))
+        self._diag_btn.setToolTip("Diagnose the current result — offline, no model needed")
+        self._diag_btn.clicked.connect(self._run_diagnose)
+        in_row.addWidget(self._diag_btn)
+        self._input = QLineEdit()
+        self._input.setPlaceholderText("Ask about your segmentation…")
+        self._input.returnPressed.connect(self._send)
+        in_row.addWidget(self._input, stretch=1)
+        self._send_btn = QPushButton()
+        self._send_btn.setFixedSize(36, 36); self._send_btn.setStyleSheet(BTN_PRIMARY)
+        self._send_btn.setIcon(icons.icon("send", "#ffffff", 15))
+        self._send_btn.setToolTip("Send")
+        self._send_btn.clicked.connect(self._send)
+        in_row.addWidget(self._send_btn)
+        chat_card.addLayout(in_row)
+        L.addWidget(chat_card)
 
-        # ── Local model card ───────────────────────────────────────────────────
-        model_card = SectionCard("Local model", icon="spark")
+        # ── Local model (optional — collapsed settings) ────────────────────────
+        model_card = CollapsibleCard("Local model  ·  optional", collapsed=True, icon="spark")
         status_row = QHBoxLayout(); status_row.setSpacing(8)
         self._status_lbl = QLabel("checking…")
         self._status_lbl.setStyleSheet(f"color:{DIM}; font-size:11px; background:transparent;")
@@ -193,35 +200,6 @@ class AssistantWidget(QWidget):
         model_card.addWidget(self._model_status)
         L.addWidget(model_card)
 
-        # ── Chat card ──────────────────────────────────────────────────────────
-        chat_card = SectionCard("Ask the assistant  ·  optional local LLM", icon="assistant")
-        chat_intro = QLabel(
-            "Natural-language Q&A. Needs a local model (above). Without one, "
-            "questions are answered by the offline diagnostic engine.")
-        chat_intro.setStyleSheet(f"color:{DIM}; font-size:10.5px; background:transparent;")
-        chat_intro.setWordWrap(True)
-        chat_card.addWidget(chat_intro)
-        self._chat = ChatView()
-        self._chat.setMinimumHeight(300)
-        chat_card.addWidget(self._chat)
-
-        in_row = QHBoxLayout(); in_row.setSpacing(7)
-        self._input = QLineEdit()
-        self._input.setPlaceholderText("e.g. why are my cells over-merged?")
-        self._input.returnPressed.connect(self._send)
-        in_row.addWidget(self._input)
-        self._send_btn = QPushButton("  Send")
-        self._send_btn.setFixedHeight(32); self._send_btn.setStyleSheet(BTN_PRIMARY)
-        self._send_btn.setIcon(icons.icon("send", "#ffffff", 14))
-        self._send_btn.clicked.connect(self._send)
-        in_row.addWidget(self._send_btn)
-        chat_card.addLayout(in_row)
-
-        self._chat_actions = QVBoxLayout()
-        self._chat_actions.setSpacing(6); self._chat_actions.setContentsMargins(0, 6, 0, 0)
-        chat_card.addLayout(self._chat_actions)
-        L.addWidget(chat_card)
-
         L.addStretch()
         foot = QLabel("CellSeg1 · everything runs locally · nothing leaves your machine")
         foot.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -243,20 +221,20 @@ class AssistantWidget(QWidget):
 
     # ── Diagnostics ────────────────────────────────────────────────────────────
 
-    def _clear_findings(self):
-        while self._findings_box.count():
-            w = self._findings_box.takeAt(0).widget()
-            if w is not None:
-                w.deleteLater()
-
     def _run_diagnose(self):
         from napari_app import advisor
         img, mask = self.predict.last_context()
         params = self.predict.current_params()
         diag = advisor.diagnose(img, mask, params)
-        self._clear_findings()
-        for f in diag["findings"]:
-            self._findings_box.addWidget(ChangeCard(
+        # Diagnosis is delivered straight into the chat — one conversation surface.
+        self._chat.system_note("Diagnosis of the current result")
+        findings = diag.get("findings", [])
+        if not findings:
+            self._chat.add_assistant_full(
+                "No problems detected — the segmentation looks healthy.")
+            return
+        for f in findings:
+            self._chat.add_widget(ChangeCard(
                 f.title, f.detail, f.changes,
                 _SEV_COLOR.get(f.severity, ACCENT), f.action,
                 self._apply, self._apply_rerun))
@@ -366,18 +344,11 @@ class AssistantWidget(QWidget):
         self._reply_buf.append(text)
         self._chat.append_token(text)
 
-    def _clear_chat_actions(self):
-        while self._chat_actions.count():
-            w = self._chat_actions.takeAt(0).widget()
-            if w is not None:
-                w.deleteLater()
-
     def _send(self):
         text = self._input.text().strip()
         if not text or (self._chat_thread and self._chat_thread.is_alive()):
             return
         self._input.clear()
-        self._clear_chat_actions()
         self._chat.add_user(text)
 
         from napari_app import advisor
@@ -427,10 +398,9 @@ class AssistantWidget(QWidget):
         self._offer_suggestions(changes)
 
     def _offer_suggestions(self, changes: dict):
-        self._clear_chat_actions()
         if not changes:
             return
-        self._chat_actions.addWidget(ChangeCard(
+        self._chat.add_widget(ChangeCard(
             "Assistant suggests", "", changes, ACCENT, "Apply & re-run",
             self._apply, self._apply_rerun))
 
