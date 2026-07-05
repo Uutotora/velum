@@ -24,6 +24,7 @@ from napari_app.widgets.common import (
     section_header, divider as _divider, param_row as _param_row,
     CollapsibleSection, SectionCard, CollapsibleCard,
 )
+from napari_app.widgets.controls import Combo
 from napari_app import icons
 
 TRAIN_IMAGE_DIR  = STORAGE_DIR / "train_images"
@@ -245,7 +246,7 @@ class TrainWidget(QWidget):
         # ── Model settings (collapsible card) ─────────────────────────────────
         _model_card = CollapsibleCard("Model settings", collapsed=True, icon="settings")
 
-        self.vit_name = QComboBox()
+        self.vit_name = Combo()
         self.vit_name.addItems(["vit_h", "vit_l", "vit_b"])
         self.vit_name.currentTextChanged.connect(self._on_vit_changed)
         _model_card.addLayout(_param_row("SAM type", self.vit_name,
@@ -271,7 +272,7 @@ class TrainWidget(QWidget):
         params_card = SectionCard("Training parameters", icon="settings")
         _LW = 92
 
-        self.resize_size = QComboBox()
+        self.resize_size = Combo()
         for v in ["256", "512", "768", "1024"]:
             self.resize_size.addItem(v)
         self.resize_size.setCurrentText("512")
@@ -305,7 +306,7 @@ class TrainWidget(QWidget):
         params_card.addLayout(_param_row("Grad accum", self.grad_accum,
             "Gradient accumulation. Effective batch = batch × accum.", label_width=_LW))
 
-        self.device = QComboBox(); self._populate_devices()
+        self.device = Combo(); self._populate_devices()
         params_card.addLayout(_param_row("Device", self.device, label_width=_LW))
         L.addWidget(params_card)
 

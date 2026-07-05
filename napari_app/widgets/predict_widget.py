@@ -26,6 +26,7 @@ from napari_app.widgets.common import (
     section_header, divider as _divider, param_row as _param_row,
     CollapsibleSection, SectionCard, CollapsibleCard,
 )
+from napari_app.widgets.controls import Combo
 
 LORA_DIR         = STORAGE_DIR / "loras"
 BUILTIN_LORA_DIR = Path(__file__).parents[2] / "checkpoints"
@@ -137,7 +138,7 @@ class PredictWidget(QWidget):
 
         # ── Engine ────────────────────────────────────────────────────────────
         engine_card = SectionCard("Engine", icon="target")
-        self.engine = QComboBox()
+        self.engine = Combo()
         self.engine.addItem("CellSeg1 · LoRA (one-shot, fine-tuned)", "cellseg1")
         self.engine.addItem("Cellpose-SAM (zero-shot, generalist)",   "cellpose")
         self.engine.setToolTip(
@@ -154,7 +155,7 @@ class PredictWidget(QWidget):
         # ── Checkpoint ────────────────────────────────────────────────────────
         self._ckpt_card = SectionCard("Checkpoint", icon="layers")
         ckpt_card = self._ckpt_card
-        self.lora_combo = QComboBox()
+        self.lora_combo = Combo()
         self._populate_lora_combo()
         self.lora_combo.currentIndexChanged.connect(self._on_checkpoint_changed)
         ckpt_card.addWidget(self.lora_combo)
@@ -180,7 +181,7 @@ class PredictWidget(QWidget):
         sw_lbl.setStyleSheet(f"color: {LABEL}; font-size: 11px; font-weight: 500;")
         sw_lbl.setFixedWidth(52)
         sw_row.addWidget(sw_lbl)
-        self.sample_combo = QComboBox()
+        self.sample_combo = Combo()
         self.sample_combo.setToolTip("Switch between images already in your test-images folder")
         self.sample_combo.activated.connect(self._on_sample_selected)
         sw_row.addWidget(self.sample_combo, stretch=1)
@@ -258,7 +259,7 @@ class PredictWidget(QWidget):
         q_lbl.setStyleSheet(f"color: {LABEL}; font-size: 11px; font-weight: 500;")
         q_lbl.setFixedWidth(70)
         q_row.addWidget(q_lbl)
-        self.quality = QComboBox()
+        self.quality = Combo()
         self.quality.setToolTip(
             "Fast = low resolution & sparse sampling; Accurate = 1024px & dense "
             "sampling (slower). Sets resize and inference parameters for you.")
@@ -500,7 +501,7 @@ class PredictWidget(QWidget):
         _model_card = CollapsibleCard("Model settings", collapsed=True, icon="settings")
         _model_card.addWidget(_field_label("Custom checkpoint (.pth)"))
         _model_card.addLayout(_make_custom_lora_row(self))
-        self.vit_name = QComboBox()
+        self.vit_name = Combo()
         self.vit_name.addItems(["vit_h", "vit_l", "vit_b"])
         self.vit_name.currentTextChanged.connect(self._on_vit_changed)
         _model_card.addLayout(_param_row("SAM type", self.vit_name,
@@ -514,14 +515,14 @@ class PredictWidget(QWidget):
         self.lora_rank.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         _model_card.addLayout(_param_row("LoRA rank", self.lora_rank,
             "Must match the rank used during training (default 4)"))
-        self.device = QComboBox(); self._populate_devices()
+        self.device = Combo(); self._populate_devices()
         _model_card.addLayout(_param_row("Device", self.device))
         self._model_card = _model_card
         L.addWidget(_model_card)
 
         # ── Inference parameters (collapsed — tune when needed) ────────────────
         _inf_card = CollapsibleCard("Inference parameters", collapsed=True, icon="settings")
-        self.resize_size = QComboBox()
+        self.resize_size = Combo()
         for v in ["256", "512", "768", "1024"]:
             self.resize_size.addItem(v)
         self.resize_size.setCurrentText("512")

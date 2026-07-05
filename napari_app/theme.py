@@ -122,14 +122,7 @@ QComboBox::drop-down {{
     subcontrol-origin: padding; subcontrol-position: center right;
     border: none; width: 26px;
 }}
-QComboBox::down-arrow {{
-    image: none; width: 0; height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid {LABEL};
-    margin-right: 11px;
-}}
-QComboBox::down-arrow:hover {{ border-top-color: {TEXT}; }}
+QComboBox::down-arrow {{ image: none; width: 0; height: 0; border: none; }}
 QComboBox QAbstractItemView {{
     background: {CARD_HEADER}; color: {TEXT};
     border: 1px solid {BORDER_STRONG};

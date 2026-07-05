@@ -20,6 +20,7 @@ from napari_app.theme import (
     WIDGET_SS, BTN_SECONDARY, BTN_PRIMARY,
 )
 from napari_app.widgets.measurements_window import Histogram, _TABLE_SS
+from napari_app.widgets.controls import Combo
 
 _DLG = QFileDialog.Option.DontUseNativeDialog
 
@@ -69,7 +70,7 @@ class CohortWindow(QWidget):
         flab = QLabel("Pooled distribution")
         flab.setStyleSheet(f"color:{LABEL}; font-size:11px; font-weight:600; background:transparent;")
         frow.addWidget(flab)
-        self._feature = QComboBox()
+        self._feature = Combo()
         for key, label in _FEATURES:
             self._feature.addItem(label, key)
         self._feature.currentIndexChanged.connect(self._redraw)

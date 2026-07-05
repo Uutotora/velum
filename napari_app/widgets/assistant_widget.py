@@ -26,6 +26,7 @@ from napari_app.theme import (
     WIDGET_SS, BTN_PRIMARY, BTN_SECONDARY,
 )
 from napari_app.widgets.common import SectionCard, CollapsibleCard
+from napari_app.widgets.controls import Combo
 from napari_app import icons
 
 WARN = WARNING   # amber, reserved for actionable warnings
@@ -146,7 +147,7 @@ class AssistantWidget(QWidget):
         model_card.addLayout(status_row)
 
         mrow = QHBoxLayout(); mrow.setSpacing(6)
-        self._model_combo = QComboBox()
+        self._model_combo = Combo()
         mrow.addWidget(self._model_combo, stretch=1)
         self._tune_btn = QPushButton("Tune for CellSeg1")
         self._tune_btn.setFixedHeight(32); self._tune_btn.setStyleSheet(BTN_SECONDARY)

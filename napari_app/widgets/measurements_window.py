@@ -22,6 +22,7 @@ from napari_app.theme import (
     BG, FG, BORDER, BORDER_STRONG, CARD_HEADER, TEXT, DIM, LABEL, ACCENT,
     ACCENT_SOFT, SUCCESS, CONSOLE, MONO, WIDGET_SS, BTN_SECONDARY, BTN_PRIMARY,
 )
+from napari_app.widgets.controls import Combo
 
 _DLG = QFileDialog.Option.DontUseNativeDialog
 
@@ -130,7 +131,7 @@ class MeasurementsWindow(QWidget):
         lbl = QLabel("Distribution")
         lbl.setStyleSheet(f"color:{LABEL}; font-size:11px; font-weight:600; background:transparent;")
         feat_row.addWidget(lbl)
-        self._feature_combo = QComboBox()
+        self._feature_combo = Combo()
         self._feature_combo.currentIndexChanged.connect(self._redraw_hist)
         feat_row.addWidget(self._feature_combo, stretch=1)
         right.addLayout(feat_row)
