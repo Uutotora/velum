@@ -71,13 +71,28 @@ for a credible product · P1 differentiation · P2 later.
   and graceful degradation. **Not verified here:** real ND2/CZI/LIF files (libs
   not installed) and live GUI auto-fill.
 
-### [ ] Packaging + dependency lock  · S
+### [x] Packaging + dependency lock  · S
 - **Goal:** `pip install -e .` works; deps are pinned; napari entry point.
 - **Why:** install is a bespoke shell script; no versioning, no reproducible
   env; `requirements.txt` is stale (Streamlit/ray leftovers).
 - **Acceptance:** a real `pyproject.toml` with deps + a `napari.manifest`
   entry point; `requirements.txt` removed or regenerated; CI installs from it.
-- **Touch:** new `pyproject.toml`, `requirements*.txt`, `.github/workflows/`.
+- **Done:** PEP 621 `pyproject.toml` (setuptools backend) declares the runtime
+  deps, a `formats` extra (nd2/czifile/readlif), a `console_scripts` launcher
+  `cellseg1 = napari_app.main:main`, and a `napari.manifest` entry point →
+  `napari_app/napari.yaml` (validated with `npe2 validate`; backed by
+  `napari_app/_npe2.py`). Flat layout handled via `py-modules` + namespace
+  `packages.find` so vendored `peft`/`data` (no `__init__.py`) still ship — a
+  built wheel and `pip install -e .` both resolve every module from a foreign
+  cwd. The pure-logic test deps moved to a PEP 735 `[dependency-groups].test`
+  so CI runs `pip install --group test` (installs *from* pyproject, no
+  torch/napari). Stale Streamlit/ray `requirements.txt` regenerated as a pinned
+  lock; `requirements-napari.txt` removed; `setup_napari.sh` now does
+  `pip install -e .`. 8 stdlib-only tests (`tests/test_packaging.py`) guard the
+  metadata (entry points resolve, py-modules exist, test group stays light).
+  **Not verified here:** live napari plugin discovery/loading in the GUI (needs
+  a display) and a full-dependency `pip install -e .` against PyPI (heavy deps
+  already present locally, so tested with `--no-deps`).
 
 ### [ ] Split the `predict_widget` god-object  · M
 - **Goal:** separate prediction logic from the Qt view.
