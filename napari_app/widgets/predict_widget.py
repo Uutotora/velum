@@ -190,7 +190,10 @@ class PredictWidget(QWidget):
         sw_lbl.setFixedWidth(52)
         sw_row.addWidget(sw_lbl)
         self.sample_combo = Combo()
-        self.sample_combo.setToolTip("Switch between images already in your test-images folder")
+        self.sample_combo.setToolTip(
+            "Switch between images already in your test-images folder. "
+            "\"has GT\" means a ground-truth mask ships alongside it, for the "
+            "GT / Evaluate workflow further down.")
         self.sample_combo.activated.connect(self._on_sample_selected)
         sw_row.addWidget(self.sample_combo, stretch=1)
         img_card.addLayout(sw_row)
@@ -793,7 +796,12 @@ class PredictWidget(QWidget):
             self.sample_combo.setEnabled(True)
             cur = self.image_path.text().strip()
             for f in files:
-                self.sample_combo.addItem(f.name, str(f))
+                # Most bundled samples ship without a ground-truth mask (only
+                # the synthetic phantom, plus any downloaded BBBC039 image,
+                # have one) — flag it here so "GT didn't autofill" isn't a
+                # surprise for the others.
+                label = f"{f.name}   ·   has GT" if self._gt_sidecar(str(f)) else f.name
+                self.sample_combo.addItem(label, str(f))
             # reflect the current image if it's one of them
             idx = self.sample_combo.findData(cur)
             if idx >= 0:
