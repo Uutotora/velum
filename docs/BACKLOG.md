@@ -152,12 +152,21 @@ for a credible product · P1 differentiation · P2 later.
   the same by code inspection, but wasn't click-tested with a display) and
   real-model inference (SAM/Cellpose weights).
 
-### [ ] Rename `streamlit_storage/` → `data_store/` (or similar)  · S
+### [x] Rename `streamlit_storage/` → `data_store/` (or similar)  · S
 - **Goal:** the misleading Streamlit-era name is gone.
 - **Why:** Streamlit is removed; the dir now holds weights + samples.
 - **Acceptance:** dir renamed; every path reference updated (grep
   `streamlit_storage`); `setup_napari.sh` updated; app still finds weights.
 - **Touch:** repo-wide grep; `setup_napari.sh`, widgets, configs.
+- **Done:** the directory is gitignored and created locally by
+  `setup_napari.sh` (SAM backbone download + `test_images/`), never tracked
+  in git, so there was no on-disk content to move — this was a path-string
+  rename. `project_root.py`'s `STORAGE_DIR` is the single source of truth
+  (every widget derives subpaths like `STORAGE_DIR / "loras"` from it), so
+  the rename touched exactly `project_root.py`, `setup_napari.sh`,
+  `.gitignore`, and the `AGENTS.md` repo map — confirmed by grepping the
+  whole repo for `streamlit_storage`/`STORAGE_DIR` before and after. No
+  behavioural change, so no new tests; full pre-existing suite stays green.
 
 ---
 
