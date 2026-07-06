@@ -4,6 +4,11 @@ Read this first. It tells you what this repo is, how to work in it, and where
 the task queue lives. If you change how the project is built, run, or tested,
 update this file in the same commit.
 
+(Claude Code specifically: this file is auto-loaded every session via a
+one-line `CLAUDE.md` at repo root that imports it — Claude Code reads
+`CLAUDE.md`, not `AGENTS.md`, by default. Keep instructions in this file, not
+duplicated into `CLAUDE.md`.)
+
 ## What this is
 
 **CellSeg1** is a desktop application for **cell instance segmentation** in
@@ -66,6 +71,8 @@ checkpoints/ streamlit_storage/   bundled weights + sample data (misnamed
 docs/                  BACKLOG.md, AUDIT_2026.md, CHANGELOG.md,
                        AGENT_KICKOFF_PROMPT.md — see above, one job each
 README.md              human-facing front door (this file is the agent one)
+CLAUDE.md              one line, imports this file — see the Claude Code
+                       note above; don't put instructions here directly
 ```
 
 ## Environment & how to run things

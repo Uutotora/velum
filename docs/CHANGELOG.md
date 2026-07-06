@@ -18,6 +18,17 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-06 (later)
+
+- **Added `CLAUDE.md`** — a one-line file that imports `AGENTS.md` via `@AGENTS.md`.
+  Researched how Claude Code actually loads project instructions: it reads
+  `CLAUDE.md` at session start, not `AGENTS.md` — confirmed directly, since
+  this repo's own `AGENTS.md` was never auto-loaded before this, only read
+  because the kickoff prompt explicitly said to. This closes that gap for
+  good without giving up `AGENTS.md`'s cross-tool portability.
+
+---
+
 ## 2026-07-06
 
 - **`predict_widget.py` god-object split.** New `napari_app/core/predict_controller.py`
