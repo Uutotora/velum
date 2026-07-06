@@ -311,7 +311,10 @@ def _sam2_available_check() -> bool:
 
 register(EngineSpec(
     key="sam2",
-    label="SAM 2 · zero-shot (z-stack / video, experimental)",
+    # Kept close in length to the other two engines' labels (~37-39 chars) —
+    # the engine combo's width is set by its widest item, so a longer label
+    # here widens the whole Predict panel and forces horizontal scrolling.
+    label="SAM 2 · zero-shot (z-stack / video)",
     predict=_predict_sam2_engine,
     available=_sam2_available_check,
     status_line=cache_status,

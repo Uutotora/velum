@@ -18,6 +18,20 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-07 (later) — user-reported bug, not a backlog item
+
+- **Fixed the Predict panel forcing horizontal scroll when SAM2 is
+  selected.** `QComboBox`/`QCheckBox` text never wraps (unlike `QLabel`), so
+  a widget's on-screen width is set by its widest item's/label's text —
+  three strings added for SAM2 were meaningfully longer than every sibling
+  they sit next to: the engine combo's SAM2 label (51 chars vs. 37-39 for
+  the other two), the "segment as z-stack" checkbox (57 chars vs. 39-44 for
+  the other checkboxes), and the "propagate" tracking-mode combo item (43
+  chars). Shortened all three to the same range as their siblings (moving
+  the dropped detail into tooltips, which were already there); confirmed
+  with `QFontMetrics` that each is now narrower than its own reference
+  sibling, not just "shorter than before."
+
 ## 2026-07-07
 
 - **SAM 2 / z-stack follow-up: closed every gap the previous entry left

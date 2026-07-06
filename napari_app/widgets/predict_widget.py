@@ -248,7 +248,10 @@ class PredictWidget(QWidget):
         # loaded file actually has more than one Z/T plane. Segments each
         # plane independently and links instances across planes by overlap
         # (see napari_app.volume_stitch) instead of collapsing to one plane.
-        self.zstack_cb = QCheckBox("Segment as z-stack / time-lapse (stitch across planes)")
+        # QCheckBox text never wraps (unlike QLabel), so it must stay short —
+        # a longer label here widens the whole Predict panel and forces
+        # horizontal scrolling; the full explanation lives in the tooltip.
+        self.zstack_cb = QCheckBox("Segment as z-stack / time-lapse")
         self.zstack_cb.setToolTip(
             "For multi-plane TIFF/OME-TIFF (confocal z-stacks, time-lapse). "
             "Segments each plane independently and links instances across "
@@ -663,9 +666,12 @@ class PredictWidget(QWidget):
             "configs/sam2.1/sam2.1_hiera_l.yaml. Leave blank to use the "
             "default for the model size above.")
         self._sam2_card.addWidget(self.sam2_config_text)
+        # A Combo's width is set by its widest item (see the engine combo's
+        # own comment in engines_sam2.py) — kept short for the same reason;
+        # the tooltip below carries the full explanation.
         self.sam2_tracking_mode = Combo()
         self.sam2_tracking_mode.addItem("Independent + stitch (default)", "automatic")
-        self.sam2_tracking_mode.addItem("Propagate — video predictor (experimental)", "propagate")
+        self.sam2_tracking_mode.addItem("Propagate (experimental)", "propagate")
         self.sam2_tracking_mode.setToolTip(
             "Only applies to \"Segment as z-stack\" above.\n"
             "Independent + stitch: segments each plane on its own, links "

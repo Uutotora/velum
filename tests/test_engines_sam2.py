@@ -152,7 +152,7 @@ def test_sam2_engine_is_registered():
 
 def test_sam2_engine_labels():
     spec = engine_registry.get("sam2")
-    assert spec.label == "SAM 2 · zero-shot (z-stack / video, experimental)"
+    assert spec.label == "SAM 2 · zero-shot (z-stack / video)"
     assert spec.bench_label == "SAM 2 (zero-shot, experimental)"
     assert spec.result_label == "SAM 2"
 
