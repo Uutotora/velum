@@ -26,6 +26,12 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
   this repo's own `AGENTS.md` was never auto-loaded before this, only read
   because the kickoff prompt explicitly said to. This closes that gap for
   good without giving up `AGENTS.md`'s cross-tool portability.
+- **Renamed `streamlit_storage/` → `data_store/`** (last open P0 backlog
+  item). The dir is gitignored and only ever created locally by
+  `setup_napari.sh`, so this was a path-string rename, not a file move:
+  `project_root.py`'s `STORAGE_DIR` constant, `setup_napari.sh`, and
+  `.gitignore` updated; every other reference already derived from
+  `STORAGE_DIR` so needed no change. No behaviour change.
 
 ---
 

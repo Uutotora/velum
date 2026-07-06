@@ -10,7 +10,7 @@ experiment_in_paper/result
 experiment_in_paper/dataset/data_statistics.yaml
 experiment_in_paper/dataset/per_image_statistics.csv
 saved_images
-streamlit_storage
+data_store
 .DS_Store
 # Byte-compiled / optimized / DLL files
 __pycache__/

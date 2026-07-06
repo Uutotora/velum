@@ -31,7 +31,7 @@ $CONDA run -n cellseg1 python -m pip install --upgrade pip
 $CONDA run -n cellseg1 python -m pip install -e "$DIR"
 
 echo "==> [3/3] Downloading SAM vit_h backbone weights (~2.5 GB, one time)…"
-BACKBONE_DIR="$DIR/streamlit_storage/sam_backbone"
+BACKBONE_DIR="$DIR/data_store/sam_backbone"
 mkdir -p "$BACKBONE_DIR"
 WEIGHTS="$BACKBONE_DIR/sam_vit_h_4b8939.pth"
 if [ -f "$WEIGHTS" ]; then
@@ -41,7 +41,7 @@ else
         "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
 fi
 
-mkdir -p "$DIR/streamlit_storage/test_images"
+mkdir -p "$DIR/data_store/test_images"
 
 echo ""
 echo "✓ Setup complete. Launch the app with:"

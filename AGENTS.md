@@ -66,8 +66,9 @@ ML core (shared, imported by the app — do not delete):
 
 tests/                 pytest suite (pure-logic, no GPU/GUI)
 .github/workflows/     CI (runs the pure-logic suite on py3.11/3.12)
-checkpoints/ streamlit_storage/   bundled weights + sample data (misnamed
-                       dir — see backlog; do not delete, paths reference it)
+checkpoints/ data_store/   bundled weights + sample data (data_store/ is
+                       gitignored, created locally by setup_napari.sh / first
+                       run — do not delete, paths reference it)
 docs/                  BACKLOG.md, AUDIT_2026.md, CHANGELOG.md,
                        AGENT_KICKOFF_PROMPT.md — see above, one job each
 README.md              human-facing front door (this file is the agent one)
