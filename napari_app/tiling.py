@@ -97,6 +97,17 @@ def should_tile(shape: tuple[int, ...], tile: int = 1024, margin: float = 1.5) -
     return max(h, w) > tile * margin
 
 
+def should_warn_no_tiling(shape: tuple[int, ...], tiled: bool,
+                          tile: int = 1024, margin: float = 1.5) -> bool:
+    """Whether to hint at "Large image" mode after a run.
+
+    True when ``should_tile`` would have recommended tiling but ``tiled`` was
+    off, meaning the image was silently shrunk for inference and may have
+    lost small cells.
+    """
+    return not tiled and should_tile(shape, tile=tile, margin=margin)
+
+
 def recommend_overlap(cell_diameter_px: float, tile: int = 1024) -> int:
     """A safe overlap: at least one full cell diameter, capped below the tile."""
     if cell_diameter_px <= 0:

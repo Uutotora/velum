@@ -310,7 +310,7 @@ for a credible product · P1 differentiation · P2 later.
   user through one real prediction on bundled sample data in under 60s.
 - **Touch:** `napari_app/widgets/guide_widget.py`, `predict_widget.py`.
 
-### [ ] Warn before silently downsampling a large image  · S
+### [x] Warn before silently downsampling a large image  · S
 - **Goal:** when an image would be shrunk significantly for inference (and
   "Large image" tiling is off), tell the user before they lose small cells.
 - **Why:** `docs/AUDIT_2026.md` §4.2 — tiling (done) is opt-in; a user who
@@ -320,6 +320,23 @@ for a credible product · P1 differentiation · P2 later.
   before/after running.
 - **Touch:** `napari_app/widgets/predict_widget.py`, `napari_app/tiling.py`
   (`should_tile` already exists).
+- **Done:** new `tiling.should_warn_no_tiling(shape, tiled, tile, margin)` —
+  `not tiled and should_tile(shape, tile, margin)`, i.e. exactly the
+  acceptance criteria's own condition. The actual touch point turned out to
+  be `predict_controller.py`, not `predict_widget.py` directly: a
+  `"[HINT] Large image — inference resized it, which can lose small cells.
+  Enable \"Large image: tile at native resolution\" for full detail."` line is
+  emitted through `run_prediction_async`'s existing `on_log` callback, right
+  after the "✓ N cells" line — `on_log` was already wired straight to the
+  widget's log window, so no widget code needed to change at all. Scoped to
+  the single-prediction path only (not batch/benchmark, which don't have an
+  equivalent interactive per-run log line to hang this off of). 4 new tests
+  (2 in `tests/test_tiling.py` for the pure condition, 2 more in
+  `tests/test_predict_controller.py` verifying the wiring: hints when large +
+  untiled, silent when tiled or small); 148 pre-existing tests unmodified
+  (152 total).
+  **Not verified here:** the real GUI (log line inspected by code, not seen
+  rendered in the actual log window with a display attached).
 
 ### [ ] OME-Zarr multiscale viewing for whole-slide images  · L
 - **Goal:** open a whole-slide image as a lazy pyramid so napari's viewer

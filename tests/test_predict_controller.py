@@ -197,6 +197,65 @@ def test_run_prediction_async_success_sequences_callbacks(tmp_path, monkeypatch)
     assert "1 cells" in events[1][1] and "Cellpose-SAM" in events[1][1]
 
 
+def test_run_prediction_async_hints_when_large_and_not_tiled(tmp_path, monkeypatch):
+    import cv2
+    import napari_app.engines as engines
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+
+    img = np.zeros((160, 480, 3), dtype=np.uint8)
+    img[70:90, 40:60] = 255
+    path = tmp_path / "big.png"
+    cv2.imwrite(str(path), img)
+    config = {"engine": "cellpose", "tile_size": 128, "clahe": False,
+              "tiled": False, "image_path": str(path), "resize_size": [256, 256]}
+
+    logs = []
+    controller = PredictController()
+    t = controller.run_prediction_async(config, on_log=logs.append)
+    t.join(timeout=10)
+    assert any("[HINT]" in s and "Large image" in s for s in logs)
+
+
+def test_run_prediction_async_no_hint_when_tiled(tmp_path, monkeypatch):
+    import cv2
+    import napari_app.engines as engines
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+
+    img = np.zeros((160, 480, 3), dtype=np.uint8)
+    img[70:90, 40:60] = 255
+    path = tmp_path / "big.png"
+    cv2.imwrite(str(path), img)
+    config = {"engine": "cellpose", "tile_size": 128, "tile_overlap": 48,
+              "clahe": False, "tiled": True, "image_path": str(path),
+              "resize_size": 256}
+
+    logs = []
+    controller = PredictController()
+    t = controller.run_prediction_async(config, on_log=logs.append)
+    t.join(timeout=10)
+    assert not any("[HINT]" in s for s in logs)
+
+
+def test_run_prediction_async_no_hint_when_small(tmp_path, monkeypatch):
+    import cv2
+    import napari_app.engines as engines
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+
+    img = np.zeros((40, 40, 3), dtype=np.uint8)
+    img[10:30, 10:30] = 200
+    path = tmp_path / "img.png"
+    cv2.imwrite(str(path), img)
+    config = {"engine": "cellpose", "image_path": str(path),
+              "resize_size": [40, 40], "clahe": False, "tile_size": 1024,
+              "tiled": False, "selected_device": "cpu"}
+
+    logs = []
+    controller = PredictController()
+    t = controller.run_prediction_async(config, on_log=logs.append)
+    t.join(timeout=10)
+    assert not any("[HINT]" in s for s in logs)
+
+
 def test_run_prediction_async_sam_branch_logs_cache_status(tmp_path, monkeypatch):
     import cv2
     import napari_app.inference_cache as ic

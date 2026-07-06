@@ -13,6 +13,7 @@ from napari_app.tiling import (
     plan_tiles,
     recommend_overlap,
     should_tile,
+    should_warn_no_tiling,
     stitch,
     tiled_predict,
 )
@@ -53,6 +54,13 @@ def test_overlap_must_be_valid():
 def test_should_tile_threshold():
     assert should_tile((4000, 4000), tile=1024)
     assert not should_tile((512, 512), tile=1024)
+
+
+def test_should_warn_no_tiling_only_when_large_and_untiled():
+    assert should_warn_no_tiling((4000, 4000), False, tile=1024)      # large, tiling off
+    assert not should_warn_no_tiling((4000, 4000), True, tile=1024)   # large, tiling on
+    assert not should_warn_no_tiling((512, 512), False, tile=1024)    # small, tiling off
+    assert not should_warn_no_tiling((512, 512), True, tile=1024)     # small, tiling on
 
 
 def test_recommend_overlap_covers_cell():

@@ -18,6 +18,19 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-06 (yet even later)
+
+- **Warn before silently downsampling a large image** (P1 backlog item).
+  `tiling.should_warn_no_tiling()` flags exactly the case the backlog
+  described: an image large enough that "Large image" tiling would help, but
+  the toggle is off. `predict_controller.run_prediction_async` now emits a
+  `[HINT]` log line for that case through its existing `on_log` callback —
+  already wired to the widget's log window, so no widget changes were needed.
+  Scoped to the single-prediction path (not batch/benchmark). 4 new tests;
+  148 pre-existing tests unmodified (152 total).
+
+---
+
 ## 2026-07-06 (even later)
 
 - **Engine registry** (top open P1 backlog item). New `napari_app/engine_registry.py`

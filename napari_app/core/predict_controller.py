@@ -283,8 +283,10 @@ class PredictController:
         Mirrors the previous ``PredictWidget._run_prediction`` inner closure:
         ``on_result(img_arr, mask, stack)`` fires once on success — before any
         "done" log line, so a caller can stash the channel stack first —
-        ``on_log`` carries both the "✓ N cells" line and any error text, and
-        ``on_finish`` always fires last, success or failure.
+        ``on_log`` carries the "✓ N cells" line (followed by a "[HINT]" line
+        if the image was large enough that "Large image" tiling would have
+        helped but was off) and any error text, and ``on_finish`` always
+        fires last, success or failure.
         """
         def run():
             try:
@@ -296,6 +298,13 @@ class PredictController:
                     spec = get_engine(config.get("engine") or "cellseg1")
                     status = spec.status_line() if spec.status_line else spec.result_label
                     on_log(f"✓ {int(mask.max())} cells  [{status}]")
+                    from napari_app.tiling import should_warn_no_tiling
+                    tile = int(config.get("tile_size") or 1024)
+                    if should_warn_no_tiling(img_arr.shape, bool(config.get("tiled")), tile=tile):
+                        on_log(
+                            "[HINT] Large image — inference resized it, which can lose "
+                            "small cells. Enable \"Large image: tile at native "
+                            "resolution\" for full detail.")
             except Exception as e:
                 import traceback
                 if on_log:
