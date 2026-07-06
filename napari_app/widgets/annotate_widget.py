@@ -84,6 +84,38 @@ def _step(n: int, html: str) -> QWidget:
     return w
 
 
+def _rect_to_box_xyxy(rect, h: int, w: int) -> list[int] | None:
+    """Convert one napari Shapes rectangle's data-coordinate corners to a
+    ``[x0, y0, x1, y1]`` box in SAM's XYXY pixel convention, clipped to the
+    image bounds. ``rect`` is an Nx2 array of (row, col) = (y, x) vertices —
+    napari always reports Shapes data in the layer's own data coordinates
+    (not the possibly-transformed "world" ones a raw mouse event needs
+    converting from), so no world-to-data conversion is needed here, unlike
+    the point-click callback's use of ``world_to_data``.
+
+    Returns ``None`` for a degenerate box (zero width/height after
+    clipping — e.g. drawn entirely outside the image) rather than raising,
+    so a callback can just skip prediction for it.
+    """
+    rect = np.asarray(rect, dtype=float)
+    y0, x0 = rect.min(axis=0)
+    y1, x1 = rect.max(axis=0)
+    # Both corners of both axes clip to the *same* [0, w] / [0, h] range —
+    # clipping the far corner's minimum up to 1 (instead of 0) looked like a
+    # reasonable way to avoid a zero-width box, but it back-fired: a box
+    # entirely outside the image (e.g. x0=x1=-5) then clipped to [0, 1]
+    # instead of [0, 0], which reads as a valid tiny box instead of the
+    # degenerate one it actually is. Symmetric clipping plus the width/height
+    # check below is what actually catches every degenerate case correctly.
+    x0i = int(np.clip(round(x0), 0, w))
+    x1i = int(np.clip(round(x1), 0, w))
+    y0i = int(np.clip(round(y0), 0, h))
+    y1i = int(np.clip(round(y1), 0, h))
+    if x1i <= x0i or y1i <= y0i:
+        return None
+    return [x0i, y0i, x1i, y1i]
+
+
 class AnnotateWidget(QWidget):
     _ready_signal  = pyqtSignal(bool, str)      # (ok, message)
     _result_signal = pyqtSignal(object, int, float)  # (mask_bool, label_id, score)
@@ -98,6 +130,7 @@ class AnnotateWidget(QWidget):
         self._labels_layer = None
         self._image_layer = None
         self._pts_layer = None
+        self._shapes_layer = None
         self._cb = None
         self._busy = False
 
@@ -151,6 +184,9 @@ class AnnotateWidget(QWidget):
         how_card.addWidget(_step(1, "<b>Left-click</b> a cell → segments it as a new label."))
         how_card.addWidget(_step(2, "<b>Shift-click</b> → grows the last cell."))
         how_card.addWidget(_step(3, "<b>Ctrl / ⌘-click</b> → carves the last cell."))
+        how_card.addWidget(_step(4, "Or select the <b>box_prompt</b> layer and "
+                                    "<b>drag a rectangle</b> around a cell → "
+                                    "segments everything inside it as a new label."))
         L.addWidget(how_card)
 
         # ── Controls card ──────────────────────────────────────────────────────
@@ -159,6 +195,14 @@ class AnnotateWidget(QWidget):
         ctl_card.addWidget(_legend_row(SUCCESS, ["⇧", "click"], "add to the last cell"))
         ctl_card.addWidget(_legend_row(DANGER,  ["⌘", "click"], "remove from the last cell"))
         ctl_card.addWidget(_legend_row(DIM,     ["drag"], "pan (never segments)"))
+        box_hint = QLabel(
+            "Prefer a box? Select the *_box_prompt layer above (rectangle tool "
+            "is already active) and drag a rectangle around a cell — segments "
+            "just that region as a new label. Follow up with shift/⌘-click to "
+            "refine it, same as a point-started cell.")
+        box_hint.setStyleSheet(f"color:{LABEL}; font-size:10.5px; background:transparent; padding-top:4px;")
+        box_hint.setWordWrap(True)
+        ctl_card.addWidget(box_hint)
         manual = QLabel(
             "Prefer to draw by hand? Select the *_annotate_masks layer and use "
             "napari's paintbrush (top-left tools).")
@@ -291,6 +335,19 @@ class AnnotateWidget(QWidget):
                 np.empty((0, 2)), name=f"{stem}_clicks", size=12, border_width=0)
         except Exception:
             self._pts_layer = None
+        try:
+            # A box prompt: SamPredictor already accepts one natively (see
+            # napari_app.interactive) — drag a rectangle here instead of
+            # clicking, for a cell whose outline a single point can't pin
+            # down unambiguously. Pre-armed with the rectangle tool so
+            # there's nothing to hunt for in napari's own toolbar.
+            self._shapes_layer = self.viewer.add_shapes(
+                [], name=f"{stem}_box_prompt", edge_color=[0.15, 0.6, 0.95, 1.0],
+                face_color=[0.0, 0.0, 0.0, 0.0], edge_width=2)
+            self._shapes_layer.mode = "add_rectangle"
+            self._shapes_layer.events.data.connect(self._on_box_drawn)
+        except Exception:
+            self._shapes_layer = None
         # keep the Labels layer active so the click callback (and manual brush) work
         try:
             self.viewer.layers.selection.active = self._labels_layer
@@ -324,6 +381,11 @@ class AnnotateWidget(QWidget):
         if self._cb is not None and self._cb in self.viewer.mouse_drag_callbacks:
             self.viewer.mouse_drag_callbacks.remove(self._cb)
         self._cb = None
+        if self._shapes_layer is not None:
+            try:
+                self._shapes_layer.events.data.disconnect(self._on_box_drawn)
+            except Exception:
+                pass
 
     # ── Prompting ──────────────────────────────────────────────────────────────
 
@@ -351,6 +413,11 @@ class AnnotateWidget(QWidget):
         # Generator callback: only act on a genuine click, never on a drag/pan.
         def callback(viewer, event):
             if event.button != 1 or self._session is None:
+                return
+            # The box-prompt Shapes layer has its own rectangle-drawing
+            # interaction while it's the active layer — don't also interpret
+            # that drag as a point click (or its release as one).
+            if self._shapes_layer is not None and viewer.layers.selection.active is self._shapes_layer:
                 return
             mods = set(event.modifiers or ())
             if "Alt" in mods:
@@ -413,6 +480,64 @@ class AnnotateWidget(QWidget):
 
         threading.Thread(target=run, daemon=True).start()
 
+    def _on_box_drawn(self, event=None):
+        """Fires when the box-prompt Shapes layer's data changes — i.e. a
+        rectangle was just finished being drawn (or removed, which also
+        fires this and is ignored via the empty-data check below).
+
+        A box always starts a *new* object, mirroring plain-click's own
+        convention, rather than trying to infer from modifier keys whether
+        it should refine the active one — refining is still available
+        afterwards via a normal shift/⌘-click, since the box's resulting
+        low-res mask is kept as `_last_low` exactly like a point-started
+        object's would be.
+        """
+        if self._shapes_layer is None or self._session is None or self._busy:
+            return
+        data = self._shapes_layer.data
+        if not data:
+            return
+        rect = np.asarray(data[-1])
+        # Clear immediately so the layer is ready for the next box right
+        # away. Setting .data fires this same events.data signal again —
+        # napari hasn't finished its own internal bookkeeping by the time
+        # that re-entrant call reads .data back, so it doesn't yet look
+        # empty and the "if not data: return" guard above never fires,
+        # recursing without end. Disconnecting for the duration of the
+        # assignment sidesteps that regardless of napari's exact event-
+        # firing/bookkeeping order.
+        self._shapes_layer.events.data.disconnect(self._on_box_drawn)
+        try:
+            self._shapes_layer.data = []
+        finally:
+            self._shapes_layer.events.data.connect(self._on_box_drawn)
+
+        box = _rect_to_box_xyxy(rect, *self._label_img.shape)
+        if box is None:
+            return
+
+        self._active_id = int(self._label_img.max()) + 1
+        self._points, self._plabels, self._last_low = [], [], None
+        self._prompt_coords, self._prompt_face = [], []
+        self._refresh_points()
+        self._run_box_predict(box)
+
+    def _run_box_predict(self, box):
+        self._busy = True
+        active = self._active_id
+
+        def run():
+            try:
+                mask, low_res, score = self._session.predict([], [], box=box)
+                self._last_low = low_res
+                self._result_signal.emit(mask, active, score)
+            except Exception as e:
+                import traceback
+                self._log(f"[ERROR] box segment: {e}\n{traceback.format_exc()}")
+                self._result_signal.emit(None, active, 0.0)
+
+        threading.Thread(target=run, daemon=True).start()
+
     def _on_result(self, mask, label_id: int, score: float):
         self._busy = False
         if mask is None:
@@ -446,6 +571,8 @@ class AnnotateWidget(QWidget):
         self._labels_layer.refresh()
         self._active_id = 0
         self._reset_prompt()
+        if self._shapes_layer is not None:
+            self._shapes_layer.data = []
         self._update_count()
 
     def _update_count(self):

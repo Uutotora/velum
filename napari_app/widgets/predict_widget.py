@@ -406,6 +406,23 @@ class PredictWidget(QWidget):
         self._results_card.addLayout(res_btns)
         L.addWidget(self._results_card)
 
+        # ── Display: colour cells by a measurement (hidden until a result with
+        # at least one cell exists) — kept as its own card rather than nested
+        # in Results, since Results' hero chips are 2-D-only and hidden for a
+        # volume result, but colouring by measurement is just as meaningful
+        # there (both share the same _last_measure/_masks(_fill) layers). ────
+        self._color_card = SectionCard("Display", icon="settings")
+        self.color_by = Combo()
+        self.color_by.addItem("Instance ID (default)", "instance_id")
+        self.color_by.currentIndexChanged.connect(self._on_color_by_changed)
+        self._color_card.addLayout(_param_row("Colour cells by", self.color_by,
+            "Paint every cell's fill + outline by one of its measured values "
+            "instead of a random per-instance colour — a heatmap over the "
+            "population (e.g. spot the biggest or roundest cells at a "
+            "glance). Uses matplotlib's viridis colormap by default."))
+        self._color_card.setVisible(False)
+        L.addWidget(self._color_card)
+
         # ── Ground truth & evaluation (collapsed — validation tool) ────────────
         _gt_card = CollapsibleCard("Ground truth & evaluation", collapsed=True, icon="check")
         _gt_card.addWidget(_field_label("GT mask file"))
@@ -1258,10 +1275,71 @@ class PredictWidget(QWidget):
         fill = self.viewer.add_labels(mask, name=f"{name}_fill", opacity=fill_opacity)
         outline = self.viewer.add_labels(mask, name=name, opacity=outline_opacity)
         outline.contour = 1
+        # Remembered so "Colour cells by" can restore napari's default
+        # per-instance colours later without having to reconstruct them.
+        fill.metadata["default_colormap"] = fill.colormap
+        outline.metadata["default_colormap"] = outline.colormap
         if solid_rgba is not None:
             _color_labels_solid(fill, mask, solid_rgba)
             _color_labels_solid(outline, mask, solid_rgba)
         return outline
+
+    def _refresh_color_by_options(self):
+        """(Re)populate "Colour cells by" from the current result's numeric
+        columns, and show/hide the whole card. Called after any measurement
+        — 2-D (_recompute_measurements) or 3-D (_show_volume_results) — so
+        it always reflects whichever schema the current result actually
+        used (analysis._SCHEMA vs. _SCHEMA_3D have different columns).
+        """
+        result = self._last_measure
+        current = self.color_by.currentData() or "instance_id"
+        self.color_by.blockSignals(True)
+        self.color_by.clear()
+        self.color_by.addItem("Instance ID (default)", "instance_id")
+        if result:
+            for key, label, unit in result["columns"][1:]:   # [0] is always cell_id
+                self.color_by.addItem(f"{label} ({unit})" if unit else label, key)
+        idx = self.color_by.findData(current)
+        self.color_by.setCurrentIndex(idx if idx >= 0 else 0)
+        self.color_by.blockSignals(False)
+
+        show = bool(result) and int(result.get("n_cells", 0)) > 0
+        self._color_card.setVisible(show)
+        self._apply_color_by(self.color_by.currentData() or "instance_id")
+
+    def _on_color_by_changed(self, _idx=None):
+        self._apply_color_by(self.color_by.currentData() or "instance_id")
+
+    def _apply_color_by(self, metric_key: str):
+        """Re-colour the current result's fill+outline layers by a measured
+        value, or restore napari's default per-instance colours for
+        "instance_id". A no-op if there's no current result layer (e.g.
+        right after clearing, before the layers exist) — never raises, since
+        this can fire from a signal at almost any point in the widget's
+        lifecycle.
+        """
+        name = Path(self.image_path.text()).stem
+        try:
+            fill = self.viewer.layers[f"{name}_masks_fill"]
+            outline = self.viewer.layers[f"{name}_masks"]
+        except (KeyError, TypeError):
+            # KeyError: no such layer (nothing predicted yet, or cleared).
+            # TypeError: self.viewer.layers doesn't support name-keyed lookup
+            # at all (only ever seen in tests using a plain list stand-in for
+            # a real napari LayerList) — same "nothing to colour" outcome.
+            return
+
+        if metric_key == "instance_id" or not self._last_measure:
+            fill.colormap = fill.metadata.get("default_colormap", fill.colormap)
+            outline.colormap = outline.metadata.get("default_colormap", outline.colormap)
+            return
+
+        from napari_app import analysis
+        id_to_rgba = analysis.label_colormap_from_measurement(self._last_measure, metric_key)
+        if not id_to_rgba:
+            return
+        _color_labels_by_map(fill, fill.data, id_to_rgba)
+        _color_labels_by_map(outline, outline.data, id_to_rgba)
 
     def _show_results(self, img_arr, mask):
         name = Path(self.image_path.text()).stem
@@ -1297,8 +1375,9 @@ class PredictWidget(QWidget):
         are hardcoded Qt labels, not schema-driven, so relabelling them for a
         volume result is a UI change of its own rather than a size a 3-D
         mask should silently trigger; the full, correctly-labelled table is
-        one click away in the Measurements window instead. GT overlay is
-        still 2-D-only.
+        one click away in the Measurements window instead. The "Colour cells
+        by" card (_refresh_color_by_options) isn't schema-specific though, so
+        it's shown here too. GT overlay is still 2-D-only.
         """
         name = Path(self.image_path.text()).stem
         self._last_mask     = None
@@ -1332,6 +1411,7 @@ class PredictWidget(QWidget):
             self._append_log(f"[INFO] 3-D result: {n_cells} cells across {mask_vol.shape[0]} planes.")
         if n_cells > 0:
             motion.count_up(self._cell_count_lbl, n_cells)
+        self._refresh_color_by_options()
         self.viewer.reset_view()
 
     def _autofill_pixel_size(self):
@@ -1379,6 +1459,7 @@ class PredictWidget(QWidget):
                 for chip in (self._chip_diam, self._chip_area, self._chip_cov):
                     chip.setText("—")
                 self._last_measure = None
+            self._refresh_color_by_options()
             return
         from napari_app import analysis
         stack = getattr(self, "_last_channel_stack", None)
@@ -1410,6 +1491,7 @@ class PredictWidget(QWidget):
         mw = get_measurements_window()
         if mw.isVisible() and result:
             mw.set_result(result, Path(self._last_img_path).name if self._last_img_path else "")
+        self._refresh_color_by_options()
 
     def _open_measurements(self):
         if self._last_measure is None:
@@ -1955,6 +2037,24 @@ def _color_labels_solid(layer, mask, rgba):
         layer.colormap = DirectLabelColormap(color_dict=cmap)
     except Exception:
         pass  # older napari — fall back to default multicolour labels
+
+
+def _color_labels_by_map(layer, mask, id_to_rgba: dict, default_rgba=(0.5, 0.5, 0.5, 1.0)):
+    """Paint each non-zero label its own colour from ``id_to_rgba`` — the
+    "colour by measurement" counterpart to ``_color_labels_solid``'s "one
+    uniform colour". A label present in ``mask`` but missing from
+    ``id_to_rgba`` (shouldn't normally happen — every label in the mask has a
+    measurement row) falls back to ``default_rgba`` rather than raising.
+    """
+    try:
+        from napari.utils.colormaps import DirectLabelColormap
+        ids = np.unique(mask)
+        cmap = {int(i): tuple(id_to_rgba.get(int(i), default_rgba)) for i in ids if i != 0}
+        cmap[None] = (0.0, 0.0, 0.0, 0.0)
+        cmap[0] = (0.0, 0.0, 0.0, 0.0)
+        layer.colormap = DirectLabelColormap(color_dict=cmap)
+    except Exception:
+        pass  # older napari — fall back to whatever colouring was already set
 
 
 def _make_stat_chip(caption: str):

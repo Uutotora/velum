@@ -71,6 +71,12 @@ def widget(app, monkeypatch):
     # production code.
     monkeypatch.setattr(w, "_append_log", lambda *a, **k: None)
     monkeypatch.setattr(w, "_recompute_measurements", lambda: None)
+    # Qt's isVisible() is composite (considers ancestors), so an unshown
+    # top-level widget reports every child as invisible regardless of its
+    # own setVisible() state — needed for the colour-by-measurement card's
+    # visibility assertions below.
+    w.show()
+    app.processEvents()
     yield w
     w.close()
 
@@ -177,3 +183,81 @@ def test_show_ground_truth_reload_does_not_accumulate_layers(widget, tmp_path):
     widget._show_ground_truth()
     names = [l.name for l in widget.viewer.layers]
     assert names == ["sample_gt_fill", "sample_gt"]
+
+
+# ── Colour cells by a measurement ─────────────────────────────────────────────
+# Exercised via _show_volume_results rather than _show_results: the `widget`
+# fixture stubs _recompute_measurements (the 2-D path's route to
+# _refresh_color_by_options) to dodge the measurements-window singleton
+# fragility documented above, but _show_volume_results calls
+# _refresh_color_by_options directly and isn't affected either way.
+
+def _mask_two_different_areas(h=30, w=30):
+    mask = np.zeros((h, w), dtype=np.int32)
+    mask[5:15, 5:15] = 1      # 10x10 = 100
+    mask[18:25, 18:26] = 2    # 7x8 = 56
+    return mask
+
+
+def _volume_two_cells():
+    mask = _mask_two_different_areas()
+    img_vol = np.zeros((2, 30, 30, 3), dtype=np.uint8)
+    mask_vol = np.stack([mask, mask], axis=0)
+    return img_vol, mask_vol
+
+
+def test_color_by_populates_dropdown_from_result_columns(widget, app):
+    img_vol, mask_vol = _volume_two_cells()
+    widget._show_volume_results(img_vol, mask_vol)
+    app.processEvents()
+
+    items = [widget.color_by.itemText(i) for i in range(widget.color_by.count())]
+    keys = [widget.color_by.itemData(i) for i in range(widget.color_by.count())]
+    assert items[0] == "Instance ID (default)"
+    assert "Volume (px³)" in items          # the 3-D schema's counterpart to "area"
+    assert "Centroid X (px)" in items
+    assert "cell_id" not in keys            # never offered as a colour-by choice
+    assert widget._color_card.isVisible() is True
+
+
+def test_color_by_hidden_when_no_cells(widget, app):
+    img_vol = np.zeros((2, 20, 20, 3), dtype=np.uint8)
+    mask_vol = np.zeros((2, 20, 20), dtype=np.int32)
+    widget._show_volume_results(img_vol, mask_vol)
+    app.processEvents()
+    assert widget._color_card.isVisible() is False
+
+
+def test_color_by_volume_recolours_fill_and_outline_matching(widget, app):
+    img_vol, mask_vol = _volume_two_cells()
+    widget._show_volume_results(img_vol, mask_vol)
+
+    idx = widget.color_by.findData("volume")
+    assert idx >= 0
+    widget.color_by.setCurrentIndex(idx)
+
+    fill = widget.viewer.layers["sample_masks_fill"]
+    outline = widget.viewer.layers["sample_masks"]
+    assert tuple(fill.get_color(1)) == tuple(outline.get_color(1))
+    assert tuple(fill.get_color(2)) == tuple(outline.get_color(2))
+    assert tuple(fill.get_color(1)) != tuple(fill.get_color(2))   # different volumes
+
+
+def test_color_by_instance_id_restores_default_colours(widget, app):
+    img_vol, mask_vol = _volume_two_cells()
+    widget._show_volume_results(img_vol, mask_vol)
+
+    outline = widget.viewer.layers["sample_masks"]
+    default_1, default_2 = tuple(outline.get_color(1)), tuple(outline.get_color(2))
+
+    widget.color_by.setCurrentIndex(widget.color_by.findData("volume"))
+    assert (tuple(outline.get_color(1)), tuple(outline.get_color(2))) != (default_1, default_2)
+
+    widget.color_by.setCurrentIndex(widget.color_by.findData("instance_id"))
+    assert tuple(outline.get_color(1)) == default_1
+    assert tuple(outline.get_color(2)) == default_2
+
+
+def test_apply_color_by_with_no_result_layers_is_a_noop(widget):
+    # No prediction has been run yet -> no *_masks/*_masks_fill layers exist.
+    widget._apply_color_by("area")   # must not raise

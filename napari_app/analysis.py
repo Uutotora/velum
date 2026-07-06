@@ -436,3 +436,46 @@ def rows_as_csv(result: dict[str, Any]) -> str:
     for row in result["rows"]:
         w.writerow(row)
     return buf.getvalue()
+
+
+def label_colormap_from_measurement(result: dict[str, Any], key: str,
+                                    cmap_name: str = "viridis") -> dict[int, tuple]:
+    """Colour each cell by one of its measured columns instead of a random
+    per-instance colour — a "classify by measurement" heatmap over the
+    population, the way QuPath/CellProfiler let you colour detections by a
+    computed value rather than just identity.
+
+    Values are min-max normalised across the *current* population and mapped
+    through a perceptually-uniform, colourblind-safe colormap — viridis by
+    default, matplotlib's own modern default (it replaced jet specifically
+    because jet's perceptual non-uniformity distorts how differences in the
+    underlying data are perceived; unsuitable for quantitative figures).
+
+    Returns ``{cell_id: (r, g, b, a)}`` in 0..1 floats (matching the format
+    napari's ``DirectLabelColormap`` expects), or ``{}`` if ``key`` isn't one
+    of ``result["columns"]``, there are no rows, or the column isn't numeric
+    (e.g. asking to colour by "cell_id" itself makes no sense — the caller is
+    expected to only offer the non-id columns as choices).
+    """
+    cols = [k for k, _label, _unit in result["columns"]]
+    if key not in cols or key == "cell_id" or not result["rows"]:
+        return {}
+    idx = cols.index(key)
+    idx_id = cols.index("cell_id")
+
+    try:
+        values = [float(row[idx]) for row in result["rows"]]
+    except (TypeError, ValueError):
+        return {}
+    ids = [int(row[idx_id]) for row in result["rows"]]
+
+    from matplotlib import colormaps
+    cmap = colormaps[cmap_name]
+
+    lo, hi = min(values), max(values)
+    if hi <= lo:
+        # No spread in this population (e.g. a single cell, or all-identical
+        # values) — colour every cell the same rather than dividing by zero.
+        rgba = tuple(cmap(0.5))
+        return {i: rgba for i in ids}
+    return {i: tuple(cmap((v - lo) / (hi - lo))) for i, v in zip(ids, values)}

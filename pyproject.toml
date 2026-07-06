@@ -68,7 +68,12 @@ sam2 = [
 # The pure-logic test suite (analysis/benchmark/cohort/advisor/tiling/formats)
 # must run WITHOUT torch or napari, so CI installs only this group. Kept in a
 # PEP 735 dependency-group (not an extra) so `pip install --group test` pulls
-# these deps alone, without the heavy runtime dependencies above.
+# these deps alone, without the heavy runtime dependencies above. matplotlib
+# is listed explicitly (not just implied by scikit-image) because it's only
+# an *optional* extra of scikit-image/scipy/nibabel — the same class of gap
+# that bit nibabel itself before it was added here directly: analysis.py's
+# colour-by-measurement path needs a real colormap, which no other package
+# in this group pulls in transitively.
 [dependency-groups]
 test = [
     "numpy",
@@ -76,6 +81,7 @@ test = [
     "scikit-image",
     "opencv-python-headless",
     "nibabel",
+    "matplotlib",
     "pytest",
 ]
 dev = [
