@@ -18,6 +18,24 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-06 (later still) — user-reported bugs, not backlog items
+
+- **Fixed a Refine crash (`KeyError: 'deterministic'`)** — `_run_refine` built
+  its config through the engine-selector-dependent `_build_config()`, so
+  refining a LoRA checkpoint while the Predict tab's engine selector was on
+  Cellpose-SAM produced Cellpose's short config, missing every SAM/LoRA
+  training key. Refine always trains via `cellseg1_train.py` regardless of
+  the selector, so it now calls `_sam_config()` directly, same as the
+  interactive Annotate session already did.
+- **Fixed a duplicated download icon** on "Load sample microscopy images" —
+  the button already had a proper `QIcon`; the post-fetch label text also
+  prepended its own "⬇" emoji on top of it.
+- **Fixed leftover native step-button chrome on the µm/pixel calibration
+  field** — it was the one spinbox in `predict_widget.py` missing
+  `setButtonSymbols(NoButtons)`, which every sibling spinbox already sets.
+
+---
+
 ## 2026-07-06 (yet even later)
 
 - **Warn before silently downsampling a large image** (P1 backlog item).

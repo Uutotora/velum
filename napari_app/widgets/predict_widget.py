@@ -326,6 +326,7 @@ class PredictWidget(QWidget):
         self.pixel_size.setSingleStep(0.05)
         self.pixel_size.setSuffix("  µm / pixel")
         self.pixel_size.setSpecialValueText("off  —  measure in pixels")
+        self.pixel_size.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.pixel_size.setMinimumHeight(34)
         self.pixel_size.setToolTip(
             "Microns per pixel from your microscope. Set it to report areas in "
@@ -763,7 +764,7 @@ class PredictWidget(QWidget):
 
     def _on_samples_done(self):
         self._sample_btn.setEnabled(True)
-        self._sample_btn.setText("⬇  Load sample microscopy images")
+        self._sample_btn.setText("  Load sample microscopy images")
         paths = getattr(self, "_sample_paths", [])
         if not paths:
             self._append_log("[WARN] No samples were written")
@@ -979,9 +980,11 @@ class PredictWidget(QWidget):
         return self._controller.build_config(self._gather_params())
 
     def _sam_config(self) -> dict:
-        """Full SAM + LoRA config. Used by the CellSeg1 engine and always by the
-        interactive Annotate session (which needs SAM regardless of the engine
-        selector). Requires an image, a LoRA checkpoint and a SAM backbone."""
+        """Full SAM + LoRA config. Used by the CellSeg1 engine and always by
+        the interactive Annotate session and Refine (both need SAM+LoRA
+        regardless of the engine selector — Refine fine-tunes a LoRA
+        checkpoint via cellseg1_train.py, which has no Cellpose equivalent).
+        Requires an image, a LoRA checkpoint and a SAM backbone."""
         return self._controller.sam_config(self._gather_params())
 
     # ── Parameter access for the Assistant agent ──────────────────────────────
@@ -1589,7 +1592,10 @@ class PredictWidget(QWidget):
         if not lora_path or not Path(lora_path).exists():
             self._append_log("[ERROR] No checkpoint selected"); return
         try:
-            base_config = self._build_config()
+            # Always the full SAM+LoRA config, like Annotate — Refine always
+            # fine-tunes the selected LoRA checkpoint via cellseg1_train.py,
+            # regardless of which engine the Predict tab's selector shows.
+            base_config = self._sam_config()
         except ValueError as e:
             self._append_log(f"[ERROR] {e}"); return
 
