@@ -12,12 +12,25 @@ up cached features, and skips the encoder if the crop was already processed.
 This works correctly even with crop_n_layers=1 (multiple crops per image).
 
 Cache is invalidated when:
-  - checkpoint path, vit_name, lora_rank, sam_image_size, or device changes
+  - checkpoint path, vit_name, lora_rank, sam_image_size, device, or the
+    *effective* compile_decoder setting (see use_compile below) changes
     → full model reload + full embedding invalidation
   - image path or mtime changes
     → embedding cache cleared, model kept
   - only inference params change (IoU, NMS thresholds, etc.)
     → both caches kept, decoder re-runs on cached embeddings (~1-2 sec)
+
+Two opt-in, off-by-default perf toggles (config["half_precision"] / config
+["compile_decoder"]), gated CUDA-only by use_amp()/use_compile():
+  - half_precision wraps mask generation in torch.autocast(fp16) on CUDA.
+  - compile_decoder runs the cached model's mask_decoder through
+    torch.compile() once, after loading (best-effort — falls back to eager
+    silently if compilation fails).
+Neither applies on CPU/MPS: MPS already runs with PYTORCH_ENABLE_MPS_FALLBACK
+(see _load_model), so any op autocast/compile introduces that MPS can't run
+would silently execute on the CPU per-op instead — slower than plain eager
+MPS, not faster. If that fallback story improves in a future torch/MPS
+release, use_amp/use_compile are the one place to loosen the gating.
 """
 
 from __future__ import annotations
@@ -32,6 +45,7 @@ import numpy as np
 
 _model: Any = None          # LoRA_Sam
 _model_key: tuple | None = None
+_compiled: bool = False     # whether the cached model's decoder is torch.compiled
 
 # embed_cache: maps sha256(image_crop_bytes) → features tensor (on device)
 _embed_cache: dict = {}
@@ -48,7 +62,39 @@ def _mk_model_key(config: dict) -> tuple:
         config["image_encoder_lora_rank"],
         config["sam_image_size"],
         config.get("selected_device", "cpu"),
+        use_compile(config),
     )
+
+
+def _is_cuda_device(selected_device: str) -> bool:
+    """True if ``selected_device`` names a CUDA index rather than "cpu"/"mps".
+
+    Mirrors the device-string convention ``_load_model`` already uses:
+    anything that isn't "cpu"/"mps" is a CUDA device index handed straight to
+    CUDA_VISIBLE_DEVICES.
+    """
+    return bool(selected_device) and selected_device not in ("cpu", "mps")
+
+
+def use_amp(config: dict) -> bool:
+    """Whether ``predict_cached`` should run mask generation under CUDA
+    autocast(fp16). Opt-in via ``config["half_precision"]``; CUDA-only
+    regardless of the flag — see the module docstring for why MPS is excluded.
+    """
+    return bool(config.get("half_precision")) and _is_cuda_device(
+        config.get("selected_device", "cpu"))
+
+
+def use_compile(config: dict) -> bool:
+    """Whether the cached model's mask decoder should be torch.compiled.
+
+    Opt-in via ``config["compile_decoder"]``; same CUDA-only gating as
+    ``use_amp``. Used in ``_mk_model_key`` so toggling it forces a reload —
+    and, being already CUDA-gated here, toggling it on a non-CUDA device
+    never does (nothing to invalidate).
+    """
+    return bool(config.get("compile_decoder")) and _is_cuda_device(
+        config.get("selected_device", "cpu"))
 
 
 def _mk_img_key(config: dict) -> tuple:
@@ -155,8 +201,12 @@ def predict_cached(config: dict, image_rgb: np.ndarray) -> np.ndarray:
     mg.predictor = CachingPredictor(mg.predictor, _embed_cache)
 
     import torch
-    with torch.no_grad():
-        output = mg.generate(image_rgb)
+    if use_amp(config):
+        with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.float16):
+            output = mg.generate(image_rgb)
+    else:
+        with torch.no_grad():
+            output = mg.generate(image_rgb)
 
     if not output:
         return np.zeros(image_rgb.shape[:2], dtype=np.uint16)
@@ -197,17 +247,40 @@ def _load_model(config: dict):
     )
     model = load_model_from_config(config, empty_lora=False)
     model.eval()
+
+    global _compiled
+    _compiled = use_compile(config) and _try_compile_decoder(model)
+
     return model
+
+
+def _try_compile_decoder(model) -> bool:
+    """Best-effort ``torch.compile`` of the mask decoder in place.
+
+    Returns whether it actually stuck. torch.compile support is uneven across
+    platforms/backends, so a failure here just leaves the decoder eager
+    rather than breaking prediction — the first call after a successful
+    compile recompiles per new input shape (expected warmup), which is why
+    this is opt-in rather than always-on.
+    """
+    import torch
+    model_sam = model.sam if hasattr(model, "sam") else model
+    try:
+        model_sam.mask_decoder = torch.compile(model_sam.mask_decoder)
+        return True
+    except Exception:
+        return False
 
 
 def invalidate_model():
     """Call when the user switches to a different checkpoint."""
-    global _model, _model_key, _embed_cache, _embed_model_key, _embed_img_key
+    global _model, _model_key, _embed_cache, _embed_model_key, _embed_img_key, _compiled
     _model = None
     _model_key = None
     _embed_cache.clear()
     _embed_model_key = None
     _embed_img_key = None
+    _compiled = False
 
 
 def invalidate_embeddings():
@@ -221,7 +294,8 @@ def cache_status() -> str:
     n_crops = len(_embed_cache)
     model_name = Path(_model_key[0]).name if _model_key else "—"
     img_name   = Path(_embed_img_key[0]).name if _embed_img_key else "—"
+    suffix = " · compiled" if _compiled else ""
     return (
-        f"model: {model_name}  |  "
+        f"model: {model_name}{suffix}  |  "
         f"embed: {img_name} ({n_crops} crop{'s' if n_crops != 1 else ''} cached)"
     )

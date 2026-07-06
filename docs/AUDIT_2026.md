@@ -175,7 +175,9 @@ AI Agent, Конкурентная позиция, Enterprise, Performance, Secu
 - **Мультиканальность реализована.** Настоящий channel picker (не 3-канальный коллапс), per-channel percentile-нормализация, измерения могут репортить интенсивность по выбранному каналу.
 - **Форматы реализованы.** OME-TIFF/ND2/CZI/LIF через `napari_app/channels.py`, авто-заполнение µm/pixel из метаданных, мягкая деградация для отсутствующих ридеров/неизвестных форматов.
 
-Всё ещё открыто из §3.2 — **без изменений**: SAM 2 / 3D (по-прежнему только 2D single-frame), медленный SAM `AutomaticMaskGenerator` (нет ONNX/TensorRT/fp16/`torch.compile`, MPS всё ещё падает в CPU), нет distributed/batch на кластере, нет управления качеством обучения (val-split/early-stop/автоподбор lora_rank), нет калибровки/uncertainty на инстанс. Это по-прежнему самый большой разрыв с рынком (whole-slide теперь закрыт, но 3D/video и скорость — нет).
+Всё ещё открыто из §3.2 — **без изменений**: SAM 2 / 3D (по-прежнему только 2D single-frame), нет ONNX/TensorRT-рантайма, нет distributed/batch на кластере, нет управления качеством обучения (val-split/early-stop/автоподбор lora_rank), нет калибровки/uncertainty на инстанс. Это по-прежнему самый большой разрыв с рынком (whole-slide теперь закрыт, но 3D/video — нет).
+
+**Частично закрыто:** fp16 autocast + `torch.compile` на декодере — реализованы как два independent off-by-default тумблера (`inference_cache.py`: `use_amp()`/`use_compile()`, CUDA-only по `selected_device`), см. `docs/BACKLOG.md` P1 и `docs/CHANGELOG.md` (2026-07-06 вечер). **Не закрыто:** ни разу не измерено на реальном CUDA — в песочнице агента только MPS (`torch.cuda.is_available() == False`), так что "2-4×" из §3.3/roadmap остаётся невалидированной гипотезой, не результатом. MPS по-прежнему падает в CPU для неподдерживаемых операций (`PYTORCH_ENABLE_MPS_FALLBACK=1`) — это осознанно не тронуто (см. код-комментарий в `inference_cache.py`), не забытый гэп.
 
 ---
 
@@ -394,7 +396,7 @@ _Обновлено 2026-07-06 — статус реальный, не план.
 | **Tiled inference + пирамиды (OME-Zarr)** | P0 | L | Критический | 🔄 tiling done, OME-Zarr пирамиды — нет (новый P2 в BACKLOG) |
 | Форматы OME-TIFF/ND2/CZI (BioFormats) | P0 | M | Высокий | ✅ done (+ LIF) |
 | Рефакторинг god-object → core/controller/view | P0 | M | Высокий | ✅ done (`PredictController`) |
-| fp16 + torch.compile инференс | P1 | S | Высокий | ⬜ open — в `docs/BACKLOG.md` P1 |
+| fp16 + torch.compile инференс | P1 | S | Высокий | 🔄 код есть (opt-in, CUDA-only), speedup не измерен — нет CUDA в песочнице |
 
 ### Фаза 2 — Professional (6-12 мес) · «сделать незаменимым для лаборатории»
 | Задача | Приоритет | Сложность | Эффект |
