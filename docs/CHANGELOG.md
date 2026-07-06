@@ -18,6 +18,29 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-07 (even later) — requested UI polish, not a backlog item
+
+- **Predicted/ground-truth masks now show a translucent fill under the
+  outline**, instead of an outline with nothing behind it — the user
+  reported outlines sometimes disappearing against a busy image and asked
+  for the "filled + bordered, same colour" look common tools (QuPath's
+  "Fill detections", CellProfiler's OverlayOutlines) already default to.
+  napari's own Labels layer can't blend a translucent fill and a contour in
+  one layer — `contour` is a 0/N *toggle*, not additive (confirmed against
+  napari's own docs) — so the fix is the standard two-layer overlay: a new
+  `PredictWidget._add_filled_labels` adds a low-opacity filled layer
+  *underneath* the existing contour=1 outline layer, both showing the same
+  label data, so a cell's fill and border always match (napari's per-label
+  colour is a deterministic function of the label id, confirmed with
+  `get_color()`). Applied everywhere a result mask is shown — `_show_results`,
+  `_show_volume_results`, and the ground-truth overlay (which keeps its
+  existing uniform-green colouring, now on both layers) — but not
+  Annotate's interactive paint layer, a live editing canvas with different
+  tradeoffs left for a separate look if wanted. 7 new tests exercising real
+  `napari.layers.Labels`/`Image` construction (not just recorded mock
+  calls): layer names/contour/opacity, matching fill/outline colour per
+  cell, and no layer accumulation on repeated runs.
+
 ## 2026-07-07 (later) — user-reported bug, not a backlog item
 
 - **Fixed the Predict panel forcing horizontal scroll when SAM2 is

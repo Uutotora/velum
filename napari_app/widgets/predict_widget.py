@@ -1233,6 +1233,36 @@ class PredictWidget(QWidget):
         self.progress_bar.setTextVisible(False)
         self._populate_lora_combo()
 
+    def _add_filled_labels(self, mask: np.ndarray, name: str, *,
+                           outline_opacity: float = 0.7, fill_opacity: float = 0.35,
+                           solid_rgba: tuple | None = None):
+        """Add a mask as two stacked Labels layers instead of outline-only:
+        a low-opacity filled wash underneath a crisp outline on top, so a
+        cell reads clearly even where its border happens to blend into the
+        underlying image — the same "fill + border, one colour" look tools
+        like QuPath ("Fill detections") and CellProfiler's OverlayOutlines
+        already default to.
+
+        napari's own Labels layer can't blend fill and contour in a single
+        layer — `contour` is a 0/N *toggle* (filled *or* outline-only), not
+        additive — so two layers sharing the same label data is the
+        standard way to get both at once; the outline layer is added last
+        so it renders on top of the fill.
+
+        ``solid_rgba``, if given, paints every label the same colour on
+        both layers instead of napari's default random-per-label colours
+        (used for the ground-truth overlay, so it reads as one consistent
+        colour rather than a rainbow that would blend with the prediction
+        layer). Returns the outline layer (the one on top, contour=1).
+        """
+        fill = self.viewer.add_labels(mask, name=f"{name}_fill", opacity=fill_opacity)
+        outline = self.viewer.add_labels(mask, name=name, opacity=outline_opacity)
+        outline.contour = 1
+        if solid_rgba is not None:
+            _color_labels_solid(fill, mask, solid_rgba)
+            _color_labels_solid(outline, mask, solid_rgba)
+        return outline
+
     def _show_results(self, img_arr, mask):
         name = Path(self.image_path.text()).stem
         self._last_mask     = mask
@@ -1245,8 +1275,7 @@ class PredictWidget(QWidget):
 
         self.viewer.add_image(img_arr, name=f"{name}_image")
         if mask is not None and mask.max() > 0:
-            lyr = self.viewer.add_labels(mask.astype(np.int32), name=f"{name}_masks", opacity=0.7)
-            lyr.contour = 1
+            self._add_filled_labels(mask.astype(np.int32), f"{name}_masks")
         self._recompute_measurements()
         # Count the headline number up for a live, product feel.
         if mask is not None and int(mask.max()) > 0:
@@ -1283,8 +1312,7 @@ class PredictWidget(QWidget):
         self.viewer.add_image(img_vol, name=f"{name}_image")
         n_cells = int(mask_vol.max()) if mask_vol is not None and mask_vol.size else 0
         if n_cells > 0:
-            lyr = self.viewer.add_labels(mask_vol.astype(np.int32), name=f"{name}_masks", opacity=0.7)
-            lyr.contour = 1
+            self._add_filled_labels(mask_vol.astype(np.int32), f"{name}_masks")
 
         from napari_app import analysis
         try:
@@ -1524,12 +1552,11 @@ class PredictWidget(QWidget):
             name  = Path(self.image_path.text()).stem
             lname = f"{name}_gt"
             for lyr in list(self.viewer.layers):
-                if lyr.name == lname:
+                if lyr.name in (lname, f"{lname}_fill"):
                     self.viewer.layers.remove(lyr)
-            l = self.viewer.add_labels(gt, name=lname, opacity=0.9)
-            l.contour = 1
-            _color_labels_solid(l, gt, (0.0, 1.0, 0.35, 1.0))  # uniform green
-            self._append_log(f"✓ GT loaded — {int(gt.max())} cells (green outline)")
+            self._add_filled_labels(gt, lname, outline_opacity=0.9,
+                                    solid_rgba=(0.0, 1.0, 0.35, 1.0))  # uniform green
+            self._append_log(f"✓ GT loaded — {int(gt.max())} cells (green)")
         except Exception as e:
             self._append_log(f"[ERROR] {e}")
 
