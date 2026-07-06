@@ -92,6 +92,20 @@ You usually cannot launch the napari GUI. Verify what you can:
 4. Say plainly in your summary what you did **not** verify (e.g. real GUI
    behaviour, real model inference).
 
+**If a new pure-logic test reaches real image I/O** (anything that ends up
+calling `data.utils`, e.g. through `_predict_cached`), don't trust a green
+suite in the full conda env as proof it'll pass in CI — that env already has
+every dependency installed, so it can't reveal a module the light `test`
+dependency-group is missing (this bit the predict-controller split: `data/
+utils.py` hard-imports `nibabel`, which no `test`-group package pulls in
+transitively, and the local suite stayed green while CI failed). Check with a
+throwaway venv that installs *only* the declared group:
+```
+python3.12 -m venv /tmp/civenv && /tmp/civenv/bin/pip install --group test . \
+  && /tmp/civenv/bin/python -m pytest -q
+```
+(needs a `python<3.13` on PATH — `requires-python` caps at 3.12).
+
 ## Working agreement (conventions)
 
 - **One meaningful change = one commit, then push.** Keep commits focused.
