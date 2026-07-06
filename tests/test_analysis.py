@@ -11,6 +11,7 @@ import pytest
 
 from napari_app.analysis import (
     compute_measurements,
+    label_colormap_from_measurement,
     rows_as_csv,
     summary_line,
 )
@@ -264,3 +265,70 @@ def test_rows_as_csv_3d_result():
     lines = csv.strip().splitlines()
     assert len(lines) == 1 + res["n_cells"]
     assert "Volume" in lines[0]
+
+
+# ── label_colormap_from_measurement (colour cells by a measurement) ─────────
+
+def _two_cell_result():
+    mask = np.zeros((40, 40), dtype=np.int32)
+    _square(mask, 1, 2, 2, 6)     # area 36, the smaller cell
+    _square(mask, 2, 20, 20, 15)  # area 225, the bigger cell
+    return compute_measurements(mask)
+
+
+def test_label_colormap_orders_low_to_high_through_the_real_colormap():
+    res = _two_cell_result()
+    cmap_out = label_colormap_from_measurement(res, "area")
+    assert set(cmap_out) == {1, 2}
+
+    from matplotlib import colormaps
+    viridis = colormaps["viridis"]
+    assert cmap_out[1] == pytest.approx(tuple(viridis(0.0)))   # smallest -> low end
+    assert cmap_out[2] == pytest.approx(tuple(viridis(1.0)))   # largest -> high end
+
+
+def test_label_colormap_keys_are_cell_ids_not_row_index():
+    mask = np.zeros((20, 20), dtype=np.int32)
+    _square(mask, 5, 2, 2, 4)   # a non-consecutive label id
+    res = compute_measurements(mask)
+    cmap_out = label_colormap_from_measurement(res, "area")
+    assert set(cmap_out) == {5}
+
+
+def test_label_colormap_missing_key_returns_empty():
+    res = _two_cell_result()
+    assert label_colormap_from_measurement(res, "not_a_real_column") == {}
+
+
+def test_label_colormap_cell_id_column_returns_empty():
+    # Colouring "by instance id" is the default random-colour path already —
+    # not a measurement, so it's explicitly excluded here.
+    res = _two_cell_result()
+    assert label_colormap_from_measurement(res, "cell_id") == {}
+
+
+def test_label_colormap_empty_result_returns_empty():
+    res = compute_measurements(np.zeros((10, 10), dtype=np.int32))
+    assert label_colormap_from_measurement(res, "area") == {}
+
+
+def test_label_colormap_no_spread_uses_middle_of_colormap():
+    mask = np.zeros((20, 20), dtype=np.int32)
+    _square(mask, 1, 1, 1, 4)   # two identically-sized cells -> no spread
+    _square(mask, 2, 10, 10, 4)
+    res = compute_measurements(mask)
+    cmap_out = label_colormap_from_measurement(res, "area")
+
+    from matplotlib import colormaps
+    mid = tuple(colormaps["viridis"](0.5))
+    assert cmap_out[1] == pytest.approx(mid)
+    assert cmap_out[2] == pytest.approx(mid)
+
+
+def test_label_colormap_respects_cmap_name():
+    res = _two_cell_result()
+    cmap_out = label_colormap_from_measurement(res, "area", cmap_name="plasma")
+    from matplotlib import colormaps
+    plasma = colormaps["plasma"]
+    assert cmap_out[1] == pytest.approx(tuple(plasma(0.0)))
+    assert cmap_out[2] == pytest.approx(tuple(plasma(1.0)))

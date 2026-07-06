@@ -18,6 +18,62 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-07 (yet even later) — requested features, not backlog items
+
+- **Colour cells by a measurement** (a "Display" card in the Predict tab).
+  A researched-and-requested feature: QuPath/CellProfiler both let you
+  colour detections by a computed value (a population heatmap) instead of
+  only by identity. New `analysis.label_colormap_from_measurement()` maps a
+  chosen column (area, circularity, intensity, ...) through matplotlib's
+  viridis colormap (perceptually-uniform, colourblind-safe — the modern
+  default that replaced jet for exactly this reason), min-max normalised
+  across the current population; the widget applies it to both the fill and
+  outline layers via napari's `DirectLabelColormap`, and remembers each
+  layer's original colormap (in `.metadata`) to restore instance-ID
+  colouring on demand. Works for 2-D and volume (z-stack) results alike,
+  independent of the Results card's 2-D-only hero chips. Surfaced a real gap
+  while wiring it up: `_apply_color_by` is called unconditionally after every
+  prediction, and an older test fixture's plain-list stand-in for
+  `viewer.layers` doesn't support name-based lookup the way a real
+  `LayerList` does — broadened the lookup's exception handling
+  (`KeyError`/`TypeError`) so it degrades to a no-op regardless, instead of
+  only working against real napari. matplotlib added to the pure-logic
+  `test` dependency-group (pyproject.toml) — the same class of gap as the
+  nibabel incident: it's only an optional extra of scikit-image/scipy/
+  nibabel, never installed by `pip install --group test` on its own.
+
+- **Interactive box-prompt segmentation** (Annotate tab). Also
+  researched-and-requested: napari-segment-anything and similar tools pair
+  a Points layer (click prompts) with a Shapes layer (box prompts) — SAM's
+  own `SamPredictor.predict()` already accepts a `box=` argument natively,
+  so `InteractiveSession.predict()` just needed to thread it through
+  (`multimask_output=False` for a box, per SAM's own docs — a box is a far
+  less ambiguous prompt than a single click). The Annotate tab now creates a
+  second layer, `*_box_prompt` (a Shapes layer, pre-armed with the rectangle
+  tool), alongside its existing click-to-segment Points layer: drawing a
+  rectangle segments everything inside it as a new object, and a follow-up
+  shift/⌘-click still refines it same as a point-started cell (the box's
+  low-res mask carries forward as `_last_low` exactly like a click's does).
+  The existing point-click callback steps aside while the Shapes layer is
+  the active one, so drawing a box is never misread as an accidental pan-
+  triggered click. Caught two real bugs before shipping: clearing the
+  Shapes layer after each box re-entered the same data-changed handler
+  recursively (napari hadn't finished its own bookkeeping by the time the
+  re-entrant call read `.data` back, so the "already empty" guard never
+  tripped) — fixed by disconnecting the handler for the duration of the
+  clear; and the box-to-pixel-bounds clipping let a box drawn entirely
+  outside the image through as a valid tiny one (an asymmetric clip range
+  meant to avoid a zero-width box instead let a fully-out-of-bounds box
+  clip to a valid-looking corner) — fixed with symmetric clipping plus the
+  existing degeneracy check.
+
+  26 new tests across both features (analysis.py's colormap function,
+  predict_widget.py's card/colouring wiring, `_rect_to_box_xyxy`'s pure
+  coordinate math, and `annotate_widget.py`'s full box-to-paint round trip —
+  the latter a first for this file, which had zero test coverage before).
+  **Not verified:** the actual rendered look/feel on a real screen (no
+  display in this sandbox).
+
 ## 2026-07-07 (even later) — requested UI polish, not a backlog item
 
 - **Predicted/ground-truth masks now show a translucent fill under the
