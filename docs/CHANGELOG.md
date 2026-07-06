@@ -33,6 +33,13 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 - **Fixed leftover native step-button chrome on the µm/pixel calibration
   field** — it was the one spinbox in `predict_widget.py` missing
   `setButtonSymbols(NoButtons)`, which every sibling spinbox already sets.
+- **Clarified the "Sample" switcher and GT autofill** — not a bug: GT autofill
+  only fires when a matching `_gt`/`_mask` sidecar file actually exists, and
+  of the 6 bundled quick samples only the synthetic `sample_phantom.png` ships
+  with one (real ground truth for the others requires "Download BBBC039...").
+  The "Sample" dropdown now labels entries "· has GT" so this is visible
+  where the user is actually looking, instead of only in the GT card's status
+  line further down.
 
 ---
 
