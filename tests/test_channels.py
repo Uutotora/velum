@@ -191,3 +191,150 @@ def test_probe_channels_plain_rgb(tmp_path):
                      np.zeros((16, 16, 3), dtype=np.uint8), photometric="rgb")
     n, _ = ch.probe_channels(tmp_path / "rgb.tif")
     assert n == 3                              # a normal RGB image → picker stays hidden
+
+
+# ── z-stack / time-lapse (VolumeStack) ──────────────────────────────────────
+
+def test_stack_from_axes_zstack_keeps_z_as_leading_plane_axis():
+    arr = np.zeros((3, 4, 20, 30), dtype=np.uint16)   # Z,C,Y,X
+    for z in range(3):
+        arr[z, 2] = z + 1                             # distinguish planes
+    vol = ch.stack_from_axes_array_zstack(arr, "ZCYX", pixel_size_um=0.25)
+    assert vol.n_planes == 3
+    assert vol.n_channels == 4
+    assert vol.shape == (20, 30)
+    assert vol.pixel_size_um == 0.25
+    for z in range(3):
+        assert vol.plane(z).channel(2).max() == z + 1
+
+
+def test_stack_from_axes_zstack_prefers_z_over_t_and_reduces_t():
+    # T,Z,C,Y,X — a real timepoint x z-stack x channel acquisition.
+    arr = np.zeros((2, 3, 2, 8, 10), dtype=np.uint16)
+    for z in range(3):
+        for c in range(2):
+            arr[0, z, c] = z * 100 + c * 10 + 1   # t=0 plane: distinguishable, non-zero
+            arr[1, z, c] = 9999                    # t=1: must never surface
+
+    vol = ch.stack_from_axes_array_zstack(arr, "TZCYX")
+    assert vol.n_planes == 3
+    assert vol.n_channels == 2
+    assert vol.shape == (8, 10)
+    assert 9999 not in vol.data                    # T reduced to its first plane
+    for z in range(3):
+        for c in range(2):
+            assert vol.plane(z).channel(c).max() == z * 100 + c * 10 + 1
+
+
+def test_stack_from_axes_zstack_no_stack_axis_gives_single_plane():
+    arr = np.zeros((4, 20, 30), dtype=np.uint16)      # C,Y,X — no Z/T at all
+    vol = ch.stack_from_axes_array_zstack(arr, "CYX", pixel_size_um=1.0)
+    assert vol.n_planes == 1
+    assert vol.n_channels == 4
+    assert vol.pixel_size_um == 1.0
+
+
+def test_stack_from_axes_zstack_mismatched_axes_falls_back_single_plane():
+    arr = np.zeros((4, 20, 30), dtype=np.uint16)
+    vol = ch.stack_from_axes_array_zstack(arr, "XY")   # wrong length for axes
+    assert vol.n_planes == 1
+    assert vol.n_channels == 4                          # heuristic still finds channels
+
+
+def test_read_volume_stack_real_zstack_tiff(tmp_path):
+    import tifffile
+    arr = np.zeros((5, 16, 24), dtype=np.uint16)        # Z,Y,X grayscale z-stack
+    for z in range(5):
+        arr[z] = (z + 1) * 10
+    path = tmp_path / "zstack.tif"
+    tifffile.imwrite(path, arr, photometric="minisblack", metadata={"axes": "ZYX"})
+
+    vol = ch.read_volume_stack(path)
+    assert vol.n_planes == 5
+    assert vol.shape == (16, 24)
+    for z in range(5):
+        assert vol.plane(z).channel(0).max() == (z + 1) * 10
+
+
+def test_read_volume_stack_propagates_pixel_size(tmp_path):
+    import tifffile
+    arr = np.zeros((3, 16, 16), dtype=np.uint16)
+    path = tmp_path / "zcal.ome.tif"
+    tifffile.imwrite(path, arr, photometric="minisblack",
+                     metadata={"axes": "ZYX", "PhysicalSizeX": 0.5, "PhysicalSizeXUnit": "µm"})
+    vol = ch.read_volume_stack(path)
+    assert vol.pixel_size_um == pytest.approx(0.5)
+
+
+def test_read_volume_stack_no_z_axis_is_one_plane(tmp_path):
+    import tifffile
+    arr = np.zeros((4, 20, 30), dtype=np.uint16)        # C,Y,X — a plain multi-channel image
+    path = tmp_path / "flat.tif"
+    tifffile.imwrite(path, arr, metadata={"axes": "CYX"})
+    vol = ch.read_volume_stack(path)
+    assert vol.n_planes == 1
+    assert vol.n_channels == 4
+
+
+def test_read_volume_stack_non_tiff_is_one_plane(tmp_path):
+    import cv2
+    img = np.zeros((20, 30, 3), dtype=np.uint8)
+    path = tmp_path / "rgb.png"
+    cv2.imwrite(str(path), img)
+    vol = ch.read_volume_stack(path)
+    assert vol.n_planes == 1
+    assert vol.shape == (20, 30)
+
+
+# ── has_z_stack ──────────────────────────────────────────────────────────────
+
+def test_has_z_stack_true_for_multiplane_z(tmp_path):
+    import tifffile
+    arr = np.zeros((5, 16, 16), dtype=np.uint16)
+    path = tmp_path / "z.tif"
+    tifffile.imwrite(path, arr, metadata={"axes": "ZYX"})
+    assert ch.has_z_stack(path) is True
+
+
+def test_has_z_stack_true_for_multiplane_t(tmp_path):
+    import tifffile
+    arr = np.zeros((4, 16, 16), dtype=np.uint16)
+    path = tmp_path / "t.tif"
+    tifffile.imwrite(path, arr, metadata={"axes": "TYX"})
+    assert ch.has_z_stack(path) is True
+
+
+def test_has_z_stack_false_for_single_plane(tmp_path):
+    import tifffile
+    path = tmp_path / "flat.tif"
+    tifffile.imwrite(path, np.zeros((16, 16), dtype=np.uint8))
+    assert ch.has_z_stack(path) is False
+
+
+def test_has_z_stack_false_for_length_one_z_axis(tmp_path):
+    import tifffile
+    arr = np.zeros((1, 16, 16), dtype=np.uint16)
+    path = tmp_path / "z1.tif"
+    tifffile.imwrite(path, arr, metadata={"axes": "ZYX"})
+    assert ch.has_z_stack(path) is False
+
+
+def test_has_z_stack_false_for_multichannel_single_plane(tmp_path):
+    import tifffile
+    arr = np.zeros((4, 20, 30), dtype=np.uint16)   # C,Y,X — channels, not a stack
+    path = tmp_path / "chan.tif"
+    tifffile.imwrite(path, arr, metadata={"axes": "CYX"})
+    assert ch.has_z_stack(path) is False
+
+
+def test_has_z_stack_false_for_non_tiff(tmp_path):
+    import cv2
+    path = tmp_path / "rgb.png"
+    cv2.imwrite(str(path), np.zeros((8, 8, 3), dtype=np.uint8))
+    assert ch.has_z_stack(path) is False
+
+
+def test_has_z_stack_false_for_unreadable_file(tmp_path):
+    path = tmp_path / "mystery.tif"
+    path.write_bytes(b"not a real tiff")
+    assert ch.has_z_stack(path) is False

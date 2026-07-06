@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from napari_app import engines as _builtin_engines  # noqa: F401 — registers built-in engines
+from napari_app import engines_sam2 as _sam2_engine  # noqa: F401 — registers the SAM2 engine
 from napari_app.engine_registry import get as get_engine, all_engines
 
 ENGINE_LABELS = {spec.key: spec.result_label for spec in all_engines()}
@@ -150,6 +151,68 @@ def _apply_clahe(rgb: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2RGB)
 
 
+def _predict_volume(config, on_slice=None, sink=None):
+    """Segment a z-stack/time-lapse (``config['image_path']`` has more than
+    one Z/T plane) one plane at a time and stitch the per-plane instance
+    masks into one consistent (Z, H, W) volume.
+
+    Engine-agnostic: dispatches each plane through the exact same
+    ``engine_registry`` entry the 2-D path uses (SAM2 is the flagship use
+    case — see ``napari_app.engines_sam2`` — but any registered engine works
+    here unchanged, since this only ever calls ``spec.predict(frame,
+    config)``). The new behaviour is entirely in how planes are read
+    (:func:`napari_app.channels.read_volume_stack`, which keeps the Z/T axis
+    instead of reducing it) and how the per-plane masks are linked afterwards
+    (:func:`napari_app.volume_stitch.stitch_slices`).
+
+    Not composed with tiling in this first cut: a whole-slide-sized z-stack
+    would need both, which is out of scope for now (``config["tiled"]`` is
+    ignored here) — documented rather than silently accepted.
+    """
+    from data.utils import resize_image
+    import cv2
+    from napari_app.channels import read_volume_stack, project_to_rgb
+    from napari_app.volume_stitch import stitch_slices
+
+    vstack = read_volume_stack(config["image_path"])
+    if sink is not None:
+        sink["volume_stack"] = vstack
+
+    channels = config.get("channels")
+    spec = get_engine(config.get("engine") or "cellseg1")
+
+    n = vstack.n_planes
+    frames = []
+    slice_masks = []
+    for z in range(n):
+        rgb = project_to_rgb(vstack.plane(z), channels,
+                             low=float(config.get("channel_low", 1.0)),
+                             high=float(config.get("channel_high", 99.0)))
+        rgb = _to_display_uint8(rgb)
+        frames.append(rgb)
+
+        orig_h, orig_w = rgb.shape[:2]
+        resized = resize_image(rgb, config["resize_size"])
+        if config.get("clahe"):
+            resized = _apply_clahe(resized)
+        small = spec.predict(resized, config)
+        if small.shape != (orig_h, orig_w):
+            mask = cv2.resize(small.astype(np.float32), (orig_w, orig_h),
+                              interpolation=cv2.INTER_NEAREST).astype(small.dtype)
+        else:
+            mask = small
+        slice_masks.append(np.asarray(mask))
+
+        if on_slice is not None:
+            on_slice(z + 1, n)
+
+    min_size = int(config.get("min_mask_area") or config.get("min_mask_region_area") or 0)
+    volume_mask = stitch_slices(slice_masks, iou_thresh=float(config.get("stitch_iou", 0.25)),
+                                min_size=min_size)
+    image_volume = np.stack(frames, axis=0)
+    return image_volume, volume_mask
+
+
 # ── Controller: config building + predict/batch/benchmark orchestration ──────
 
 class PredictController:
@@ -176,8 +239,9 @@ class PredictController:
         """Build the engine config dict from a snapshot of UI values.
 
         Mirrors the previous ``PredictWidget._build_config`` 1:1: Cellpose-SAM
-        needs no LoRA/SAM checkpoint (a much shorter config); everything else
-        delegates to :meth:`sam_config`.
+        needs no LoRA/SAM checkpoint (a much shorter config); SAM2 needs its
+        own checkpoint+config (no LoRA either — see :meth:`sam2_config`);
+        everything else delegates to :meth:`sam_config`.
         """
         img = params["image_path"]
         if not img or not Path(img).exists():
@@ -202,7 +266,12 @@ class PredictController:
                 "image_encoder_lora_rank": params["lora_rank"],
                 "sam_image_size": rs, "result_pth_path": "",
                 "channels": params["channels"],
+                "zstack": bool(params.get("zstack", False)),
+                "stitch_iou": float(params.get("stitch_iou", 0.25)),
             }
+
+        if params["engine"] == "sam2":
+            return PredictController.sam2_config(params)
 
         return PredictController.sam_config(params)
 
@@ -253,6 +322,50 @@ class PredictController:
             "tiled": params["tiled"],
             "tile_size": rs, "tile_overlap": 0,
             "channels": params["channels"],
+            "zstack": bool(params.get("zstack", False)),
+            "stitch_iou": float(params.get("stitch_iou", 0.25)),
+        }
+
+    @staticmethod
+    def sam2_config(params: dict) -> dict:
+        """SAM2 config: zero-shot, like Cellpose-SAM — no LoRA checkpoint —
+        but needs its own checkpoint + Hydra config name instead (see
+        :mod:`napari_app.engines_sam2`)."""
+        img = params["image_path"]
+        if not img or not Path(img).exists():
+            raise ValueError(f"Image not found: {img}")
+        if not get_engine("sam2").available():
+            raise ValueError(
+                "SAM2 is not installed — run: pip install sam2  "
+                "(see github.com/facebookresearch/sam2)")
+        from napari_app.engines_sam2 import resolve_sam2
+        model_type = params.get("sam2_model_type") or "large"
+        ckpt, config_name = resolve_sam2(
+            params.get("sam2_checkpoint_text", ""), params.get("sam2_config_text", ""),
+            model_type, params["storage_dir"])
+        rs = int(params["resize_size"])
+        return {
+            "engine": "sam2", "image_path": img,
+            "resize_size": [rs, rs],
+            "sam2_checkpoint": ckpt,
+            "sam2_config_name": config_name,
+            "sam2_model_type": model_type,
+            "points_per_side":        params.get("points_per_side", 32),
+            "pred_iou_thresh":        params.get("pred_iou_thresh", 0.8),
+            "stability_score_thresh": params.get("stability_score_thresh", 0.6),
+            "box_nms_thresh":         params.get("box_nms_thresh", 0.7),
+            "min_mask_area":          params.get("min_mask_area", 0),
+            "selected_device": params["device"],
+            "clahe": params["clahe"],
+            "tiled": params["tiled"],
+            "tile_size": rs, "tile_overlap": 0,
+            "channels": params["channels"],
+            "zstack": bool(params.get("zstack", False)),
+            "stitch_iou": float(params.get("stitch_iou", 0.25)),
+            # kept so downstream (caching keys) stays valid
+            "vit_name": params.get("vit_name", "vit_h"),
+            "image_encoder_lora_rank": params.get("lora_rank", 4),
+            "sam_image_size": rs, "result_pth_path": "",
         }
 
     @staticmethod
@@ -307,6 +420,39 @@ class PredictController:
                             "[HINT] Large image — inference resized it, which can lose "
                             "small cells. Enable \"Large image: tile at native "
                             "resolution\" for full detail.")
+            except Exception as e:
+                import traceback
+                if on_log:
+                    on_log(f"[ERROR] {e}\n{traceback.format_exc()}")
+            finally:
+                if on_finish:
+                    on_finish()
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        return t
+
+    def run_volume_prediction_async(self, config: dict, *, on_slice=None, on_result=None,
+                                     on_log=None, on_finish=None) -> threading.Thread:
+        """Predict a z-stack/time-lapse on a background daemon thread.
+
+        Mirrors :meth:`run_prediction_async`'s callback contract exactly, but
+        for volumes: ``on_result(image_volume, mask_volume, volume_stack)``
+        fires with ``(Z, H, W, 3)``/``(Z, H, W)`` arrays instead of 2-D ones,
+        and ``on_slice(done, total)`` reports per-plane progress (the volume
+        equivalent of ``run_prediction_async``'s ``on_tile``).
+        """
+        def run():
+            try:
+                sink = {}
+                img_vol, mask_vol = _predict_volume(config, on_slice=on_slice, sink=sink)
+                if on_result:
+                    on_result(img_vol, mask_vol, sink.get("volume_stack"))
+                if on_log:
+                    spec = get_engine(config.get("engine") or "cellseg1")
+                    status = spec.status_line() if spec.status_line else spec.result_label
+                    n_instances = int(mask_vol.max()) if mask_vol.size else 0
+                    on_log(f"✓ {n_instances} cells across {mask_vol.shape[0]} planes  [{status}]")
             except Exception as e:
                 import traceback
                 if on_log:

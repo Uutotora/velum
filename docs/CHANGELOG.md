@@ -18,6 +18,44 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-06 (night)
+
+- **SAM 2 engine for z-stacks / time-lapse** (top open P1 backlog item —
+  previously the single largest ML-pipeline gap per `docs/AUDIT_2026.md`).
+  New `napari_app/engines_sam2.py` registers SAM2 as a third `EngineSpec`,
+  lazy-imported and `available()`-gated exactly like Cellpose, so the app
+  (and CI) are unaffected without the optional `sam2` package/checkpoint
+  installed (`pip install -e ".[sam2]"`). The z-stack/time-lapse capability
+  itself is a new engine-agnostic layer, not SAM2-specific: new
+  `napari_app/volume_stitch.py` links independently-segmented 2-D planes
+  into one consistent instance volume by adjacent-slice IoU (the same idea
+  Cellpose's own `stitch3D` uses — fully pure-logic, unit-tested without any
+  GPU); `napari_app/channels.py` gained a `VolumeStack`/`read_volume_stack`/
+  `has_z_stack` path that keeps a TIFF/OME-TIFF's Z/T axis instead of always
+  reducing it to the first plane; `predict_controller.py`'s new
+  `_predict_volume`/`run_volume_prediction_async` read a stack, run *any*
+  registered engine per-plane, and stitch — so this also works with Cellpose
+  or CellSeg1, not only SAM2 (which remains the flagship choice, being the
+  only one of the three actually trained for video/volumetric consistency).
+  The Predict tab gained an off-by-default "Segment as z-stack" checkbox
+  (shown only for a file that genuinely has one) and a SAM2 settings card,
+  both following the existing `tiled`-toggle pattern; napari's Image/Labels
+  layers are n-D natively, so results just add the volume arrays directly —
+  3-D per-cell measurements are explicitly not wired up yet (`analysis.py`
+  is 2-D-only), so the results card is hidden rather than showing stale
+  numbers. 66 new tests (163 → 229), including a `PredictWidget`
+  constructed under offscreen Qt with a mocked napari viewer (a real
+  `napari.Viewer()` segfaults in this sandbox) — a first for this repo's
+  test suite, and it caught a real bug pre-commit: a test file's own import
+  order could flip which engine registers first and silently change the
+  Predict tab's default engine. **Not verified:** any real SAM2 inference
+  (no GPU/package/checkpoint here), the guessed checkpoint/Hydra-config
+  filenames (overridable in the UI), or the widget on an actual screen.
+  **Deliberately out of scope:** SAM2's video-predictor propagation mode
+  (stronger but a different, prompt-driven workflow), ND2/CZI/LIF volumes,
+  and z-stack + tiling composed together. See `docs/BACKLOG.md` for the full
+  writeup.
+
 ## 2026-07-06 (evening)
 
 - **fp16 + `torch.compile` inference** (top open P1 backlog item). Two
