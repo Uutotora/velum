@@ -177,14 +177,49 @@ for a credible product · P1 differentiation · P2 later.
 - **Why:** confocal/lightsheet/organoids are 3D; the current pipeline is 2D.
 - **Acceptance:** an `Engine` entry that segments a z-stack and stitches
   instances across z; napari shows the n-D labels.
-- **Touch:** `napari_app/engines.py` (make it a registry), tiling for 3D.
+- **Touch:** `napari_app/engine_registry.py` (`register()` the new
+  `EngineSpec` — the registry itself is done, see below), 3D stitching logic,
+  a SAM2 weights/dependency story. Still sizeable: 3D instance stitching is
+  real algorithm work and needs GPU + real SAM2 checkpoints to verify, neither
+  available in the agent sandbox.
 
-### [ ] Engine registry + plugins  · M
+### [x] Engine registry + plugins  · M
 - **Goal:** turn the two hard-coded engines into a registry so StarDist/
   InstanSeg/Micro-SAM/DeepCell can be added.
 - **Acceptance:** engines register via a small interface (`predict(image,
   params) -> label mask`); the UI lists whatever is registered.
 - **Touch:** `napari_app/engines.py`, `predict_widget` engine selector.
+- **Done:** new `napari_app/engine_registry.py` — a Qt/torch-free
+  `EngineSpec` (key, label, `predict(image, config) -> mask`, `available()`,
+  optional `status_line()`, `bench_label`/`result_label`) plus
+  `register`/`get`/`all_engines`/`is_registered`. `napari_app/engines.py`
+  registers the two built-ins at import time (closures still lazily import
+  torch/cellpose/inference_cache inside the function body, exactly as
+  before — the module stays cheap to import). `predict_controller.py`'s
+  `_predict_cached`/`_predict_tiled` dispatch (previously a hardcoded
+  `if engine == "cellpose": ... else: ...`, duplicated in both functions) now
+  do a single `engine_registry.get(config["engine"]).predict(image, config)`
+  — which also collapsed `_predict_tiled`'s two near-identical per-tile
+  closures into one. `ENGINE_LABELS` (used by the benchmark results table) is
+  now derived from the registry instead of a hand-maintained dict.
+  `predict_widget.py`'s engine combo and the benchmark checklist are both
+  populated by looping `engine_registry.all_engines()` instead of two
+  hardcoded entries each; adding a third engine now means one `register()`
+  call plus its own settings-card/config-building code — not edits to the
+  combo, the checklist, or the dispatch branches.
+  **Deliberately out of scope** (still genuinely engine-specific, not
+  genericized): config *building* (`build_config`/`sam_config` — SAM+LoRA and
+  Cellpose need entirely different parameter shapes), the manifest's
+  per-engine extra fields, and `_on_engine_changed`'s settings-card
+  visibility/hint text. A future engine needs its own branch for those, same
+  as Cellpose already does. 15 new tests in `tests/test_engine_registry.py`
+  (registry mechanics + label defaulting + the built-ins' exact label
+  strings); all 133 pre-existing tests pass unmodified (148 total) — one
+  pre-existing test caught a real bug during this change (a captured-vs-live
+  function reference for `available()`, same class of pitfall the dispatch
+  closures already had to avoid for `predict_cellpose`).
+  **Not verified here:** the real GUI (combo/benchmark-checklist population
+  inspected by code, not click-tested with a display).
 
 ### [ ] fp16 + `torch.compile` inference  · S
 - **Goal:** 2–4× faster inference with no accuracy change of note.

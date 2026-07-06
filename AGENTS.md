@@ -48,7 +48,11 @@ napari_app/            THE PRODUCT (napari desktop app)
                        benchmark orchestration — see below), training/predict
                        state managers, training entry — moved out of the old
                        Streamlit GUI
-  engines.py           Cellpose-SAM engine + engine device mapping
+  engine_registry.py   EngineSpec + register/get/all_engines — the pluggable
+                       engine interface predict_controller.py dispatches
+                       through
+  engines.py           Cellpose-SAM engine + registers both built-in engines
+                       (cellseg1, cellpose) with engine_registry
   inference_cache.py   model + ViT-embedding cache (smart: changing only
                        thresholds skips the encoder)
   tiling.py            native-resolution tiled inference for large images

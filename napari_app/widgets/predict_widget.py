@@ -19,6 +19,7 @@ from napari_app.core.predict_controller import (
     PredictController, _to_display_uint8, _read_for_predict, _predict_cached,
     _predict_tiled, _apply_clahe,
 )
+from napari_app import engine_registry
 from project_root import STORAGE_DIR
 from napari_app.theme import (
     WIDGET_SS, BTN_PRIMARY, BTN_SUCCESS, BTN_SECONDARY, BTN_BROWSE,
@@ -141,10 +142,12 @@ class PredictWidget(QWidget):
         L.setContentsMargins(14, 8, 14, 16)
 
         # ── Engine ────────────────────────────────────────────────────────────
+        # Populated from the engine registry (napari_app/engine_registry.py) so
+        # a newly registered engine shows up here without touching this widget.
         engine_card = SectionCard("Engine", icon="target")
         self.engine = Combo()
-        self.engine.addItem("CellSeg1 · LoRA (one-shot, fine-tuned)", "cellseg1")
-        self.engine.addItem("Cellpose-SAM (zero-shot, generalist)",   "cellpose")
+        for _spec in engine_registry.all_engines():
+            self.engine.addItem(_spec.label, _spec.key)
         self.engine.setToolTip(
             "CellSeg1: SAM + LoRA — best when you've fine-tuned on your own data.\n"
             "Cellpose-SAM: a 2025 generalist foundation model — strong accuracy "
@@ -478,14 +481,13 @@ class PredictWidget(QWidget):
         self.bench_gt.setPlaceholderText("Folder of label masks (matched by file name)")
         _bench_card.addLayout(_dir_row(self, self.bench_gt, "Select GT folder"))
 
-        self.bench_cellseg1 = QCheckBox("CellSeg1 · LoRA (current checkpoint)")
-        self.bench_cellseg1.setChecked(True)
-        self.bench_cellseg1.setStyleSheet(f"color: {LABEL}; font-size: 11px;")
-        self.bench_cellpose = QCheckBox("Cellpose-SAM (zero-shot)")
-        self.bench_cellpose.setChecked(True)
-        self.bench_cellpose.setStyleSheet(f"color: {LABEL}; font-size: 11px;")
-        _bench_card.addWidget(self.bench_cellseg1)
-        _bench_card.addWidget(self.bench_cellpose)
+        self._bench_checks: dict[str, QCheckBox] = {}
+        for _spec in engine_registry.all_engines():
+            cb = QCheckBox(_spec.bench_label)
+            cb.setChecked(True)
+            cb.setStyleSheet(f"color: {LABEL}; font-size: 11px;")
+            _bench_card.addWidget(cb)
+            self._bench_checks[_spec.key] = cb
 
         self.bench_btn = QPushButton("Run benchmark")
         self.bench_btn.setFixedHeight(34); self.bench_btn.setStyleSheet(BTN_SUCCESS)
@@ -664,6 +666,9 @@ class PredictWidget(QWidget):
         return self.engine.currentData() or "cellseg1"
 
     def _on_engine_changed(self, _idx=None):
+        # Which settings cards/hint text apply is bespoke per engine (unlike the
+        # combo list itself, this isn't registry-driven) — a third engine needs
+        # its own branch/settings card here.
         is_cp = self._current_engine() == "cellpose"
         # Checkpoint / SAM-specific controls are irrelevant for Cellpose.
         self._ckpt_card.setVisible(not is_cp)
@@ -1443,9 +1448,7 @@ class PredictWidget(QWidget):
             self._append_log("[ERROR] Benchmark: images folder not found"); return
         if not gt_dir.is_dir():
             self._append_log("[ERROR] Benchmark: GT folder not found"); return
-        engines = []
-        if self.bench_cellseg1.isChecked(): engines.append("cellseg1")
-        if self.bench_cellpose.isChecked(): engines.append("cellpose")
+        engines = [key for key, cb in self._bench_checks.items() if cb.isChecked()]
         if not engines:
             self._append_log("[ERROR] Benchmark: select at least one engine"); return
 
@@ -1455,8 +1458,7 @@ class PredictWidget(QWidget):
             if "cellseg1" in engines:
                 bases["cellseg1"] = self._sam_config()
             if "cellpose" in engines:
-                from napari_app.engines import cellpose_available
-                if not cellpose_available():
+                if not engine_registry.get("cellpose").available():
                     raise ValueError("Cellpose is not installed")
                 bases["cellpose"] = {
                     "engine": "cellpose", "resize_size": [rs, rs], "image_path": "",

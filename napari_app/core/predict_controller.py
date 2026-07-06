@@ -13,7 +13,10 @@ from pathlib import Path
 
 import numpy as np
 
-ENGINE_LABELS = {"cellseg1": "CellSeg1 (LoRA)", "cellpose": "Cellpose-SAM"}
+from napari_app import engines as _builtin_engines  # noqa: F401 — registers built-in engines
+from napari_app.engine_registry import get as get_engine, all_engines
+
+ENGINE_LABELS = {spec.key: spec.result_label for spec in all_engines()}
 
 
 # ── Read + inference core (module functions: the "service" layer) ────────────
@@ -82,7 +85,6 @@ def _read_for_predict(config):
 
 def _predict_cached(config, on_tile=None, sink=None):
     from data.utils import resize_image
-    from napari_app.inference_cache import predict_cached
     import cv2
 
     img, stack = _read_for_predict(config)
@@ -100,17 +102,8 @@ def _predict_cached(config, on_tile=None, sink=None):
     if config.get("clahe"):
         resized = _apply_clahe(resized)
 
-    if config.get("engine") == "cellpose":
-        from napari_app.engines import predict_cellpose
-        small = predict_cellpose(
-            resized,
-            diameter=config.get("cp_diameter", 0),
-            flow_threshold=config.get("cp_flow_threshold", 0.4),
-            cellprob_threshold=config.get("cp_cellprob_threshold", 0.0),
-            device=config.get("selected_device", "cpu"),
-        )
-    else:
-        small = predict_cached(config, resized)
+    spec = get_engine(config.get("engine") or "cellseg1")
+    small = spec.predict(resized, config)
 
     if small.shape != (orig_h, orig_w):
         mask = cv2.resize(small.astype(np.float32), (orig_w, orig_h),
@@ -135,26 +128,12 @@ def _predict_tiled(config, img, on_tile=None):
     if overlap <= 0:
         overlap = recommend_overlap(float(config.get("cp_diameter") or 0), tile)
 
-    if config.get("engine") == "cellpose":
-        from napari_app.engines import predict_cellpose
+    spec = get_engine(config.get("engine") or "cellseg1")
 
-        def _fn(t):
-            if config.get("clahe"):
-                t = _apply_clahe(t)
-            return predict_cellpose(
-                t,
-                diameter=config.get("cp_diameter", 0),
-                flow_threshold=config.get("cp_flow_threshold", 0.4),
-                cellprob_threshold=config.get("cp_cellprob_threshold", 0.0),
-                device=config.get("selected_device", "cpu"),
-            )
-    else:
-        from napari_app.inference_cache import predict_cached
-
-        def _fn(t):
-            if config.get("clahe"):
-                t = _apply_clahe(t)
-            return predict_cached(config, t)
+    def _fn(t):
+        if config.get("clahe"):
+            t = _apply_clahe(t)
+        return spec.predict(t, config)
 
     min_area = int(config.get("min_mask_area") or config.get("min_mask_region_area") or 0)
     return tiled_predict(img, _fn, tile=tile, overlap=overlap, min_area=min_area,
@@ -206,8 +185,7 @@ class PredictController:
         rs = int(params["resize_size"])
 
         if params["engine"] == "cellpose":
-            from napari_app.engines import cellpose_available
-            if not cellpose_available():
+            if not get_engine("cellpose").available():
                 raise ValueError("Cellpose is not installed — run: pip install cellpose")
             return {
                 "engine": "cellpose", "image_path": img,
@@ -308,8 +286,6 @@ class PredictController:
         ``on_log`` carries both the "✓ N cells" line and any error text, and
         ``on_finish`` always fires last, success or failure.
         """
-        is_cp = config.get("engine") == "cellpose"
-
         def run():
             try:
                 sink = {}
@@ -317,11 +293,9 @@ class PredictController:
                 if on_result:
                     on_result(img_arr, mask, sink.get("stack"))
                 if on_log:
-                    if is_cp:
-                        on_log(f"✓ {int(mask.max())} cells  [Cellpose-SAM]")
-                    else:
-                        from napari_app.inference_cache import cache_status as cs
-                        on_log(f"✓ {int(mask.max())} cells  [{cs()}]")
+                    spec = get_engine(config.get("engine") or "cellseg1")
+                    status = spec.status_line() if spec.status_line else spec.result_label
+                    on_log(f"✓ {int(mask.max())} cells  [{status}]")
             except Exception as e:
                 import traceback
                 if on_log:

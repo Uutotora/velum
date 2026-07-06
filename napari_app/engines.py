@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from napari_app.engine_registry import EngineSpec, register
+
 _cp_model = None
 _cp_key: str | None = None
 
@@ -76,3 +78,54 @@ def invalidate_cellpose():
     global _cp_model, _cp_key
     _cp_model = None
     _cp_key = None
+
+
+# ── Registry wiring for the two built-in engines ──────────────────────────────
+# predict(image, config) -> label_mask is the shared shape both PredictController
+# dispatch paths call; each closure lazily imports its own heavy dependency, same
+# as before this registry existed.
+
+def _predict_cellseg1_engine(image: np.ndarray, config: dict) -> np.ndarray:
+    from napari_app.inference_cache import predict_cached
+    return predict_cached(config, image)
+
+
+def _predict_cellpose_engine(image: np.ndarray, config: dict) -> np.ndarray:
+    return predict_cellpose(
+        image,
+        diameter=config.get("cp_diameter", 0),
+        flow_threshold=config.get("cp_flow_threshold", 0.4),
+        cellprob_threshold=config.get("cp_cellprob_threshold", 0.0),
+        device=config.get("selected_device", "cpu"),
+    )
+
+
+def _cellseg1_status_line() -> str:
+    from napari_app.inference_cache import cache_status
+    return cache_status()
+
+
+def _cellpose_available_check() -> bool:
+    # A thin wrapper (rather than passing cellpose_available directly) so
+    # tests that monkeypatch napari_app.engines.cellpose_available still take
+    # effect — EngineSpec.available would otherwise hold a frozen reference to
+    # whichever function object existed at register() time.
+    return cellpose_available()
+
+
+register(EngineSpec(
+    key="cellseg1",
+    label="CellSeg1 · LoRA (one-shot, fine-tuned)",
+    predict=_predict_cellseg1_engine,
+    status_line=_cellseg1_status_line,
+    bench_label="CellSeg1 · LoRA (current checkpoint)",
+    result_label="CellSeg1 (LoRA)",
+))
+register(EngineSpec(
+    key="cellpose",
+    label="Cellpose-SAM (zero-shot, generalist)",
+    predict=_predict_cellpose_engine,
+    available=_cellpose_available_check,
+    bench_label="Cellpose-SAM (zero-shot)",
+    result_label="Cellpose-SAM",
+))

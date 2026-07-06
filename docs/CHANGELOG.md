@@ -18,6 +18,20 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-06 (even later)
+
+- **Engine registry** (top open P1 backlog item). New `napari_app/engine_registry.py`
+  (`EngineSpec` + `register`/`get`/`all_engines`) replaces the hardcoded
+  `if engine == "cellpose": ... else: ...` dispatch in `predict_controller.py`
+  and the two hardcoded entries in the Predict tab's engine combo + benchmark
+  checklist. Adding a future engine (StarDist/InstanSeg/Micro-SAM/DeepCell/the
+  still-open SAM2 item) is now one `register()` call instead of edits across
+  three files. Config-building and per-engine settings UI stay bespoke per
+  engine deliberately — see `docs/BACKLOG.md` for the exact boundary. 15 new
+  tests; 133 pre-existing tests unmodified (148 total).
+
+---
+
 ## 2026-07-06 (later)
 
 - **Added `CLAUDE.md`** — a one-line file that imports `AGENTS.md` via `@AGENTS.md`.
