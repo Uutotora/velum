@@ -79,7 +79,17 @@ def test_build_config_cellpose_shape(tmp_path, monkeypatch):
         "vit_name": "vit_h", "image_encoder_lora_rank": 4,
         "sam_image_size": 256, "result_pth_path": "",
         "channels": None,
+        "zstack": False, "stitch_iou": 0.25,
     }
+
+
+def test_build_config_cellpose_threads_zstack_through(tmp_path, monkeypatch):
+    import napari_app.engines as engines
+    monkeypatch.setattr(engines, "cellpose_available", lambda: True)
+    params = _base_params(tmp_path, engine="cellpose", zstack=True, stitch_iou=0.4)
+    cfg = PredictController.build_config(params)
+    assert cfg["zstack"] is True
+    assert cfg["stitch_iou"] == 0.4
 
 
 def test_build_config_cellpose_unavailable_raises(tmp_path, monkeypatch):
@@ -159,6 +169,58 @@ def test_sam_config_threads_perf_flags_through(tmp_path):
     cfg = PredictController.sam_config(params)
     assert cfg["half_precision"] is True
     assert cfg["compile_decoder"] is True
+
+
+# ── sam2_config ───────────────────────────────────────────────────────────────
+
+def _fake_sam2_available(monkeypatch, value=True):
+    import napari_app.engines_sam2 as es2
+    monkeypatch.setattr(es2, "sam2_available", lambda: value)
+
+
+def _with_sam2_checkpoint(tmp_path, model_type="large"):
+    names = {"large": "sam2.1_hiera_large.pt", "small": "sam2.1_hiera_small.pt"}
+    d = tmp_path / "sam2_checkpoints"; d.mkdir(exist_ok=True)
+    ckpt = d / names[model_type]; ckpt.write_bytes(b"x")
+    return ckpt
+
+
+def test_sam2_config_unavailable_raises(tmp_path, monkeypatch):
+    _fake_sam2_available(monkeypatch, False)
+    params = _base_params(tmp_path, engine="sam2")
+    with pytest.raises(ValueError, match="SAM2 is not installed"):
+        PredictController.build_config(params)
+
+
+def test_sam2_config_missing_checkpoint_raises(tmp_path, monkeypatch):
+    _fake_sam2_available(monkeypatch, True)
+    params = _base_params(tmp_path, engine="sam2")
+    with pytest.raises(ValueError, match="checkpoint not found"):
+        PredictController.build_config(params)
+
+
+def test_sam2_config_resolves_paths_and_shape(tmp_path, monkeypatch):
+    _fake_sam2_available(monkeypatch, True)
+    ckpt = _with_sam2_checkpoint(tmp_path)
+    params = _base_params(tmp_path, engine="sam2", resize_size=768,
+                          sam2_model_type="large", sam2_checkpoint_text="",
+                          sam2_config_text="")
+    cfg = PredictController.build_config(params)
+    assert cfg["engine"] == "sam2"
+    assert cfg["sam2_checkpoint"] == str(ckpt)
+    assert cfg["sam2_config_name"] == "configs/sam2.1/sam2.1_hiera_l.yaml"
+    assert cfg["resize_size"] == [768, 768]
+    assert cfg["points_per_side"] == 32
+    assert cfg["zstack"] is False and cfg["stitch_iou"] == 0.25
+
+
+def test_sam2_config_threads_zstack_through(tmp_path, monkeypatch):
+    _fake_sam2_available(monkeypatch, True)
+    _with_sam2_checkpoint(tmp_path)
+    params = _base_params(tmp_path, engine="sam2", zstack=True, stitch_iou=0.5)
+    cfg = PredictController.sam2_config(params)
+    assert cfg["zstack"] is True
+    assert cfg["stitch_iou"] == 0.5
 
 
 def test_resolve_lora_prefers_custom_text_over_combo():
@@ -331,6 +393,111 @@ def test_run_prediction_async_forwards_on_tile(tmp_path, monkeypatch):
     t = controller.run_prediction_async(config, on_tile=lambda d, n: calls.append((d, n)))
     t.join(timeout=10)
     assert calls and calls[-1][0] == calls[-1][1]  # ends at total/total
+
+
+# ── z-stack / time-lapse orchestration (_predict_volume / run_volume_prediction_async) ──
+
+def _write_zstack(tmp_path):
+    """A 3-plane grayscale z-stack: one square tracked across all 3 planes
+    (shifting slightly each time, so IoU-linking keeps its id) plus a second,
+    unrelated square that only appears in the last plane."""
+    import tifffile
+    arr = np.zeros((3, 40, 40), dtype=np.uint8)
+    arr[0, 10:30, 10:30] = 200
+    arr[1, 10:30, 12:32] = 200
+    arr[2, 10:30, 14:34] = 200
+    arr[2, 2:6, 2:6] = 200
+    path = tmp_path / "zstack.tif"
+    tifffile.imwrite(path, arr, photometric="minisblack", metadata={"axes": "ZYX"})
+    return path
+
+
+def test_predict_volume_stitches_across_planes(tmp_path, monkeypatch):
+    import napari_app.engines as engines
+    from napari_app.core.predict_controller import _predict_volume
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+
+    path = _write_zstack(tmp_path)
+    config = {"engine": "cellpose", "image_path": str(path), "resize_size": [40, 40],
+              "clahe": False, "channels": None, "stitch_iou": 0.25, "min_mask_area": 0}
+
+    img_vol, mask_vol = _predict_volume(config)
+    assert img_vol.shape == (3, 40, 40, 3)
+    assert mask_vol.shape == (3, 40, 40)
+    assert int(mask_vol.max()) == 2                     # tracked square + one new appearance
+    tracked = mask_vol[0, 15, 20], mask_vol[1, 15, 20], mask_vol[2, 15, 20]
+    assert tracked[0] == tracked[1] == tracked[2] != 0   # same id, all 3 planes
+    assert mask_vol[2, 3, 3] not in (0, tracked[0])      # new instance, distinct id
+    assert mask_vol[0, 3, 3] == 0 and mask_vol[1, 3, 3] == 0  # absent from earlier planes
+
+
+def test_predict_volume_reports_on_slice_progress(tmp_path, monkeypatch):
+    import napari_app.engines as engines
+    from napari_app.core.predict_controller import _predict_volume
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+
+    path = _write_zstack(tmp_path)
+    config = {"engine": "cellpose", "image_path": str(path), "resize_size": [40, 40],
+              "clahe": False, "channels": None}
+    calls = []
+    _predict_volume(config, on_slice=lambda d, n: calls.append((d, n)))
+    assert calls == [(1, 3), (2, 3), (3, 3)]
+
+
+def test_run_volume_prediction_async_success_sequences_callbacks(tmp_path, monkeypatch):
+    import napari_app.engines as engines
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+
+    path = _write_zstack(tmp_path)
+    config = {"engine": "cellpose", "image_path": str(path), "resize_size": [40, 40],
+              "clahe": False, "channels": None}
+
+    events = []
+    controller = PredictController()
+    t = controller.run_volume_prediction_async(
+        config,
+        on_result=lambda img_vol, mask_vol, stack: events.append(
+            ("result", mask_vol.shape, int(mask_vol.max()), stack)),
+        on_log=lambda s: events.append(("log", s)),
+        on_finish=lambda: events.append(("finish",)))
+    t.join(timeout=10)
+
+    assert [e[0] for e in events] == ["result", "log", "finish"]
+    assert events[0][1] == (3, 40, 40)
+    assert events[0][2] == 2
+    assert events[0][3] is not None              # the VolumeStack read along the way
+    assert "2 cells across 3 planes" in events[1][1]
+    assert "Cellpose-SAM" in events[1][1]
+
+
+def test_run_volume_prediction_async_forwards_on_slice(tmp_path, monkeypatch):
+    import napari_app.engines as engines
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+
+    path = _write_zstack(tmp_path)
+    config = {"engine": "cellpose", "image_path": str(path), "resize_size": [40, 40],
+              "clahe": False, "channels": None}
+
+    calls = []
+    controller = PredictController()
+    t = controller.run_volume_prediction_async(config, on_slice=lambda d, n: calls.append((d, n)))
+    t.join(timeout=10)
+    assert calls == [(1, 3), (2, 3), (3, 3)]
+
+
+def test_run_volume_prediction_async_error_still_calls_log_and_finish(tmp_path):
+    config = {"engine": "cellpose", "image_path": str(tmp_path / "missing.tif"),
+              "resize_size": [40, 40], "clahe": False, "channels": None}
+    events = []
+    controller = PredictController()
+    t = controller.run_volume_prediction_async(
+        config,
+        on_result=lambda *a: events.append(("result",)),
+        on_log=lambda s: events.append(("log", s)),
+        on_finish=lambda: events.append(("finish",)))
+    t.join(timeout=10)
+    assert events[0][0] == "log" and "[ERROR]" in events[0][1]
+    assert events[1] == ("finish",)
 
 
 # ── run_batch_async ───────────────────────────────────────────────────────────

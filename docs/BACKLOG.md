@@ -172,16 +172,59 @@ for a credible product · P1 differentiation · P2 later.
 
 ## P1 — differentiation
 
-### [ ] SAM 2 engine (3D / video)  · L
+### [x] SAM 2 engine (3D / video)  · L
 - **Goal:** add SAM 2 as an engine for z-stacks and time-lapse.
 - **Why:** confocal/lightsheet/organoids are 3D; the current pipeline is 2D.
 - **Acceptance:** an `Engine` entry that segments a z-stack and stitches
   instances across z; napari shows the n-D labels.
-- **Touch:** `napari_app/engine_registry.py` (`register()` the new
-  `EngineSpec` — the registry itself is done, see below), 3D stitching logic,
-  a SAM2 weights/dependency story. Still sizeable: 3D instance stitching is
-  real algorithm work and needs GPU + real SAM2 checkpoints to verify, neither
-  available in the agent sandbox.
+- **Done:** new `napari_app/engines_sam2.py` registers a `sam2` `EngineSpec`
+  the same lazy-import/`available()`-gated way `cellpose` already works —
+  `sam2`'s package + a checkpoint are optional (new `sam2` extra in
+  `pyproject.toml`), never a hard dependency, so the app (and CI's pure-logic
+  suite) is unaffected when neither is installed. Its `predict()` is an
+  ordinary single-plane `EngineSpec` (SAM2's `SAM2AutomaticMaskGenerator`,
+  the same "segment everything" contract as SAM1's generator — reuses
+  `predict.sam_output_to_mask` unchanged) — the z-stack capability itself is
+  a new **engine-agnostic** layer above the registry, not special-cased to
+  SAM2: `napari_app/volume_stitch.py` links independently-segmented 2-D
+  slices into one consistent instance volume by adjacent-slice IoU (the same
+  idea Cellpose's own `stitch3D` uses for its 3-D mode — a well-precedented,
+  fully pure-logic algorithm, unit-tested without any GPU/model), and
+  `napari_app/channels.py` gained `VolumeStack`/`read_volume_stack`/
+  `has_z_stack` to read a multi-plane TIFF/OME-TIFF keeping the Z/T axis
+  (previously always reduced to its first plane). `predict_controller.py`'s
+  new `_predict_volume`/`PredictController.run_volume_prediction_async` read
+  a stack, run *any* registered engine per-plane, and stitch — so Cellpose or
+  CellSeg1 can drive a z-stack too, though SAM2 is the flagship (it was
+  trained for video/volumetric consistency, unlike the other two). The
+  Predict tab gained an off-by-default "Segment as z-stack" checkbox (shown
+  only when `has_z_stack()` says the loaded file genuinely has one) and a
+  SAM2 settings card, both following the exact `tiled`-toggle pattern this
+  file's house rules already establish. napari's Labels/Image layers are
+  n-D natively, so the result path just adds the volume arrays directly
+  (`_show_volume_results`, a scoped-down sibling of `_show_results`).
+  66 new tests (163 pre-existing + 66 = 229 total; `test_volume_stitch.py`,
+  `test_engines_sam2.py`, additions to
+  `test_channels.py`/`test_predict_controller.py`, and a new
+  `test_predict_volume_wiring.py` that — a first for this repo — actually
+  constructs a real `PredictWidget` under offscreen Qt with a mocked napari
+  viewer, since a real `napari.Viewer()` segfaults in this sandbox's
+  offscreen platform; that mock-viewer construction also caught a real bug
+  before commit: `tests/test_engines_sam2.py`'s own module-level import order
+  could flip which engine registers first and silently change the Predict
+  tab's default engine, fixed by importing `predict_controller` first).
+  **Not verified here** (no GPU, no real `sam2` package/checkpoint, no
+  display in this sandbox): actual SAM2 inference of any kind, the exact
+  checkpoint/Hydra-config filenames guessed in `engines_sam2.py` (overridable
+  in the SAM2 settings card if wrong), real multi-plane files beyond
+  synthetic TIFFs, and the widget rendered on an actual screen. **Explicitly
+  out of scope, not attempted:** SAM2's video-predictor mode (memory-bank
+  mask *propagation* from a prompted frame — stronger than independent
+  per-plane detection + IoU stitching, but a fundamentally different,
+  interactive-prompt workflow); ND2/CZI/LIF volume reading (TIFF/OME-TIFF
+  only); 3-D per-cell measurements/GT overlay (`analysis.py` is 2-D-only;
+  the results card is hidden rather than showing stale/wrong numbers);
+  composing z-stack with tiling (a whole-slide-sized z-stack).
 
 ### [x] Engine registry + plugins  · M
 - **Goal:** turn the two hard-coded engines into a registry so StarDist/

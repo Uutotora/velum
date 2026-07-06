@@ -12,7 +12,7 @@ duplicated into `CLAUDE.md`.)
 ## What this is
 
 **CellSeg1** is a desktop application for **cell instance segmentation** in
-microscopy images, built as a **napari** plugin/app. Two interchangeable
+microscopy images, built as a **napari** plugin/app. Three interchangeable
 engines produce instance masks, and everything downstream (morphometry,
 cohort stats, the Assistant, export) is engine-agnostic:
 
@@ -20,6 +20,9 @@ cohort stats, the Assistant, export) is engine-agnostic:
   single annotated image (`cellseg1_train.py`, `peft/`, `predict.py`).
 - **Cellpose-SAM** — zero-shot generalist, no training required
   (`napari_app/engines.py`).
+- **SAM 2** — zero-shot, the flagship choice for z-stacks/time-lapse
+  (`napari_app/engines_sam2.py`; optional dependency, degrades gracefully
+  when not installed — see `docs/BACKLOG.md`'s "SAM 2 engine" entry).
 
 Target users are microscopists and cell biologists, **not** ML engineers.
 The commercial goal is a world-class, enterprise-grade segmentation platform.
@@ -51,13 +54,23 @@ napari_app/            THE PRODUCT (napari desktop app)
   engine_registry.py   EngineSpec + register/get/all_engines — the pluggable
                        engine interface predict_controller.py dispatches
                        through
-  engines.py           Cellpose-SAM engine + registers both built-in engines
-                       (cellseg1, cellpose) with engine_registry
+  engines.py           Cellpose-SAM engine + registers the two SAM1-era
+                       built-in engines (cellseg1, cellpose) with engine_registry
+  engines_sam2.py       SAM2 engine (lazy `sam2` import; degrades to
+                       available()=False when not installed) — the
+                       flagship z-stack/time-lapse engine, but its 2-D
+                       predict() works like any other registered engine
   inference_cache.py   model + ViT-embedding cache (smart: changing only
                        thresholds skips the encoder)
-  tiling.py            native-resolution tiled inference for large images
+  tiling.py            native-resolution tiled inference for large 2-D images
+  volume_stitch.py     engine-agnostic z-stack/time-lapse instance linking
+                       (IoU-based, adjacent-slice) — stitches any engine's
+                       independent per-plane masks into one n-D label volume;
+                       see predict_controller.py's _predict_volume for the
+                       per-plane-predict + stitch orchestration that uses it
   advisor.py           the Assistant's offline diagnostic engine + Ollama bridge
-  analysis.py          per-cell morphometry (skimage regionprops)
+  analysis.py          per-cell morphometry (skimage regionprops) — 2-D only;
+                       z-stack results aren't wired into measurements yet
   benchmark.py         instance F1/AP vs ground truth
   cohort.py            batch/population aggregation
 

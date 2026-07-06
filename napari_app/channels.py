@@ -62,6 +62,39 @@ class ChannelStack:
         return self.data[:, :, idx]
 
 
+@dataclass(frozen=True)
+class VolumeStack:
+    """A z-stack or time-lapse kept as one :class:`ChannelStack`-shaped frame
+    per plane, instead of collapsing the stack axis to its first plane the
+    way :func:`read_channel_stack` does.
+
+    ``data`` is ``Z×H×W×C`` float32 (channel-last, never normalised); ``names``
+    labels each channel (shared across every plane — channel identity doesn't
+    vary slice to slice). Used by the z-stack / time-lapse prediction path
+    (:mod:`napari_app.volume_stitch` stitches the resulting per-plane
+    instance masks back into one consistent volume).
+    """
+    data: np.ndarray
+    names: list[str]
+    pixel_size_um: float | None = None
+
+    @property
+    def n_planes(self) -> int:
+        return self.data.shape[0]
+
+    @property
+    def n_channels(self) -> int:
+        return self.data.shape[3]
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self.data.shape[1], self.data.shape[2]
+
+    def plane(self, z: int) -> ChannelStack:
+        return ChannelStack(data=self.data[z], names=self.names,
+                            pixel_size_um=self.pixel_size_um)
+
+
 def _default_names(n: int) -> list[str]:
     return [f"Channel {i}" for i in range(n)]
 
@@ -145,6 +178,48 @@ def stack_from_axes_array(arr: np.ndarray,
     return stack
 
 
+def stack_from_axes_array_zstack(arr: np.ndarray,
+                                 axes: str,
+                                 names: Sequence[str] | None = None,
+                                 pixel_size_um: float | None = None) -> VolumeStack:
+    """Like :func:`stack_from_axes_array` but keeps the Z (or T) axis as a
+    leading stack dimension instead of reducing it to its first plane.
+
+    Picks ``Z`` over ``T`` when a file has both (a rare 5-D ZTCYX acquisition
+    reduces its T axis to the first timepoint, keeping Z — segmentation cares
+    about the stack it was asked to segment, not every axis a file has). Each
+    resulting plane is still run through :func:`stack_from_axes_array`, so a
+    z-stack *and* multi-channel image (e.g. ``"ZCYX"``) keeps per-plane
+    channel handling identical to the single-plane path. A file with no Z/T
+    axis at all (or no axis metadata) degrades to a single-plane
+    :class:`VolumeStack` so callers never need a separate code path.
+    """
+    if not axes or len(axes) != arr.ndim:
+        stack = to_channel_stack(arr, names=names, pixel_size_um=pixel_size_um)
+        return VolumeStack(data=stack.data[None], names=stack.names,
+                           pixel_size_um=pixel_size_um)
+
+    stack_axis = "Z" if "Z" in axes else ("T" if "T" in axes else None)
+    if stack_axis is None:
+        stack = stack_from_axes_array(arr, axes, names=names, pixel_size_um=pixel_size_um)
+        return VolumeStack(data=stack.data[None], names=stack.names,
+                           pixel_size_um=pixel_size_um)
+
+    zax = axes.index(stack_axis)
+    arr = np.moveaxis(arr, zax, 0)
+    plane_axes = axes[:zax] + axes[zax + 1:]
+
+    planes = []
+    plane_names = names
+    for i in range(arr.shape[0]):
+        plane_stack = stack_from_axes_array(arr[i], plane_axes, names=plane_names,
+                                            pixel_size_um=pixel_size_um)
+        plane_names = plane_stack.names   # keep names consistent across planes
+        planes.append(plane_stack.data)
+    return VolumeStack(data=np.stack(planes, axis=0), names=plane_names,
+                       pixel_size_um=pixel_size_um)
+
+
 def _reduce_extra_axes(arr: np.ndarray, axes: str) -> tuple[np.ndarray, str]:
     """Collapse non-spatial, non-channel axes (Z, T, S, ...) by taking index 0.
 
@@ -195,6 +270,31 @@ def _read_tiff_stack(path: Path) -> ChannelStack:
         pixel_size = _tiff_pixel_size_um(tf)
 
     return stack_from_axes_array(arr, axes, names=names, pixel_size_um=pixel_size)
+
+
+def read_volume_stack(path: Union[str, Path]) -> VolumeStack:
+    """Read a z-stack or time-lapse file, keeping every plane.
+
+    Only TIFF/OME-TIFF is supported for now — the common z-stack/time-lapse
+    container microscopes and napari itself use. ND2/CZI/LIF volumes are a
+    future extension (no backlog item currently needs them); such a file, or
+    any TIFF with no Z/T axis, degrades to a 1-plane :class:`VolumeStack` via
+    :func:`read_channel_stack` so the caller never needs a separate branch.
+    """
+    path = Path(path)
+    if path.suffix.lower() not in (".tif", ".tiff"):
+        stack = read_channel_stack(path)
+        return VolumeStack(data=stack.data[None], names=stack.names,
+                           pixel_size_um=stack.pixel_size_um)
+
+    import tifffile
+    with tifffile.TiffFile(path) as tf:
+        series = tf.series[0]
+        arr = series.asarray()
+        axes = series.axes or ""
+        names = _ome_channel_names(tf)
+        pixel_size = _tiff_pixel_size_um(tf)
+    return stack_from_axes_array_zstack(arr, axes, names=names, pixel_size_um=pixel_size)
 
 
 def _require(module: str, fmt: str, package: str | None = None):
@@ -428,6 +528,34 @@ def probe_channels(path: Union[str, Path]) -> tuple[int, list[str]]:
             pass
     stack = read_channel_stack(path)
     return stack.n_channels, stack.names
+
+
+def has_z_stack(path: Union[str, Path]) -> bool:
+    """Cheaply report whether a file has a genuine multi-plane Z or T axis.
+
+    Reads only the series shape/axes (no pixel data), mirroring
+    :func:`probe_channels`'s "don't load the full array" shape, so the UI can
+    decide whether a "segment as z-stack" toggle is even worth offering.
+    ``False`` for anything that isn't TIFF/OME-TIFF, that has no axis
+    metadata, or whose Z/T axis has length 1 (a single-plane file with
+    incidental Z/T metadata shouldn't offer a no-op toggle).
+    """
+    path = Path(path)
+    if path.suffix.lower() not in (".tif", ".tiff"):
+        return False
+    try:
+        import tifffile
+        with tifffile.TiffFile(path) as tf:
+            series = tf.series[0]
+            axes, shape = series.axes or "", series.shape
+        if not axes or len(axes) != len(shape):
+            return False
+        for ax in ("Z", "T"):
+            if ax in axes and shape[axes.index(ax)] > 1:
+                return True
+        return False
+    except Exception:
+        return False
 
 
 def percentile_normalize(channel: np.ndarray,

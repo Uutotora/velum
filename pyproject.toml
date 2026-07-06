@@ -54,6 +54,17 @@ formats = [
     "readlif>=0.6",
 ]
 
+# Optional SAM2 engine (napari_app/engines_sam2.py) for z-stack/time-lapse
+# segmentation. Not installed by default: heavy (its own torch-version
+# constraints, Hydra configs, GB-scale checkpoints) and the app degrades
+# gracefully without it (EngineSpec.available() reports False; the Predict
+# tab shows "pip install sam2" instead of crashing). Meta has not always
+# published sam2 to PyPI under a stable name — if this pip name 404s, install
+# from source per github.com/facebookresearch/sam2's own instructions instead.
+sam2 = [
+    "sam2",
+]
+
 # The pure-logic test suite (analysis/benchmark/cohort/advisor/tiling/formats)
 # must run WITHOUT torch or napari, so CI installs only this group. Kept in a
 # PEP 735 dependency-group (not an extra) so `pip install --group test` pulls

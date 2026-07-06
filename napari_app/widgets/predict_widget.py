@@ -98,9 +98,11 @@ def _field_label(text: str) -> QLabel:
 class PredictWidget(QWidget):
     _log_signal            = pyqtSignal(str)
     _done_signal           = pyqtSignal(object, object)
+    _volume_done_signal    = pyqtSignal(object, object)
     _finish_signal         = pyqtSignal()
     _batch_progress_signal = pyqtSignal(int, int)
     _tile_progress_signal  = pyqtSignal(int, int)
+    _slice_progress_signal = pyqtSignal(int, int)
     _batch_finish_signal   = pyqtSignal()
     _refine_finish_signal  = pyqtSignal(str)
     _sample_finish_signal  = pyqtSignal()
@@ -240,6 +242,22 @@ class PredictWidget(QWidget):
         self._chan_lbl.setVisible(False)
         self.channel_list.setVisible(False)
         self._channel_names: list[str] = []
+
+        # ── Z-stack / time-lapse toggle (multi-plane TIFF only) ────────────────
+        # Hidden for an ordinary single-plane image; revealed only when the
+        # loaded file actually has more than one Z/T plane. Segments each
+        # plane independently and links instances across planes by overlap
+        # (see napari_app.volume_stitch) instead of collapsing to one plane.
+        self.zstack_cb = QCheckBox("Segment as z-stack / time-lapse (stitch across planes)")
+        self.zstack_cb.setToolTip(
+            "For multi-plane TIFF/OME-TIFF (confocal z-stacks, time-lapse). "
+            "Segments each plane independently and links instances across "
+            "planes by overlap, producing one n-D label volume instead of "
+            "unrelated 2-D masks per plane. Works with any engine; SAM2 is "
+            "the flagship choice (trained for video/volumetric consistency).")
+        self.zstack_cb.setStyleSheet(f"color: {LABEL}; font-size: 11px;")
+        self.zstack_cb.setVisible(False)
+        img_card.addWidget(self.zstack_cb)
 
         L.addWidget(img_card)
 
@@ -625,6 +643,29 @@ class PredictWidget(QWidget):
         self._cp_card.setVisible(False)
         L.addWidget(self._cp_card)
 
+        # ── SAM2 settings (shown only for the SAM2 engine) ─────────────────────
+        self._sam2_card = SectionCard("SAM 2 settings", icon="settings")
+        self.sam2_model_type = Combo()
+        self.sam2_model_type.addItems(["large", "base_plus", "small", "tiny"])
+        self._sam2_card.addLayout(_param_row("Model size", self.sam2_model_type,
+            "Larger = better accuracy, slower. Must match the checkpoint below."))
+        self._sam2_card.addWidget(_field_label("Checkpoint (.pt)"))
+        self.sam2_checkpoint = QLineEdit()
+        self.sam2_checkpoint.setPlaceholderText(
+            "auto-detected from data_store/sam2_checkpoints/")
+        self._sam2_card.addLayout(_file_row(self, self.sam2_checkpoint,
+            "Select SAM2 checkpoint", "PyTorch (*.pt *.pth)"))
+        self._sam2_card.addWidget(_field_label("Config override (advanced)"))
+        self.sam2_config_text = QLineEdit()
+        self.sam2_config_text.setPlaceholderText("auto (Hydra config name)")
+        self.sam2_config_text.setToolTip(
+            "Package-relative Hydra config name, e.g. "
+            "configs/sam2.1/sam2.1_hiera_l.yaml. Leave blank to use the "
+            "default for the model size above.")
+        self._sam2_card.addWidget(self.sam2_config_text)
+        self._sam2_card.setVisible(False)
+        L.addWidget(self._sam2_card)
+
         L.addStretch()
         inner.setLayout(L)
         scroll.setWidget(inner)
@@ -649,9 +690,11 @@ class PredictWidget(QWidget):
 
         self._log_signal.connect(self._append_log)
         self._done_signal.connect(self._show_results)
+        self._volume_done_signal.connect(self._show_volume_results)
         self._finish_signal.connect(self._on_done)
         self._batch_progress_signal.connect(self._on_batch_progress)
         self._tile_progress_signal.connect(self._on_tile_progress)
+        self._slice_progress_signal.connect(self._on_slice_progress)
         self._batch_finish_signal.connect(self._on_batch_done)
         self._refine_finish_signal.connect(self._on_refine_done)
         self._sample_finish_signal.connect(self._on_samples_done)
@@ -675,9 +718,11 @@ class PredictWidget(QWidget):
         self.image_path.textChanged.connect(lambda _t: self._autofill_gt())
         self.image_path.textChanged.connect(lambda _t: self._refresh_channel_picker())
         self.image_path.textChanged.connect(lambda _t: self._autofill_pixel_size())
+        self.image_path.textChanged.connect(lambda _t: self._refresh_zstack_toggle())
         self._autofill_gt()
         self._on_gt_path_changed()
         self._populate_samples()
+        self._refresh_zstack_toggle()
 
         self._autofill_from_sidecar()
 
@@ -688,16 +733,20 @@ class PredictWidget(QWidget):
 
     def _on_engine_changed(self, _idx=None):
         # Which settings cards/hint text apply is bespoke per engine (unlike the
-        # combo list itself, this isn't registry-driven) — a third engine needs
+        # combo list itself, this isn't registry-driven) — a new engine needs
         # its own branch/settings card here.
-        is_cp = self._current_engine() == "cellpose"
-        # Checkpoint / SAM-specific controls are irrelevant for Cellpose.
-        self._ckpt_card.setVisible(not is_cp)
-        self._inf_card.setVisible(not is_cp)
+        engine = self._current_engine()
+        is_cp = engine == "cellpose"
+        is_sam2 = engine == "sam2"
+        is_sam_lora = not is_cp and not is_sam2   # cellseg1 (SAM + LoRA)
+        # Checkpoint / LoRA-specific controls are irrelevant for Cellpose and SAM2.
+        self._ckpt_card.setVisible(is_sam_lora)
+        self._inf_card.setVisible(is_sam_lora)
         if hasattr(self, "_model_card"):
-            self._model_card.setVisible(not is_cp)
-        self.quality.setEnabled(not is_cp)
+            self._model_card.setVisible(is_sam_lora)
+        self.quality.setEnabled(is_sam_lora)
         self._cp_card.setVisible(is_cp)
+        self._sam2_card.setVisible(is_sam2)
         if is_cp:
             from napari_app.engines import cellpose_available
             if cellpose_available():
@@ -707,6 +756,16 @@ class PredictWidget(QWidget):
             else:
                 self._engine_hint.setText(
                     "⚠ Cellpose is not installed. Run:  pip install cellpose")
+        elif is_sam2:
+            from napari_app.engines_sam2 import sam2_available
+            if sam2_available():
+                self._engine_hint.setText(
+                    "Zero-shot, with native z-stack/video support — tick "
+                    "\"Segment as z-stack\" above for multi-plane files.")
+            else:
+                self._engine_hint.setText(
+                    "⚠ SAM2 is not installed. Run:  pip install sam2  "
+                    "(see github.com/facebookresearch/sam2)")
         else:
             self._engine_hint.setText(
                 "SAM + LoRA. Pick a checkpoint below; fine-tune your own in the Train tab.")
@@ -959,6 +1018,23 @@ class PredictWidget(QWidget):
         self._chan_lbl.setVisible(show)
         self.channel_list.setVisible(show)
 
+    def _refresh_zstack_toggle(self):
+        """Show the z-stack checkbox only for a file that genuinely has more
+        than one Z/T plane; an ordinary single-plane image keeps it hidden
+        (and force-unchecked, so _gather_params reports zstack=False) so the
+        default 2-D path is completely unaffected."""
+        path = self.image_path.text().strip()
+        show = False
+        if path and Path(path).exists():
+            try:
+                from napari_app.channels import has_z_stack
+                show = has_z_stack(path)
+            except Exception:
+                show = False
+        self.zstack_cb.setVisible(show)
+        if not show:
+            self.zstack_cb.setChecked(False)
+
     def _selected_channels(self) -> list[int] | None:
         """Checked segmentation channels, or ``None`` when the picker is inactive.
 
@@ -1001,6 +1077,11 @@ class PredictWidget(QWidget):
             "cp_flow_threshold": self.cp_flow.value(),
             "cp_cellprob_threshold": self.cp_cellprob.value(),
             "channels": self._selected_channels(),
+            "zstack": self.zstack_cb.isChecked() if self.zstack_cb.isVisible() else False,
+            "stitch_iou": 0.25,
+            "sam2_model_type": self.sam2_model_type.currentText(),
+            "sam2_checkpoint_text": self.sam2_checkpoint.text(),
+            "sam2_config_text": self.sam2_config_text.text(),
         }
 
     def _build_config(self):
@@ -1092,9 +1173,24 @@ class PredictWidget(QWidget):
         is_cp = config.get("engine") == "cellpose"
         if is_cp:
             self._append_log(f"▶ {Path(config['image_path']).name}  [Cellpose-SAM · {config['selected_device']}]")
+        elif config.get("engine") == "sam2":
+            from napari_app.engines_sam2 import cache_status as sam2_cache_status
+            self._append_log(f"▶ {Path(config['image_path']).name}  [{sam2_cache_status()}]")
         else:
             from napari_app.inference_cache import cache_status
             self._append_log(f"▶ {Path(config['image_path']).name}  [{cache_status()}]")
+
+        if config.get("zstack"):
+            # z-stack/time-lapse: a scoped-down sibling path (see
+            # _show_volume_results) — engine-agnostic orchestration lives in
+            # PredictController.run_volume_prediction_async.
+            def on_volume_result(img_vol, mask_vol, stack):
+                self._volume_done_signal.emit(img_vol, mask_vol)
+
+            self._controller.run_volume_prediction_async(
+                config, on_slice=self._slice_progress_signal.emit, on_result=on_volume_result,
+                on_log=self._log_signal.emit, on_finish=self._finish_signal.emit)
+            return
 
         def on_result(img_arr, mask, stack):
             # Stash the raw channel stack (None on the ordinary path) so the
@@ -1136,6 +1232,40 @@ class PredictWidget(QWidget):
         # Count the headline number up for a live, product feel.
         if mask is not None and int(mask.max()) > 0:
             motion.count_up(self._cell_count_lbl, int(mask.max()))
+        self.viewer.reset_view()
+
+    def _show_volume_results(self, img_vol, mask_vol):
+        """Add a z-stack/time-lapse prediction's results as n-D layers.
+
+        A scoped-down sibling of _show_results for volumes: napari's Image/
+        Labels layers are n-D natively, so add_image/add_labels need no
+        change — but per-cell measurements (_recompute_measurements) assume a
+        2-D mask (skimage regionprops properties like perimeter/circularity
+        are 2-D-only), so this deliberately does not call it; the results
+        card is hidden instead of showing stale numbers from a previous 2-D
+        run. Wiring real 3-D measurements is a follow-up, not attempted here.
+        """
+        name = Path(self.image_path.text()).stem
+        self._last_mask     = None
+        self._last_img_rgb  = None
+        self._last_img_path = self.image_path.text()
+
+        for lyr in list(self.viewer.layers):
+            if lyr.name.startswith(name) and "_gt" not in lyr.name:
+                self.viewer.layers.remove(lyr)
+
+        self.viewer.add_image(img_vol, name=f"{name}_image")
+        n_cells = int(mask_vol.max()) if mask_vol is not None and mask_vol.size else 0
+        if n_cells > 0:
+            lyr = self.viewer.add_labels(mask_vol.astype(np.int32), name=f"{name}_masks", opacity=0.7)
+            lyr.contour = 1
+        self._results_card.setVisible(False)
+        self._append_log(
+            f"[INFO] 3-D result: {n_cells} cells across {mask_vol.shape[0]} planes. "
+            "Per-cell measurements/GT overlay are 2-D-only for now — switch to a "
+            "single plane to measure.")
+        if n_cells > 0:
+            motion.count_up(self._cell_count_lbl, n_cells)
         self.viewer.reset_view()
 
     def _autofill_pixel_size(self):
@@ -1578,6 +1708,14 @@ class PredictWidget(QWidget):
         self.progress_bar.setRange(0, total)
         self.progress_bar.setValue(done)
         self.progress_bar.setFormat(f"tile {done}/{total}")
+        self.progress_bar.setTextVisible(True)
+
+    def _on_slice_progress(self, done: int, total: int):
+        # Same determinate-bar treatment as _on_tile_progress, worded for the
+        # z-stack/time-lapse path (one plane at a time instead of one tile).
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(done)
+        self.progress_bar.setFormat(f"plane {done}/{total}")
         self.progress_bar.setTextVisible(True)
 
     def _on_batch_done(self):
