@@ -18,6 +18,24 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-06 (evening)
+
+- **fp16 + `torch.compile` inference** (top open P1 backlog item). Two
+  off-by-default checkboxes in the Predict tab's Model settings card —
+  half precision (CUDA autocast fp16) and mask-decoder `torch.compile` —
+  gated CUDA-only by new `use_amp()`/`use_compile()` predicates in
+  `inference_cache.py`, so they're a proven no-op on CPU/MPS rather than an
+  unverifiable behaviour change. `torch.compile` failures fall back to eager
+  silently; toggling it is folded into the model-cache key so it forces a
+  reload+recompile only where it actually matters (a CUDA device). Scoped to
+  `inference_cache.py` (the app's one prediction choke point) after
+  confirming `predict.py`'s `predict_images`/`predict_config` — the
+  originally-scoped touch point — have no live caller anywhere in the app.
+  11 new tests (163 total), green in the full conda env and in a throwaway
+  venv with only the declared `test` dependency-group installed. **Not
+  verified:** the actual CUDA speedup — no CUDA in this sandbox (MPS only)
+  to benchmark on.
+
 ## 2026-07-06 (later still) — user-reported bugs, not backlog items
 
 - **Fixed a Refine crash (`KeyError: 'deterministic'`)** — `_run_refine` built

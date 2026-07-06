@@ -245,6 +245,8 @@ class PredictController:
             "min_mask_region_area":     params["min_mask_area"],
             "max_mask_region_area_ratio": 0.1,
             "selected_device": params["device"],
+            "half_precision": params["half_precision"],
+            "compile_decoder": params["compile_decoder"],
             "deterministic": True, "seed": 0,
             "allow_tf32_on_cudnn": True, "allow_tf32_on_matmul": True,
             "clahe": params["clahe"],

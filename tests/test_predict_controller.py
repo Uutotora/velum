@@ -38,6 +38,8 @@ def _base_params(tmp_path, engine="cellseg1", **overrides):
         "lora_paths": {},
         "lora_rank": 4,
         "device": "cpu",
+        "half_precision": False,
+        "compile_decoder": False,
         "points_per_side": 32,
         "pred_iou_thresh": 0.8,
         "stability_score_thresh": 0.6,
@@ -136,6 +138,27 @@ def test_sam_config_resolves_paths_and_shape(tmp_path):
     assert cfg["mask_decoder_lora_rank"] == 8
     assert cfg["points_per_side"] == 32
     assert cfg["freeze_image_encoder"] is True   # LoRA-only fine-tune assumption
+
+
+def test_sam_config_perf_flags_default_off(tmp_path):
+    lora = tmp_path / "my.pth"; lora.write_bytes(b"x")
+    backbone_dir = tmp_path / "sam_backbone"; backbone_dir.mkdir()
+    (backbone_dir / "sam_vit_h_4b8939.pth").write_bytes(b"x")
+    params = _base_params(tmp_path, lora_paths={"mylora": str(lora)})
+    cfg = PredictController.sam_config(params)
+    assert cfg["half_precision"] is False
+    assert cfg["compile_decoder"] is False
+
+
+def test_sam_config_threads_perf_flags_through(tmp_path):
+    lora = tmp_path / "my.pth"; lora.write_bytes(b"x")
+    backbone_dir = tmp_path / "sam_backbone"; backbone_dir.mkdir()
+    (backbone_dir / "sam_vit_h_4b8939.pth").write_bytes(b"x")
+    params = _base_params(tmp_path, lora_paths={"mylora": str(lora)},
+                           half_precision=True, compile_decoder=True)
+    cfg = PredictController.sam_config(params)
+    assert cfg["half_precision"] is True
+    assert cfg["compile_decoder"] is True
 
 
 def test_resolve_lora_prefers_custom_text_over_combo():

@@ -221,12 +221,48 @@ for a credible product · P1 differentiation · P2 later.
   **Not verified here:** the real GUI (combo/benchmark-checklist population
   inspected by code, not click-tested with a display).
 
-### [ ] fp16 + `torch.compile` inference  · S
+### [x] fp16 + `torch.compile` inference  · S
 - **Goal:** 2–4× faster inference with no accuracy change of note.
 - **Acceptance:** autocast/half where supported (CUDA), optional
   `torch.compile` on the decoder, behind a setting; benchmark shows speedup;
   MPS path documented (currently falls back to CPU).
 - **Touch:** `predict.py`, `inference_cache.py`, `engines.py`.
+- **Done:** two independent, off-by-default checkboxes in the Predict tab's
+  Model settings card — "Half precision (fp16 autocast)" and "Compile mask
+  decoder (experimental)" — thread `half_precision`/`compile_decoder` through
+  `PredictController.sam_config()` into the config. Both are gated CUDA-only
+  by new pure predicates `use_amp()`/`use_compile()` in `inference_cache.py`
+  (`selected_device` not in `("cpu", "mps")`, the same device-string
+  convention `_load_model` already used), so flipping either box on a
+  CPU/MPS machine is a proven no-op rather than a silent behaviour change.
+  `use_amp` wraps `predict_cached`'s `mg.generate()` in
+  `torch.autocast(device_type="cuda", dtype=torch.float16)`; `use_compile`
+  `torch.compile()`s the cached model's `mask_decoder` once at load time
+  inside a bare `try/except` (a compile failure leaves the decoder eager
+  instead of crashing prediction) and is folded into `_mk_model_key` — using
+  the *gated* value, not the raw flag, so toggling it never forces a reload
+  on non-CUDA devices. `cache_status()` appends "· compiled" when it stuck.
+  Actual touch was `inference_cache.py` + `predict_controller.py` +
+  `predict_widget.py`, not `predict.py`/`engines.py` as originally scoped:
+  `predict.py`'s `predict_images`/`predict_config` have no live caller
+  anywhere in the app (confirmed by a repo-wide grep — an unwired legacy
+  path) and Cellpose has no SAM decoder to compile, so `inference_cache.py`
+  (the single choke point per this file's own house rules and `AGENTS.md`)
+  was the entire real surface. 11 new tests: 9 pure-logic
+  (`tests/test_inference_cache.py` — CUDA-only gating, `_mk_model_key`
+  differentiation, the compiled flag through `cache_status`/
+  `invalidate_model`) plus 2 in `tests/test_predict_controller.py`
+  (`sam_config` threads both flags through, default off). 163 total (152
+  pre-existing + 11), green both in the full conda env and in a throwaway
+  venv with only the `test` dependency-group installed.
+  **Not verified here:** the actual speedup ("benchmark shows speedup") —
+  this sandbox has no CUDA (`torch.cuda.is_available()` is False, MPS only),
+  so there's no hardware to run autocast/`torch.compile` on at all, only to
+  confirm they never fire and never change output on this machine. MPS stays
+  excluded by design, not as a follow-up gap: it already runs with
+  `PYTORCH_ENABLE_MPS_FALLBACK=1` elsewhere in this module, so any op these
+  paths introduce that MPS can't execute would silently fall back to the CPU
+  per-op — slower than plain eager MPS, not faster.
 
 ### [ ] Agentic tuning loop  · L
 - **Goal:** the Assistant can itself run predict → score → adjust until AP

@@ -534,6 +534,23 @@ class PredictWidget(QWidget):
             "Must match the rank used during training (default 4)"))
         self.device = Combo(); self._populate_devices()
         _model_card.addLayout(_param_row("Device", self.device))
+
+        self.half_precision = QCheckBox("Half precision (fp16 autocast)")
+        self.half_precision.setToolTip(
+            "Run mask generation under CUDA autocast(fp16) for faster "
+            "inference. CUDA only — has no effect on CPU/MPS.")
+        self.half_precision.setStyleSheet(f"color: {LABEL}; font-size: 11px;")
+        _model_card.addWidget(self.half_precision)
+
+        self.compile_decoder = QCheckBox("Compile mask decoder (experimental)")
+        self.compile_decoder.setToolTip(
+            "torch.compile the mask decoder for faster repeated inference. "
+            "CUDA only. The first prediction after enabling this (or after "
+            "loading a new checkpoint) is slower while it compiles; falls "
+            "back to eager silently if compilation fails.")
+        self.compile_decoder.setStyleSheet(f"color: {LABEL}; font-size: 11px;")
+        _model_card.addWidget(self.compile_decoder)
+
         self._model_card = _model_card
         L.addWidget(_model_card)
 
@@ -971,6 +988,8 @@ class PredictWidget(QWidget):
             "lora_paths": self._lora_paths,
             "lora_rank": self.lora_rank.value(),
             "device": self.device.currentText(),
+            "half_precision": self.half_precision.isChecked(),
+            "compile_decoder": self.compile_decoder.isChecked(),
             "points_per_side": self.points_per_side.value(),
             "pred_iou_thresh": self.pred_iou_thresh.value(),
             "stability_score_thresh": self.stability_score_thresh.value(),
