@@ -15,9 +15,21 @@ embedding live entirely inside :func:`main` / :func:`build_workspace`, never in
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Optional
+
+# Make the repo root importable *before* the ``napari_app`` imports below, so
+# the app works when launched as a script (``python .../studio/app.py``) from
+# any working directory — mirrors ``napari_app/main.py``. This is deliberate:
+# ``python -m napari_app.studio.app`` injects the *current directory* at the
+# front of ``sys.path`` ahead of ``PYTHONPATH``, so running it from a different
+# checkout (e.g. the main tree while the code lives in a worktree) would import
+# the wrong ``napari_app``. Running the file + bootstrapping here avoids that.
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
