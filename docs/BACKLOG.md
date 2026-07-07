@@ -181,6 +181,10 @@ north-star mockup. **Additive + opt-in**: classic `napari_app/main.py` /
 `run_napari.sh` / `cellseg1` stays byte-for-byte unchanged; Studio ships behind
 `run_studio.sh` / `cellseg1-studio`. Lives in `napari_app/studio/`.
 
+- [x] **Own window chrome + transitions** (2026-07-07) — frameless window with
+  a custom dark title bar (own traffic lights, native move/resize via
+  startSystemMove/grips), replacing the grey OS title bar; soft fade on screen
+  navigation. `window_chrome.py`, 5 tests.
 - [x] **Foundation** (2026-07-07) — `project.py` (Project/ProjectStore/
   ProjectSettings carrying every predict/train knob, JSON-persisted, 20 tests);
   `theme.py` (light+dark tokens, QSS, viridis, 14 tests); shell `app.py`/

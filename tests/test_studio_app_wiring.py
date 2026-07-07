@@ -135,3 +135,40 @@ def test_toggle_theme_rebuilds_chrome(app, store):
 def test_load_fonts_returns_a_family(app):
     fam = app_mod.load_fonts()
     assert isinstance(fam, str) and fam
+
+
+# ── custom window chrome (frameless title bar) ───────────────────────────────
+def test_window_is_frameless(app, store):
+    from PyQt6.QtCore import Qt
+    win = app_mod.StudioWindow(store, theme_name="dark")
+    assert win.windowFlags() & Qt.WindowType.FramelessWindowHint
+
+
+def test_titlebar_has_three_traffic_lights_and_grips(app, store):
+    from napari_app.studio import window_chrome
+    win = app_mod.StudioWindow(store, theme_name="dark")
+    bars = win.findChildren(window_chrome.TitleBar)
+    assert len(bars) == 1
+    lights = bars[0].findChildren(window_chrome._TrafficButton)
+    assert len(lights) == 3            # close / minimise / zoom
+    assert len(win._grips) == 4        # four corner resize handles
+
+
+def test_traffic_close_button_calls_window_close(app, store, monkeypatch):
+    from napari_app.studio import window_chrome
+    win = app_mod.StudioWindow(store, theme_name="dark")
+    called = {"n": 0}
+    monkeypatch.setattr(win, "close", lambda: called.__setitem__("n", called["n"] + 1))
+    bar = win.findChildren(window_chrome.TitleBar)[0]
+    close_btn = bar.findChildren(window_chrome._TrafficButton)[0]
+    close_btn.click()
+    assert called["n"] == 1
+
+
+def test_titlebar_rebuilds_on_theme_toggle(app, store):
+    from napari_app.studio import window_chrome
+    win = app_mod.StudioWindow(store, theme_name="dark")
+    win.toggle_theme()
+    assert win._theme_name == "light"
+    # still exactly one title bar after the rebuild
+    assert len(win.findChildren(window_chrome.TitleBar)) == 1

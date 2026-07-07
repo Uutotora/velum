@@ -41,6 +41,9 @@ from napari_app.studio import theme
 from napari_app.studio.components import Sidebar
 from napari_app.studio.screens import HomeScreen, ProjectsScreen
 from napari_app.studio.project import ProjectStore, default_store_root
+from napari_app.studio.window_chrome import (
+    TitleBar, install_corner_grips, layout_corner_grips,
+)
 
 _FONT_DIR = Path(__file__).parent / "fonts"
 
@@ -86,15 +89,35 @@ class StudioWindow(QMainWindow):
         self.resize(1320, 860)
         self.setMinimumSize(1040, 680)
 
+        # Frameless: drop the native grey OS title bar and wear our own dark one
+        # (with our own traffic lights), so the app reads as a product, not a
+        # generic Qt window. Move/resize stay native via startSystemMove +
+        # corner grips (see window_chrome).
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+
         central = QWidget()
-        self._root = QHBoxLayout(central)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.setCentralWidget(central)
+
+        # Title bar sits in its own holder so a theme switch can rebuild just it.
+        self._titlebar_holder = QWidget()
+        self._titlebar_lay = QVBoxLayout(self._titlebar_holder)
+        self._titlebar_lay.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(self._titlebar_holder)
+
+        body = QWidget()
+        self._root = QHBoxLayout(body)          # sidebar + stack
         self._root.setContentsMargins(0, 0, 0, 0)
         self._root.setSpacing(0)
-        self.setCentralWidget(central)
+        outer.addWidget(body, 1)
 
         self._stack = QStackedWidget()
         self._build_chrome()
+        self._build_titlebar()
         self.apply_theme(theme_name)
+        self._grips = install_corner_grips(self)
         self.navigate("home")
 
     # ── construction ────────────────────────────────────────────────────────
@@ -110,6 +133,7 @@ class StudioWindow(QMainWindow):
             item = self._root.takeAt(0)
             w = item.widget()
             if w and w is not self._stack:
+                w.setParent(None)      # remove from child tree synchronously
                 w.deleteLater()
 
         self._sidebar = Sidebar(_NAV, t)
@@ -125,6 +149,23 @@ class StudioWindow(QMainWindow):
                                   on_open=self.open_project)
         self.register_screen("home", home)
         self.register_screen("projects", projects)
+
+    def _build_titlebar(self) -> None:
+        """(Re)build the custom title bar for the current theme."""
+        while self._titlebar_lay.count():
+            item = self._titlebar_lay.takeAt(0)
+            w = item.widget()
+            if w:
+                w.setParent(None)      # remove from child tree synchronously
+                w.deleteLater()
+        self._titlebar_lay.addWidget(
+            TitleBar(self, self.tokens, on_toggle_theme=self.toggle_theme))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        grips = getattr(self, "_grips", None)
+        if grips:
+            layout_corner_grips(self, grips)
 
     def register_screen(self, key: str, widget: QWidget) -> None:
         """Register (or replace) a screen widget under a nav ``key``."""
@@ -170,6 +211,15 @@ class StudioWindow(QMainWindow):
                 pass
         self._stack.setCurrentWidget(screen)
         self._sidebar.set_active(key)
+        # A soft fade on the incoming screen — the "beautiful transitions" from
+        # the mockup. Skipped for the napari-hosting workspace (an opacity
+        # effect on a live GL canvas is expensive and can flicker).
+        if key not in ("workspace",):
+            try:
+                from napari_app.motion import fade_in
+                fade_in(screen, 170)
+            except Exception:
+                pass
 
     def open_project(self, project_id: str) -> None:
         """Open a project into the Workspace (Segment) screen."""
@@ -215,6 +265,7 @@ class StudioWindow(QMainWindow):
         self._screens = {}
         self._theme_name = new
         self._build_chrome()
+        self._build_titlebar()
         for k, v in heavy.items():
             self._screens[k] = v
             self._stack.addWidget(v)

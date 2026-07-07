@@ -18,6 +18,30 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-07 — Studio: own window chrome (no more grey OS title bar) + screen transitions
+
+First polish pass after the foundation landed and the app ran for real: it
+still wore the native macOS title bar (a grey strip with the traffic lights),
+which reads as "a Qt window", not a product. Replaced it with our own:
+
+- **Frameless window + custom dark title bar** (`window_chrome.py`) carrying
+  the app's *own* traffic lights (close/minimise/zoom, hover-revealed glyphs),
+  a centred title, and a theme toggle — matching the north-star mockup. Move
+  and resize stay fully native via `QWindow.startSystemMove` +
+  `startSystemResize` and four corner `QSizeGrip`s (no hand-rolled geometry).
+  Portable (macOS + Linux), no new dependency (the pyobjc native-title-bar
+  route needs a package that isn't installed).
+- **Screen transitions** — a soft fade on navigation (reusing `motion.fade_in`),
+  the "beautiful transitions" from the mockup; skipped for the napari-hosting
+  Workspace where an opacity effect on a live GL canvas would flicker.
+
+Verified: 16 Studio wiring tests (incl. frameless flag, three traffic lights,
+close-button wiring, title-bar rebuild on theme toggle) + full suite green;
+the frameless window constructs, navigates and toggles theme cleanly offscreen.
+Not verified here (no display): the live look of the custom title bar and the
+fade timing. Still napari-flavoured and next on the list: the Workspace panel
+(custom layer + results UI) that currently hosts the raw `PredictWidget`.
+
 ## 2026-07-07 — CellSeg1 Studio: the standalone desktop app takes shape (foundation)
 
 The start of turning CellSeg1 from a napari *plugin* (a 500px dock inside
