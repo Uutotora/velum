@@ -49,6 +49,90 @@ def test_no_webengine_falls_back_to_a_message_not_a_crash(app, monkeypatch):
     assert w._view is None
 
 
+# ── embedded-view load retry ─────────────────────────────────────────────────
+#
+# `aim up` spawns a real web server in a subprocess; the very first load
+# attempt can race it still starting (confirmed against a real install: the
+# first QWebEngineView.loadFinished fired False, a retry ~1s later fired
+# True with the real Aim page's DOM actually populated). These tests drive
+# the retry state machine directly against a fake view (no real
+# QWebEngineView/Chromium involved) so they stay fast and deterministic;
+# QTimer.singleShot is monkeypatched to fire immediately rather than really
+# waiting `_LOAD_RETRY_MS`.
+
+class _FakeView:
+    def __init__(self):
+        self.urls = []
+
+    def setUrl(self, url):
+        self.urls.append(url)
+
+
+def _fire_timers_immediately(monkeypatch):
+    from PyQt6.QtCore import QTimer
+    monkeypatch.setattr(QTimer, "singleShot", staticmethod(lambda ms, fn: fn()))
+
+
+def test_embedded_view_retries_once_after_a_failed_load(app, monkeypatch):
+    monkeypatch.setattr(dashboard_window, "_has_webengine", lambda: False)
+    w = dashboard_window.DashboardWindow()
+    _fire_timers_immediately(monkeypatch)
+    fake_view = _FakeView()
+    w._view = fake_view
+    w._url = "http://127.0.0.1:12345"
+    w._load_attempt = 0
+
+    w._on_embedded_load_finished(False)
+
+    assert w._load_attempt == 1
+    assert len(fake_view.urls) == 1   # the retry re-set the URL
+    assert fake_view.urls[0].toString() == "http://127.0.0.1:12345"
+
+
+def test_embedded_view_does_not_retry_after_a_successful_load(app, monkeypatch):
+    monkeypatch.setattr(dashboard_window, "_has_webengine", lambda: False)
+    w = dashboard_window.DashboardWindow()
+    _fire_timers_immediately(monkeypatch)
+    fake_view = _FakeView()
+    w._view = fake_view
+    w._url = "http://127.0.0.1:12345"
+    w._load_attempt = 0
+
+    w._on_embedded_load_finished(True)
+
+    assert w._load_attempt == 0
+    assert fake_view.urls == []
+
+
+def test_embedded_view_gives_up_after_max_attempts_with_a_status_message(app, monkeypatch):
+    monkeypatch.setattr(dashboard_window, "_has_webengine", lambda: False)
+    w = dashboard_window.DashboardWindow()
+    _fire_timers_immediately(monkeypatch)
+    w._view = _FakeView()
+    w._url = "http://127.0.0.1:12345"
+    w._load_attempt = 0
+
+    for _ in range(dashboard_window._LOAD_MAX_ATTEMPTS):
+        w._on_embedded_load_finished(False)
+
+    assert w._load_attempt == dashboard_window._LOAD_MAX_ATTEMPTS
+    assert "embedded load failed" in w._status.text()
+    assert "Open in browser" in w._status.text()
+
+
+def test_open_dashboard_resets_the_retry_counter(app, monkeypatch):
+    monkeypatch.setattr(dashboard_window, "_has_webengine", lambda: False)
+    w = dashboard_window.DashboardWindow()
+    w._view = _FakeView()   # pretend webengine had been available
+    w._load_attempt = 5
+
+    from napari_app.core import experiment_tracking as tracking
+    monkeypatch.setattr(tracking, "ensure_dashboard_running", lambda: "http://127.0.0.1:1")
+    w.open_dashboard()
+
+    assert w._load_attempt == 0
+
+
 def test_open_dashboard_shows_the_url_in_the_status_label(app, monkeypatch):
     monkeypatch.setattr(dashboard_window, "_has_webengine", lambda: False)
     w = dashboard_window.DashboardWindow()

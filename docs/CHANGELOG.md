@@ -18,6 +18,39 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-07 (night) — the embedded dashboard view raced Aim's server startup and loaded blank
+
+The user installed `PyQt6-WebEngine` (the `tracking-ui` extra) and reported
+the embedded Dashboard view staying blank while "Open in browser" — now
+fixed — worked. Installed the real package here too and reproduced it: the
+`QWebEngineView`'s first `loadFinished` fired `False`. Root cause:
+`open_dashboard()` calls `ensure_dashboard_running()` (spawns the `aim up`
+subprocess) and immediately points the view at its URL — but a freshly
+`Popen`'d web server isn't listening yet the instant the subprocess object
+exists, so the very first load attempt can race it (confirmed: a *second*
+attempt ~1s later succeeded, with the real Aim page's DOM actually
+populated — 116KB of HTML, `document.title == "Aim"`).
+
+Fixed with a non-blocking retry in `DashboardWindow` itself (not a blocking
+wait in `experiment_tracking.py`, which callers reach from the GUI thread —
+sleeping there would freeze the whole app): on `loadFinished(False)`,
+`QTimer.singleShot` re-triggers the load after 700ms, up to 8 attempts,
+giving up with a "try Open in browser" status message rather than retrying
+forever. 4 new tests drive the retry state machine against a fake view
+(`QTimer.singleShot` monkeypatched to fire immediately) — fast and
+deterministic, no real Chromium involved.
+
+**Sandbox limitation, not re-verified against a real screen:** even after
+the DOM genuinely populated in the real-install check above, a `.grab()`
+screenshot of the embedded view stayed blank, with the Chromium GPU process
+logging `Unable to initialize SkSurface` / `Context lost during
+MakeCurrent` / `Failed to make current since context is marked as lost` —
+consistent with Chromium's compositor failing to get a working (even
+software) rendering surface specifically under `QT_QPA_PLATFORM=offscreen`,
+not with anything actually wrong in the page or this app's code. The DOM
+content is confirmed correct; the *pixels* on a real display with real GPU
+acceleration are not confirmed here and need the user's own look.
+
 ## 2026-07-07 (evening, later) — installed Aim for real in the app's actual env; "Open in browser" was silently inert, not broken
 
 The previous entry's real-Aim verification ran in a throwaway venv, kept
