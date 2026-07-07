@@ -1197,16 +1197,19 @@ class PredictWidget(QWidget):
         p = self.gt_path.text().strip()
         return bool(p) and Path(p).exists()
 
-    def start_auto_tune(self, on_step, on_finish) -> str | None:
+    def start_auto_tune(self, on_step, on_finish, *, strategy: str = "advisor",
+                        model: str | None = None, max_steps: int = 8,
+                        patience: int = 2, min_delta: float = 0.005,
+                        on_round_start=None) -> str | None:
         """Start the tuning loop against the current image + loaded ground
         truth. Returns an error string (and starts nothing) if a
         precondition isn't met, else ``None`` once the loop has started in
-        the background. ``on_step``/``on_finish`` are forwarded to
-        :meth:`PredictController.run_tuning_loop_async` verbatim — they fire
-        from a background thread exactly like every other async controller
-        callback, so the caller (the Assistant widget) is responsible for
-        making them thread-safe (a Qt signal), same as it already does for
-        ``rerun``'s own callbacks.
+        the background. Everything else is forwarded to
+        :meth:`PredictController.run_tuning_loop_async` verbatim — the
+        callbacks fire from a background thread exactly like every other
+        async controller callback, so the caller (the Assistant widget) is
+        responsible for making them thread-safe (a Qt signal), same as it
+        already does for ``rerun``'s own callbacks.
         """
         if self._last_mask is None:
             return "Run a prediction first."
@@ -1223,7 +1226,10 @@ class PredictWidget(QWidget):
                             interpolation=cv2.INTER_NEAREST).astype(np.int32)
         params = self._gather_params()
         self._controller.run_tuning_loop_async(
-            params, gt, on_step=on_step, on_log=self._append_log, on_finish=on_finish)
+            params, gt, strategy=strategy, model=model, max_steps=max_steps,
+            patience=patience, min_delta=min_delta,
+            on_step=on_step, on_round_start=on_round_start,
+            on_log=self._append_log, on_finish=on_finish)
         return None
 
     def stop_auto_tune(self):

@@ -108,6 +108,35 @@ def test_start_auto_tune_dispatches_with_gathered_params(widget, monkeypatch, tm
     assert params["image_path"] == str(img_path)
     assert np.array_equal(gtm, gt.astype(np.int32))
     assert kw["on_step"] is on_step and kw["on_finish"] is on_finish
+    assert kw["strategy"] == "advisor" and kw["model"] is None   # defaults
+
+
+def test_start_auto_tune_forwards_strategy_model_and_loop_settings(widget, monkeypatch, tmp_path):
+    import cv2
+    widget._last_mask = np.zeros((10, 10), dtype=np.int32)
+    gt_path = tmp_path / "gt.png"
+    cv2.imwrite(str(gt_path), np.zeros((10, 10), dtype=np.uint16))
+    widget.gt_path.setText(str(gt_path))
+    img_path = tmp_path / "img.png"
+    cv2.imwrite(str(img_path), np.zeros((10, 10, 3), dtype=np.uint8))
+    widget.image_path.setText(str(img_path))
+
+    calls = []
+    monkeypatch.setattr(widget._controller, "run_tuning_loop_async",
+                        lambda params, gtm, **kw: calls.append(kw))
+    on_round_start = lambda s, t: None
+    err = widget.start_auto_tune(
+        lambda s: None, lambda r: None, strategy="llm", model="qwen2.5:7b",
+        max_steps=3, patience=1, min_delta=0.02, on_round_start=on_round_start)
+
+    assert err is None
+    kw = calls[0]
+    assert kw["strategy"] == "llm"
+    assert kw["model"] == "qwen2.5:7b"
+    assert kw["max_steps"] == 3
+    assert kw["patience"] == 1
+    assert kw["min_delta"] == pytest.approx(0.02)
+    assert kw["on_round_start"] is on_round_start
 
 
 def test_start_auto_tune_resizes_gt_to_match_prediction_shape(widget, monkeypatch, tmp_path):

@@ -267,6 +267,41 @@ def build_live_message(diag: dict[str, Any], params: dict[str, Any]) -> str:
     return f"[live context]\n{_context_block(diag, params)}"
 
 
+def build_tuning_prompt(diag: dict[str, Any], params: dict[str, Any],
+                        trajectory: list[Any]) -> str:
+    """Prompt for the agentic tuning loop's LLM-driven strategy
+    (:func:`napari_app.core.tuning_loop.llm_propose_fn`): like
+    :func:`build_context_prompt`, but framed as one round of an autonomous
+    tuning session with the score trajectory so far, so the model reasons
+    about what it already tried instead of re-suggesting the same thing
+    blind — the ReAct pattern (reason, then act) applied to this specific
+    loop rather than free-form chat. ``trajectory`` items need only
+    ``step``/``score``/``n_cells``/``changes`` attributes (a
+    ``tuning_loop.TuningStep``, not imported here to avoid a cross-module
+    coupling in the other direction).
+    """
+    lines = []
+    for s in trajectory:
+        chg = ", ".join(f"{k}={v}" for k, v in s.changes.items()) or "(baseline)"
+        lines.append(f"  round {s.step}: score={s.score:.3f}  cells={s.n_cells}  change={chg}")
+    hist_txt = "\n".join(lines) if lines else "  (no rounds yet — this is the baseline)"
+    return (
+        f"{AGENT_SYSTEM}\n\n---\n"
+        "AUTO-TUNE MODE: you are running an autonomous tuning loop against a "
+        "ground-truth mask, not chatting with a person. Each round you either "
+        "suggest exactly one parameter change to try next, or decide tuning "
+        "has plateaued.\n\n"
+        f"Score so far (0-1, higher is better — mean instance AP against "
+        f"ground truth):\n{hist_txt}\n\n"
+        f"{_context_block(diag, params)}\n\n"
+        "Reply with a short reason (one sentence), then either one line of "
+        "the exact form `SUGGEST: <param>=<value>` for the single change you "
+        "want to try next, or a line `STOP: <one-sentence reason>` if you "
+        "believe further rounds are unlikely to improve the score. Never "
+        "repeat a change already listed in the history above."
+    )
+
+
 _SUGGEST_RE = None
 
 
@@ -291,6 +326,17 @@ def parse_suggestions(text: str) -> dict[str, Any]:
         except ValueError:
             continue
     return out
+
+
+def parse_stop(text: str) -> str | None:
+    """Extract a `STOP: <reason>` line from an LLM reply (the auto-tune
+    loop's "finish" action — see :func:`build_tuning_prompt`), or ``None``
+    if the reply doesn't contain one."""
+    for line in text.splitlines():
+        line = line.strip()
+        if line.upper().startswith("STOP:"):
+            return line.split(":", 1)[1].strip() or "the model asked to stop."
+    return None
 
 
 # Curated local models that run well on a scientist's laptop and are strong at

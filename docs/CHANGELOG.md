@@ -18,6 +18,62 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-07 (afternoon) — agentic tuning loop follow-up: a real LLM tool-calling strategy, live chart + leaderboard + CSV export, parameter importance
+
+Direct instruction, right after the first pass landed: don't stop at the
+minimum that satisfies the acceptance criteria — go all the way, and
+research how comparable products instrument this kind of loop before
+building further ("больше полезной информации — я смогу её убрать", i.e.
+bias toward more instrumentation, not less). Researched AutoML/sweep
+dashboards (Optuna, Weights & Biases), the ReAct tool-calling-loop pattern,
+agentic-coding-tool UX (Cursor/Devin checkpoints), and this app's own
+segmentation neighbourhood (CellSeg3D's grid-search tuner, the
+"the-segmentation-game" napari plugin's Highscore table) — see
+`docs/BACKLOG.md`'s "Agentic tuning loop" entry for the full writeup and
+which of it is grounded in which precedent. Four real additions, not
+cosmetic:
+
+- **A genuine LLM tool-calling strategy** (closes the first pass's own
+  "deliberately out of scope" note). `tuning_loop.llm_propose_fn` hands the
+  "what to change next" decision to a connected local Ollama model each
+  round — a real ReAct round (reason, then act), reusing the chat's
+  existing `SUGGEST:` protocol plus a new `STOP: <reason>` one
+  (`advisor.build_tuning_prompt`/`advisor.parse_stop`). Falls back to the
+  rule-based advisor on any model error/timeout/unusable reply. A new
+  "Strategy" combo in the Assistant only offers it once a local model is
+  actually connected.
+- **A settings panel** (closes the first pass's other "deliberately out of
+  scope" note): `max_steps`/`patience`/`min_delta` are now three spinboxes
+  in the Assistant's new "Auto-tune" card, not fixed constants.
+- **Product-grade trajectory instrumentation**, replacing the first pass's
+  growing pile of per-round chat cards: a live score-vs-round chart
+  (pyqtgraph/matplotlib fallback, the same one `train_widget.LossChart`
+  already uses), a sortable leaderboard table (click a round → "Use
+  selected round" restores it, a Cursor/Devin-style one-click checkpoint),
+  a CSV export of the full trajectory, and a "what mattered most" panel
+  (Pearson correlation between each varying parameter and the score —
+  W&B's parameter-importance idea without needing enough trials for its
+  random-forest model). The chat keeps one short line per round for the
+  conversational narrative; the rich data lives in the dedicated card.
+- **Every stop is explained, not just coded**: `TuningResult` now carries a
+  free-text `stop_detail` (the advisor's or the model's own words for why
+  it stopped) alongside the machine-readable `stop_reason`, surfaced
+  verbatim in the finish banner instead of discarded once the loop exits.
+
+24 net-new tests (369 → 393; the pure-loop and controller suites were also
+rewritten in place for the new `Proposal`/`TuningResult`/4-arg-`ProposeFn`
+contracts, so more test functions than that actually changed). Full suite
+green in the full conda env (393 passed) and in a from-scratch venv with
+only `pip install --group test` (288 passed, 9 skipped for PyQt6-gated
+files).
+
+**Not verified:** the real GUI (chart/table rendering on an actual screen)
+and a real local model's actual tuning judgement — the LLM strategy's tests
+use a scripted fake `ollama_chat`, proving the plumbing around whatever the
+model says, not that a real model's suggestions are good ones. **Still out
+of scope:** a multi-candidate-per-round (beam search) strategy and a
+parallel-coordinates-style multi-parameter plot.
+
 ## 2026-07-07 (midday) — agentic tuning loop, plus two documentation fixes
 
 - **Agentic tuning loop** (top open P1 backlog item). The Assistant can now

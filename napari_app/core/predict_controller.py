@@ -608,26 +608,41 @@ class PredictController:
         return t
 
     def run_tuning_loop_async(self, initial_params: dict, gt_mask: np.ndarray, *,
+                               strategy: str = "advisor", model: str | None = None,
                                max_steps: int = 8, patience: int = 2, min_delta: float = 0.005,
-                               on_step=None, on_log=None, on_finish=None) -> threading.Thread:
-        """Automate predict -> score-against-``gt_mask`` -> ask the advisor
-        what to change -> repeat, on a background daemon thread.
+                               on_step=None, on_round_start=None, on_log=None,
+                               on_finish=None) -> threading.Thread:
+        """Automate predict -> score-against-``gt_mask`` -> adjust -> repeat,
+        on a background daemon thread.
 
         This is the same predict/score/adjust cycle a user already runs by
         hand from the Assistant tab (Diagnose -> Apply & re-run -> Evaluate
         against ground truth); see :mod:`napari_app.core.tuning_loop` for the
-        actual loop and its stopping rule. ``on_step(TuningStep)`` fires once
-        per round with that round's full parameter snapshot, score and
-        metrics — the whole trajectory is reconstructed by the caller from
-        these calls (not returned in bulk), so the UI can show progress live
-        and let the user jump back to *any* prior step's parameters, not
-        just the final one. ``on_finish`` always fires last, success or
-        failure; :meth:`stop_tuning` requests cooperative cancellation,
-        checked once per round.
+        actual loop and its stopping rule. ``strategy="advisor"`` (default)
+        uses the deterministic rule-based diagnostic engine;
+        ``strategy="llm"`` (with a connected Ollama ``model`` name) hands
+        the "what to change next" decision to that local model each round
+        instead — a real tool-calling loop, falling back to the advisor if
+        the model errors. ``on_step(TuningStep)`` fires once per round with
+        that round's full parameter snapshot, score and metrics — the whole
+        trajectory is reconstructed by the caller from these calls (not
+        returned in bulk), so the UI can show progress live and let the user
+        jump back to *any* prior step's parameters, not just the final one.
+        ``on_round_start(step, max_steps)`` fires right before each
+        (potentially slow) round starts predicting.
+        ``on_finish(stop_reason, stop_detail)`` always fires last, success or
+        failure — ``stop_reason`` is one of
+        :data:`napari_app.core.tuning_loop.STOP_REASONS` (``"error"`` on an
+        exception); ``stop_detail`` is free text when the stop had one worth
+        keeping (e.g. the advisor's or the local model's own words for why
+        it had nothing left to suggest), else ``""``. :meth:`stop_tuning`
+        requests cooperative cancellation, checked once per round.
         """
         self._tuning_stop.clear()
 
         def run():
+            stop_reason = "error"
+            stop_detail = ""
             try:
                 from napari_app.core import tuning_loop
 
@@ -635,17 +650,23 @@ class PredictController:
                     return _predict_cached(self.build_config(p))
 
                 score_fn = tuning_loop.default_score_fn(gt_mask)
-                tuning_loop.run_tuning_loop(
-                    initial_params, predict_fn, score_fn,
+                propose_fn = (tuning_loop.llm_propose_fn(model)
+                             if strategy == "llm" and model
+                             else tuning_loop.default_propose_fn)
+                result = tuning_loop.run_tuning_loop(
+                    initial_params, predict_fn, score_fn, propose_fn=propose_fn,
                     max_steps=max_steps, patience=patience, min_delta=min_delta,
-                    on_step=on_step, should_stop=self._tuning_stop.is_set)
+                    on_step=on_step, on_round_start=on_round_start,
+                    should_stop=self._tuning_stop.is_set)
+                stop_reason = result.stop_reason
+                stop_detail = result.stop_detail
             except Exception as e:
                 import traceback
                 if on_log:
                     on_log(f"[ERROR] {e}\n{traceback.format_exc()}")
             finally:
                 if on_finish:
-                    on_finish()
+                    on_finish(stop_reason, stop_detail)
 
         t = threading.Thread(target=run, daemon=True)
         t.start()
