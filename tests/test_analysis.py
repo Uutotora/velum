@@ -12,6 +12,7 @@ import pytest
 from napari_app.analysis import (
     compute_measurements,
     label_colormap_from_measurement,
+    measurement_range,
     rows_as_csv,
     summary_line,
 )
@@ -332,3 +333,25 @@ def test_label_colormap_respects_cmap_name():
     plasma = colormaps["plasma"]
     assert cmap_out[1] == pytest.approx(tuple(plasma(0.0)))
     assert cmap_out[2] == pytest.approx(tuple(plasma(1.0)))
+
+
+# ── measurement_range (the legend's min/max for "colour cells by") ─────────
+
+def test_measurement_range_returns_min_max_across_population():
+    res = _two_cell_result()
+    assert measurement_range(res, "area") == (36.0, 225.0)
+
+
+def test_measurement_range_missing_key_returns_none():
+    res = _two_cell_result()
+    assert measurement_range(res, "not_a_real_column") is None
+
+
+def test_measurement_range_cell_id_returns_none():
+    res = _two_cell_result()
+    assert measurement_range(res, "cell_id") is None
+
+
+def test_measurement_range_empty_result_returns_none():
+    res = compute_measurements(np.zeros((10, 10), dtype=np.int32))
+    assert measurement_range(res, "area") is None

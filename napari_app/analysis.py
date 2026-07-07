@@ -479,3 +479,25 @@ def label_colormap_from_measurement(result: dict[str, Any], key: str,
         rgba = tuple(cmap(0.5))
         return {i: rgba for i in ids}
     return {i: tuple(cmap((v - lo) / (hi - lo))) for i, v in zip(ids, values)}
+
+
+def measurement_range(result: dict[str, Any], key: str) -> tuple[float, float] | None:
+    """The (min, max) of one measured column across the current population —
+    the range a "color cells by" legend needs to label its gradient.
+
+    A separate function rather than folding into
+    ``label_colormap_from_measurement``'s return value so that function's
+    contract (an id -> rgba dict, nothing else) stays simple for its
+    existing callers. ``None`` under the same conditions that function
+    itself treats as "not a real choice" (unknown/id column, no rows,
+    non-numeric).
+    """
+    cols = [k for k, _label, _unit in result["columns"]]
+    if key not in cols or key == "cell_id" or not result["rows"]:
+        return None
+    idx = cols.index(key)
+    try:
+        values = [float(row[idx]) for row in result["rows"]]
+    except (TypeError, ValueError):
+        return None
+    return (min(values), max(values))
