@@ -172,6 +172,47 @@ for a credible product · P1 differentiation · P2 later.
 
 ## P1 — differentiation
 
+### CellSeg1 Studio — standalone desktop app  · XL (epic, multi-PR)
+The headline UX bet: stop being "a napari plugin in a dock" and become a
+self-contained product that owns its window (Home · Projects · Workspace),
+with napari's canvas embedded as one component. Design language derived from
+Label Studio, retuned for microscopy. Agreed against an interactive HTML
+north-star mockup. **Additive + opt-in**: classic `napari_app/main.py` /
+`run_napari.sh` / `cellseg1` stays byte-for-byte unchanged; Studio ships behind
+`run_studio.sh` / `cellseg1-studio`. Lives in `napari_app/studio/`.
+
+- [x] **Foundation** (2026-07-07) — `project.py` (Project/ProjectStore/
+  ProjectSettings carrying every predict/train knob, JSON-persisted, 20 tests);
+  `theme.py` (light+dark tokens, QSS, viridis, 14 tests); shell `app.py`/
+  `components.py`/`screens.py` (StudioWindow + sidebar + live Home/Projects,
+  reusing PredictWidget/TrainWidget; 12 headless tests); Figtree bundled; new
+  entry point. See `docs/CHANGELOG.md`.
+- [ ] **Workspace layer panel** · M — a custom, Studio-styled layer list +
+  layer controls driven by `viewer.layers` events (napari-fidelity: new
+  labels/shapes/points, visibility, opacity/blending/contour/brush/eraser,
+  contiguous/preserve/show-selected, bigger colour palette, 2D↔3D + grid +
+  home), replacing the embedded napari docks so the workspace stops looking
+  like napari. Ground-truth overlay toggle lives here.
+- [ ] **Results panel parity** · M — port the full Results surface into the
+  Studio inspector (cells detected, median Ø/mean area/coverage, pixel
+  calibration, Save masks/Export CSV/Refine/Measurements, "Colour cells by"
+  heatmap, Ground-truth & evaluation, Batch, Benchmark). Reuse existing
+  controllers; don't re-implement.
+- [ ] **New-project dialog** · S — replace the auto-named stub in
+  `StudioWindow._new_project` with a real Name/Description/Import/Engine flow
+  (the 3-step Label Studio pattern), writing through `ProjectStore`.
+- [ ] **Assistant drawer + Logs console + Dashboard screen** · M — host the
+  existing `AssistantWidget` as a right drawer, `log_window` as a bottom
+  console, `dashboard_window` as a screen, wired into the sidebar Tools/nav.
+- [ ] **Live theme repaint** · S — currently a theme toggle rebuilds the
+  Home/Projects chrome only; make embedded/reused widgets re-theme too (or
+  restyle them through Studio tokens), and persist the choice.
+- [ ] **⌘K command palette** · M — folds in the existing P1 "Command palette"
+  item below; the Studio shell is the natural host.
+- **Verify:** pure logic unit-tested; Qt screens headless-import + offscreen
+  construct-tested (`pytest.importorskip("PyQt6")`); GUI/model behaviour noted
+  as not-verified-here each PR.
+
 ### [x] SAM 2 engine (3D / video)  · L
 - **Goal:** add SAM 2 as an engine for z-stacks and time-lapse.
 - **Why:** confocal/lightsheet/organoids are 3D; the current pipeline is 2D.

@@ -18,6 +18,45 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-07 — CellSeg1 Studio: the standalone desktop app takes shape (foundation)
+
+The start of turning CellSeg1 from a napari *plugin* (a 500px dock inside
+napari's window) into a self-contained desktop *product* that owns its own
+window — Home screen, a Projects library, a Workspace that embeds napari's
+canvas as one component among many. Design language derived from the Label
+Studio system and retuned for microscopy (warm-neutral light "bench" + deep
+"scope" dark, iris-indigo interactive hue + fluor-teal signal hue, Figtree
+typeface). Preceded by an interactive HTML north-star mockup the direction was
+agreed against.
+
+This first increment is **additive and opt-in** — the classic app
+(`napari_app/main.py`, `run_napari.sh`, the `cellseg1` command) is byte-for-byte
+unchanged; launch it to revert instantly. Shipped in a new `napari_app/studio/`
+package:
+
+- **`project.py`** — the concept the app has lacked entirely: a `Project` +
+  `ProjectStore` + `ProjectSettings`, carrying **every** predict/train knob
+  (engine, thresholds, Cellpose/SAM2 params, channels, calibration, display),
+  JSON-persisted one folder per project, with tags/favourites/recent ordering.
+  Pure stdlib, atomic writes, forward/backward-compatible loading. 20 tests.
+- **`theme.py`** — the Studio design tokens: light + dark palettes (identical
+  key sets so widgets never branch on theme), QSS builders, a viridis ramp for
+  the "colour cells by" heatmap. Pure strings. 14 tests.
+- **`app.py` / `components.py` / `screens.py`** — the shell: a `StudioWindow`
+  (`QMainWindow`) owning a sidebar (wordmark, no app icon, per the direction) +
+  a stack of screens; Home and Projects are live, store-backed; the heavier
+  Workspace/Train screens are registered by `main()`, which embeds napari's
+  `_qt_viewer` and **reuses the proven `PredictWidget`/`TrainWidget` unchanged**
+  (feature preservation by reuse, not rewrite). Bundles Figtree (SIL OFL). New
+  entry point: `run_studio.sh` / `cellseg1-studio`. 12 headless wiring tests.
+
+Verified: full pure-logic suite green in the conda env **and** the 34 new
+pure tests pass with only `pytest` installed (proving no torch/napari leak into
+the CI light group); shell tests pass headless (`QT_QPA_PLATFORM=offscreen`);
+all studio modules import without a display; `git diff` confirms the classic
+entry point is untouched. **Not** verified here (no display): the live GUI —
+the embedded napari canvas, real theme-toggle repaint, real segmentation.
+
 ## 2026-07-07 (night, later) — the real reason PyQt6-WebEngine kept saying "not installed": a Qt startup-order requirement, not this app's dependency detection
 
 User installed `PyQt6-WebEngine` and still saw "Embedded view needs the
