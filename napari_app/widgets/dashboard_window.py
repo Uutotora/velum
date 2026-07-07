@@ -13,12 +13,19 @@ from __future__ import annotations
 import webbrowser
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 
 from napari_app.theme import (
     BG, BORDER, BORDER_STRONG, TEXT, DIM, ACCENT, CONSOLE, WIDGET_SS,
     BTN_PRIMARY, BTN_SECONDARY,
 )
+
+# aim up spawns a real web server in a subprocess; the very first load
+# attempt right after starting it can race the server still coming up
+# (connection refused, not yet listening) -- retry a few times rather than
+# showing a permanently blank view for what's usually a ~1-2s startup.
+_LOAD_RETRY_MS = 700
+_LOAD_MAX_ATTEMPTS = 8
 
 
 def _has_webengine() -> bool:
@@ -67,9 +74,11 @@ class DashboardWindow(QWidget):
 
         self._url: str | None = None
         self._view = None
+        self._load_attempt = 0
         if _has_webengine():
             from PyQt6.QtWebEngineWidgets import QWebEngineView
             self._view = QWebEngineView()
+            self._view.loadFinished.connect(self._on_embedded_load_finished)
             L.addWidget(self._view)
         else:
             fallback = QWidget()
@@ -105,8 +114,22 @@ class DashboardWindow(QWidget):
         self._browser_btn.setEnabled(True)
         self._browser_btn.setToolTip(f"Open {self._url} in your system browser")
         if self._view is not None:
-            from PyQt6.QtCore import QUrl
-            self._view.setUrl(QUrl(self._url))
+            self._load_attempt = 0
+            self._load_embedded_view()
+
+    def _load_embedded_view(self):
+        from PyQt6.QtCore import QUrl
+        self._view.setUrl(QUrl(self._url))
+
+    def _on_embedded_load_finished(self, ok: bool):
+        if ok or self._url is None:
+            return
+        self._load_attempt += 1
+        if self._load_attempt >= _LOAD_MAX_ATTEMPTS:
+            self._status.setText(
+                f"{self._url}  (embedded load failed — try “Open in browser”)")
+            return
+        QTimer.singleShot(_LOAD_RETRY_MS, self._load_embedded_view)
 
     def _open_in_browser(self):
         if self._url:
