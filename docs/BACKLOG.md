@@ -617,6 +617,48 @@ for a credible product · P1 differentiation · P2 later.
   `track()`/hparams calls) is correct assuming Aim's own documented API
   surface, not that a real Aim server behaves as documented.
 
+  **Follow-up (same day), on request — closed the real-Aim gap above and
+  fixed a real bug it found:** the user reported not seeing the "Dashboard"
+  button in Predict/Train. Investigated by literally rendering both widgets
+  under offscreen Qt (`QT_QPA_PLATFORM=offscreen`) and grabbing a real
+  `QPixmap` screenshot rather than only import-checking — the button *was*
+  present and correctly placed in both footers (screenshots showed it next
+  to "Log"), so this wasn't a code defect; the far more likely explanation
+  is a stale already-running app process from before PR #23 merged (this
+  screenshot technique itself is worth keeping in mind as a stronger
+  verification tool than a plain headless import for future UI-layout
+  questions in this sandbox). Installed the real `aim` package into a
+  throwaway venv (not this repo's shared conda env) and drove
+  `experiment_tracking.py` for real end-to-end: a real `aim.Run` created a
+  real `.aim` repo with real hparams/tracked values, and —
+  critically — **`ensure_dashboard_running()` failed** with
+  `FileNotFoundError: 'aim'`, a genuine bug this real install caught that no
+  amount of fake-module-injection testing could have: `subprocess.Popen(["aim",
+  ...])` resolves the bare command through `PATH`, which a pip-installed
+  console-script's directory is not guaranteed to be on (it wasn't, in this
+  throwaway venv, invoked by its full interpreter path rather than an
+  activated shell — plausibly also how a packaged desktop app would launch
+  Aim). Fixed with a new `_aim_cli_path()`: prefer the sibling of
+  `sys.executable` (where pip actually installs the console-script,
+  regardless of `PATH`), falling back to the bare name only if that sibling
+  doesn't exist. Re-ran the same real-install script after the fix:
+  `ensure_dashboard_running()` now launches a real `aim up` that answers
+  `HTTP 200` with real Aim UI HTML — the dashboard genuinely works
+  end-to-end, not just against fakes. 2 new tests for `_aim_cli_path()`'s
+  two branches (sibling present / absent, via a monkeypatched
+  `sys.executable`); the existing Popen-args test's assertion loosened from
+  an exact `"aim"` match to `endswith("aim")` so it stays valid under both
+  branches. Separately, replaced Train's old plain-text "Training history"
+  card (`self.history_box`, `STATE_MANAGER.load_history()` — this session
+  only, no comparison) with a "Run history" card pointing at the same
+  Dashboard — removing a second, now-redundant history UI instead of
+  leaving two competing ones. 3 new tests in this follow-up (433 → 436; 393
+  → 436 across the whole Aim feature including the earlier pass); full
+  suite green in the full conda env (436 passed) and the light venv (316
+  passed, 11 skipped). The embedded `QWebEngineView` path is
+  still unverified (`PyQt6-WebEngine` was not installed for this pass
+  either — it's the separate, heavier `tracking-ui` extra).
+
 ### [ ] Vision-grounded QC in the Assistant  · L
 - **Goal:** the agent inspects the actual mask (not just scalar stats) and
   highlights specific wrong cells ("45 and 46 are merged").

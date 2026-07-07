@@ -18,6 +18,39 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-07 (evening) — real-Aim verification found and fixed a genuine bug; Train's history card replaced
+
+User report: the "Dashboard" button wasn't visible in Predict/Train.
+Investigated by rendering both widgets under offscreen Qt and grabbing a
+real screenshot (`QWidget.grab()`), not just an import check — the button
+*was* there, correctly placed next to "Log" in both footers, so this was
+very likely a stale already-running app process from before the previous
+PR merged, not a code defect (worth remembering this screenshot technique
+for future UI questions in this sandbox — it catches what a plain headless
+import can't).
+
+While already investigating, closed the previous entry's one real
+remaining gap: installed the actual `aim` package into a throwaway venv
+(not this repo's shared conda env) and drove `experiment_tracking.py` for
+real. A real `aim.Run` worked exactly as the wrapper assumed — **except**
+`ensure_dashboard_running()` failed with `FileNotFoundError: 'aim'`:
+`subprocess.Popen(["aim", ...])` resolves through `PATH`, which a
+pip-installed console-script isn't guaranteed to be on when invoked outside
+an activated shell (exactly how a packaged desktop app plausibly launches
+it). Fixed with `_aim_cli_path()`: prefer the sibling of `sys.executable`
+(where pip actually puts the script, `PATH`-independent), falling back to
+the bare name otherwise. Re-verified against the same real install
+afterward: the dashboard now actually launches and answers `HTTP 200` with
+real Aim UI HTML.
+
+Also replaced Train's old plain-text "Training history" card
+(session-only, no comparison) with a "Run history" card pointing at the
+same Dashboard — one real history UI instead of two competing ones.
+
+3 new tests (433 → 436): `_aim_cli_path()`'s two branches, and a guard that
+the old history box/method stay removed. Full suite green in the full
+conda env and the light `pip install --group test` venv.
+
 ## 2026-07-07 (afternoon, later) — unified experiment tracking (Aim), not a backlog item
 
 Direct request following the auto-tune follow-up: an open-source dashboard

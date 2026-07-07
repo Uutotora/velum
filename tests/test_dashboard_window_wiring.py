@@ -140,3 +140,15 @@ def test_assistant_widget_dashboard_button_opens_the_shared_window(app, monkeypa
     w._open_dashboard()
     assert called == [True]
     w.close()
+
+
+def test_train_widget_replaced_the_old_local_history_box_with_the_dashboard(app):
+    """The plain-text "Training history" box (STATE_MANAGER.load_history(),
+    this session only) was replaced by a "Run history" card pointing at the
+    Dashboard (every run, real comparison) -- guards against it silently
+    coming back."""
+    tw = pytest.importorskip("napari_app.widgets.train_widget")
+    w = tw.TrainWidget(MagicMock())
+    assert not hasattr(w, "history_box")
+    assert not hasattr(w, "_refresh_history")
+    w.close()
