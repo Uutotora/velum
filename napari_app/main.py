@@ -5,8 +5,19 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from PyQt6.QtCore import QCoreApplication, QLocale, Qt
+
+# Must run before any QApplication exists (napari.Viewer() below creates one) —
+# PyQt6-WebEngine's own import requires this attribute to already be set, or
+# it raises ImportError even when the package is genuinely installed. Setting
+# it doesn't require WebEngine to be installed at all, so it's always safe;
+# skipping it would make the optional embedded Dashboard view
+# (napari_app/widgets/dashboard_window.py) permanently unreachable via a
+# lazy import no matter what's on disk, only fixable by an app restart *and*
+# this line, so it belongs at the true entry point, not next to the feature.
+QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+
 import napari
-from PyQt6.QtCore import QLocale, Qt
 from napari_app.widgets.train_widget import TrainWidget
 from napari_app.widgets.predict_widget import PredictWidget
 from napari_app.widgets.assistant_widget import AssistantWidget

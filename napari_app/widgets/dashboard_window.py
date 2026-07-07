@@ -6,7 +6,11 @@ just launches the user's system browser against the same local URL.
 Follows the exact singleton pattern `log_window.py`/`measurements_window.py`
 already use: one shared instance per process, reused across every "Dashboard"
 button in Predict/Train/Assistant so they all point at the same window
-instead of spawning three independent ones.
+instead of spawning three independent ones. Because it's a singleton, whether
+the embedded view or the fallback message gets built is re-checked on every
+open (`_upgrade_to_embedded_view_if_possible`), not only once at first
+construction — otherwise installing `PyQt6-WebEngine` into an already-running
+app would keep showing the fallback until the whole app was restarted.
 """
 from __future__ import annotations
 
@@ -74,33 +78,57 @@ class DashboardWindow(QWidget):
 
         self._url: str | None = None
         self._view = None
+        self._fallback = None
         self._load_attempt = 0
         if _has_webengine():
-            from PyQt6.QtWebEngineWidgets import QWebEngineView
-            self._view = QWebEngineView()
-            self._view.loadFinished.connect(self._on_embedded_load_finished)
-            L.addWidget(self._view)
+            self._build_embedded_view(L)
         else:
-            fallback = QWidget()
-            fl = QVBoxLayout(fallback)
-            fl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            msg = QLabel(
-                "Embedded view needs the optional PyQt6-WebEngine package\n"
-                "(pip install -e \".[tracking-ui]\").\n\n"
-                "Use “Open in browser” above to view the dashboard "
-                "in your system browser instead.")
-            msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            msg.setStyleSheet(f"color:{DIM}; font-size:12px; background:transparent;")
-            fl.addWidget(msg)
-            fallback.setStyleSheet(f"background:{CONSOLE};")
-            L.addWidget(fallback)
+            self._build_fallback(L)
 
         self.setLayout(L)
+
+    def _build_fallback(self, layout: QVBoxLayout):
+        self._fallback = QWidget()
+        fl = QVBoxLayout(self._fallback)
+        fl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg = QLabel(
+            "Embedded view needs the optional PyQt6-WebEngine package\n"
+            "(pip install -e \".[tracking-ui]\").\n\n"
+            "Use “Open in browser” above to view the dashboard "
+            "in your system browser instead.")
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg.setStyleSheet(f"color:{DIM}; font-size:12px; background:transparent;")
+        fl.addWidget(msg)
+        self._fallback.setStyleSheet(f"background:{CONSOLE};")
+        layout.addWidget(self._fallback)
+
+    def _build_embedded_view(self, layout: QVBoxLayout):
+        from PyQt6.QtWebEngineWidgets import QWebEngineView
+        self._view = QWebEngineView()
+        self._view.loadFinished.connect(self._on_embedded_load_finished)
+        layout.addWidget(self._view)
+
+    def _upgrade_to_embedded_view_if_possible(self):
+        """PyQt6-WebEngine can be installed into a running app's env *after*
+        this window was first built — its absence was otherwise baked into
+        the layout once, at construction, permanently (this window is a
+        singleton), so the fallback message would keep showing even once
+        the package genuinely becomes available, until the whole app was
+        restarted. Re-check on every open instead and swap the fallback out
+        for a real view the moment it's possible, no restart needed."""
+        if self._view is not None or not _has_webengine():
+            return
+        if self._fallback is not None:
+            self.layout().removeWidget(self._fallback)
+            self._fallback.deleteLater()
+            self._fallback = None
+        self._build_embedded_view(self.layout())
 
     def open_dashboard(self):
         """Start Aim's dashboard server (if needed) and point this window
         at it — the embedded view if available, else just enables the
         "Open in browser" button and says so."""
+        self._upgrade_to_embedded_view_if_possible()
         from napari_app.core import experiment_tracking as tracking
         try:
             self._url = tracking.ensure_dashboard_running()

@@ -18,6 +18,53 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-07 (night, later) — the real reason PyQt6-WebEngine kept saying "not installed": a Qt startup-order requirement, not this app's dependency detection
+
+User installed `PyQt6-WebEngine` and still saw "Embedded view needs the
+optional PyQt6-WebEngine package" in the Dashboard window. Two compounding
+bugs, both real:
+
+1. `DashboardWindow` is a singleton (one shared instance across every
+   "Dashboard" button, by design — see the earlier entry on why). Whether
+   it builds the embedded view or the fallback message was decided *once*,
+   at first construction, and never revisited — so a window opened before
+   the package was installed would show the fallback forever, even after
+   installing it, until the whole app restarted. Fixed:
+   `_upgrade_to_embedded_view_if_possible()` now re-checks on every open
+   and swaps the fallback out for a real view the moment it becomes
+   available, no restart needed.
+2. The deeper one: `PyQt6.QtWebEngineWidgets` itself refuses to import
+   unless `Qt.AA_ShareOpenGLContexts` was set *before the process's first
+   `QApplication` was constructed* — otherwise it raises `ImportError:
+   QtWebEngineWidgets must be imported or Qt.AA_ShareOpenGLContexts must be
+   set before a QCoreApplication instance is created`, indistinguishable
+   from "not installed" to `_has_webengine()`'s broad except clause.
+   `napari_app/main.py` calls `napari.Viewer()` (which constructs the
+   QApplication) long before any Dashboard code ever runs, and never set
+   this attribute — so the lazy `import PyQt6.QtWebEngineWidgets` inside
+   `_has_webengine()`, reached only when a user actually clicks
+   "Dashboard", was **structurally unreachable no matter what was
+   installed**. This means fix #1 alone would not have been enough — even
+   with instant re-checking, the check itself was doomed. Fixed by setting
+   `QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)` at the very
+   top of `main.py`, before `napari` is even imported.
+
+Verified both fixes against reproductions of the exact failure (a bare
+`QApplication()` with no attribute set, then a lazy `QtWebEngineWidgets`
+import — reliably fails) and the fix (attribute set first — reliably
+succeeds), and confirmed importing the real `napari_app.main` module (the
+actual entry point) makes `_has_webengine()` return `True` even when
+checked long after its own `QApplication` already exists, matching a real
+"click Dashboard deep into a running session" timing.
+
+3 new tests for the dynamic-upgrade logic (against a patched
+`_build_embedded_view`, not a real `QWebEngineView` — real construction
+needs the same attribute-before-QApplication ordering this shared test
+process can't reliably guarantee across files, so the tests exercise the
+window's own swap logic instead). Full suite green in the full conda env
+(445 passed, with `aim` and `PyQt6-WebEngine` both genuinely installed
+there now) and the light venv (316 passed, 11 skipped).
+
 ## 2026-07-07 (night) — the embedded dashboard view raced Aim's server startup and loaded blank
 
 The user installed `PyQt6-WebEngine` (the `tracking-ui` extra) and reported

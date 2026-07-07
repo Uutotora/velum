@@ -49,16 +49,14 @@ def test_no_webengine_falls_back_to_a_message_not_a_crash(app, monkeypatch):
     assert w._view is None
 
 
-# ── embedded-view load retry ─────────────────────────────────────────────────
-#
-# `aim up` spawns a real web server in a subprocess; the very first load
-# attempt can race it still starting (confirmed against a real install: the
-# first QWebEngineView.loadFinished fired False, a retry ~1s later fired
-# True with the real Aim page's DOM actually populated). These tests drive
-# the retry state machine directly against a fake view (no real
-# QWebEngineView/Chromium involved) so they stay fast and deterministic;
-# QTimer.singleShot is monkeypatched to fire immediately rather than really
-# waiting `_LOAD_RETRY_MS`.
+# Shared fakes/helpers for the sections below. Real QWebEngineView
+# construction needs Qt.AA_ShareOpenGLContexts set *before* the very first
+# QApplication in the process (see napari_app/main.py's fix, and
+# docs/CHANGELOG.md for how this was found) — a constraint this shared test
+# process can't reliably guarantee relative to whichever other test file's
+# `app` fixture happened to run first, so these tests drive
+# DashboardWindow's own logic against a fake view/patched builder instead of
+# ever constructing a real one.
 
 class _FakeView:
     def __init__(self):
@@ -71,6 +69,75 @@ class _FakeView:
 def _fire_timers_immediately(monkeypatch):
     from PyQt6.QtCore import QTimer
     monkeypatch.setattr(QTimer, "singleShot", staticmethod(lambda ms, fn: fn()))
+
+
+def _stub_build_embedded_view(monkeypatch, fake_view=None):
+    """Replace DashboardWindow._build_embedded_view with one that assigns a
+    fake view instead of constructing a real QWebEngineView."""
+    view = fake_view if fake_view is not None else _FakeView()
+    monkeypatch.setattr(
+        dashboard_window.DashboardWindow, "_build_embedded_view",
+        lambda self, layout: setattr(self, "_view", view))
+    return view
+
+
+# ── dynamic upgrade: PyQt6-WebEngine installed after this (singleton)
+#    window's first construction must not require an app restart ──────────
+
+def test_upgrades_from_fallback_to_embedded_view_once_available(app, monkeypatch):
+    monkeypatch.setattr(dashboard_window, "_has_webengine", lambda: False)
+    w = dashboard_window.DashboardWindow()
+    assert w._view is None
+    assert w._fallback is not None
+
+    monkeypatch.setattr(dashboard_window, "_has_webengine", lambda: True)
+    fake_view = _stub_build_embedded_view(monkeypatch)
+    w._upgrade_to_embedded_view_if_possible()
+
+    assert w._view is fake_view
+    assert w._fallback is None
+
+
+def test_open_dashboard_triggers_the_upgrade_automatically(app, monkeypatch):
+    monkeypatch.setattr(dashboard_window, "_has_webengine", lambda: False)
+    w = dashboard_window.DashboardWindow()
+    assert w._view is None
+
+    monkeypatch.setattr(dashboard_window, "_has_webengine", lambda: True)
+    fake_view = _stub_build_embedded_view(monkeypatch)
+    from napari_app.core import experiment_tracking as tracking
+    monkeypatch.setattr(tracking, "ensure_dashboard_running", lambda: "http://127.0.0.1:1")
+    w.open_dashboard()
+
+    assert w._view is fake_view
+
+
+def test_upgrade_is_a_noop_once_already_embedded(app, monkeypatch):
+    monkeypatch.setattr(dashboard_window, "_has_webengine", lambda: True)
+    first_view = _stub_build_embedded_view(monkeypatch)
+    w = dashboard_window.DashboardWindow()
+    assert w._view is first_view
+
+    build_calls = []
+    monkeypatch.setattr(
+        dashboard_window.DashboardWindow, "_build_embedded_view",
+        lambda self, layout: build_calls.append(1))
+    w._upgrade_to_embedded_view_if_possible()
+
+    assert w._view is first_view   # unchanged
+    assert build_calls == []       # _build_embedded_view not called again
+
+
+# ── embedded-view load retry ─────────────────────────────────────────────────
+#
+# `aim up` spawns a real web server in a subprocess; the very first load
+# attempt can race it still starting (confirmed against a real install: the
+# first QWebEngineView.loadFinished fired False, a retry ~1s later fired
+# True with the real Aim page's DOM actually populated). These tests drive
+# the retry state machine directly against a fake view (no real
+# QWebEngineView/Chromium involved) so they stay fast and deterministic;
+# QTimer.singleShot is monkeypatched to fire immediately rather than really
+# waiting `_LOAD_RETRY_MS`.
 
 
 def test_embedded_view_retries_once_after_a_failed_load(app, monkeypatch):
