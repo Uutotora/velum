@@ -45,12 +45,14 @@ def widget(app, monkeypatch):
     viewer.layers = layers
 
     def fake_add_labels(data, name=None, opacity=1.0, **kwargs):
-        layer = nl.Labels(data, name=name, opacity=opacity)
+        extra = {k: v for k, v in kwargs.items() if k in ("scale", "units")}
+        layer = nl.Labels(data, name=name, opacity=opacity, **extra)
         layers.append(layer)
         return layer
 
     def fake_add_image(data, name=None, **kwargs):
-        layer = nl.Image(data, name=name)
+        extra = {k: v for k, v in kwargs.items() if k in ("scale", "units", "rgb")}
+        layer = nl.Image(data, name=name, **extra)
         layers.append(layer)
         return layer
 
@@ -220,12 +222,16 @@ def test_color_by_populates_dropdown_from_result_columns(widget, app):
     assert widget._color_card.isVisible() is True
 
 
-def test_color_by_hidden_when_no_cells(widget, app):
+def test_color_by_disabled_when_no_cells(widget, app):
     img_vol = np.zeros((2, 20, 20, 3), dtype=np.uint8)
     mask_vol = np.zeros((2, 20, 20), dtype=np.int32)
     widget._show_volume_results(img_vol, mask_vol)
     app.processEvents()
-    assert widget._color_card.isVisible() is False
+    # The "Display" card itself stays visible with no cells (the scale-bar
+    # and view-in-3D toggles alongside it are still meaningful) — only
+    # "Colour cells by" is disabled, since there's nothing to colour by.
+    assert widget._color_card.isVisible() is True
+    assert widget.color_by.isEnabled() is False
 
 
 def test_color_by_volume_recolours_fill_and_outline_matching(widget, app):
@@ -261,3 +267,162 @@ def test_color_by_instance_id_restores_default_colours(widget, app):
 def test_apply_color_by_with_no_result_layers_is_a_noop(widget):
     # No prediction has been run yet -> no *_masks/*_masks_fill layers exist.
     widget._apply_color_by("area")   # must not raise
+
+
+def test_color_by_shows_a_legend_with_the_metric_range(widget):
+    img_vol, mask_vol = _volume_two_cells()
+    widget._show_volume_results(img_vol, mask_vol)
+    assert widget._color_legend.isVisible() is False   # default is instance_id -> no legend
+
+    widget.color_by.setCurrentIndex(widget.color_by.findData("volume"))
+    assert widget._color_legend.isVisible() is True
+    assert widget._color_legend._lo.text() != ""
+    assert widget._color_legend._hi.text() != ""
+
+    widget.color_by.setCurrentIndex(widget.color_by.findData("instance_id"))
+    assert widget._color_legend.isVisible() is False
+
+
+# ── real-world µm calibration (scale bar + layer scale/units) ───────────────
+
+def test_layer_scale_kwargs_empty_when_uncalibrated(widget):
+    assert widget.pixel_size.value() == 0.0   # the documented "off" sentinel
+    assert widget._layer_scale_kwargs(2) == {}
+    assert widget._layer_scale_kwargs(3) == {}
+
+
+def test_layer_scale_kwargs_2d(widget):
+    widget.pixel_size.setValue(0.25)
+    kw = widget._layer_scale_kwargs(2)
+    assert kw["scale"] == (0.25, 0.25)
+    assert kw["units"] == ("um", "um")
+
+
+def test_layer_scale_kwargs_volume_leaves_leading_axis_unscaled(widget):
+    widget.pixel_size.setValue(0.5)
+    kw = widget._layer_scale_kwargs(3)
+    assert kw["scale"] == (1.0, 0.5, 0.5)
+    assert kw["units"] == ("pixel", "um", "um")
+
+
+def test_is_rgb_like_true_even_for_a_small_image(widget):
+    # napari's own auto-guess needs both non-channel axes > 30px; a small
+    # image should still be recognised as RGB via the explicit shape check.
+    small_rgb = np.zeros((10, 10, 3), dtype=np.uint8)
+    assert widget._is_rgb_like(small_rgb, 2) is True
+
+
+def test_is_rgb_like_false_for_grayscale():
+    gray = np.zeros((100, 100), dtype=np.uint8)
+    assert pw.PredictWidget._is_rgb_like(gray, 2) is False
+
+
+def test_show_results_calibrated_image_and_labels_scale_stay_aligned(widget):
+    """The image layer and every Labels layer for one result must share the
+    exact same scale — a mismatch here would visually misalign the mask
+    overlay from the image it was predicted on."""
+    widget.pixel_size.setValue(0.25)
+    img = np.zeros((30, 30, 3), dtype=np.uint8)
+    widget._show_results(img, _mask_2_cells())
+
+    img_layer = widget.viewer.layers["sample_image"]
+    fill_layer = widget.viewer.layers["sample_masks_fill"]
+    outline_layer = widget.viewer.layers["sample_masks"]
+    assert tuple(img_layer.scale) == tuple(fill_layer.scale) == tuple(outline_layer.scale)
+    assert tuple(img_layer.scale) == (0.25, 0.25)
+
+
+def test_scale_bar_toggle_sets_viewer_visibility(widget):
+    widget.scale_bar_cb.setChecked(True)
+    assert widget.viewer.scale_bar.visible is True
+    widget.scale_bar_cb.setChecked(False)
+    assert widget.viewer.scale_bar.visible is False
+
+
+# ── view-in-3D toggle (volume results only) ─────────────────────────────────
+
+def test_view3d_toggle_hidden_for_2d_shown_for_volume(widget):
+    img = np.zeros((30, 30, 3), dtype=np.uint8)
+    widget._show_results(img, _mask_2_cells())
+    assert widget.view3d_cb.isVisible() is False
+
+    img_vol, mask_vol = _volume_two_cells()
+    widget._show_volume_results(img_vol, mask_vol)
+    assert widget.view3d_cb.isVisible() is True
+
+
+def test_view3d_toggle_sets_ndisplay(widget):
+    img_vol, mask_vol = _volume_two_cells()
+    widget._show_volume_results(img_vol, mask_vol)
+    widget.view3d_cb.setChecked(True)
+    assert widget.viewer.dims.ndisplay == 3
+    widget.view3d_cb.setChecked(False)
+    assert widget.viewer.dims.ndisplay == 2
+
+
+def test_a_new_2d_result_resets_view3d_off(widget):
+    img_vol, mask_vol = _volume_two_cells()
+    widget._show_volume_results(img_vol, mask_vol)
+    widget.view3d_cb.setChecked(True)
+
+    img = np.zeros((30, 30, 3), dtype=np.uint8)
+    widget._show_results(img, _mask_2_cells())
+    assert widget.view3d_cb.isChecked() is False
+    assert widget.viewer.dims.ndisplay == 2
+
+
+# ── linked selection: Measurements row -> highlighted cell in the viewer ───
+
+def test_measurement_row_selected_highlights_both_layers(widget):
+    img = np.zeros((30, 30, 3), dtype=np.uint8)
+    widget._show_results(img, _mask_2_cells())
+    from napari_app import analysis
+    widget._last_measure = analysis.compute_measurements(_mask_2_cells())
+
+    widget._on_measurement_row_selected(2)
+    fill = widget.viewer.layers["sample_masks_fill"]
+    outline = widget.viewer.layers["sample_masks"]
+    assert fill.show_selected_label is True and fill.selected_label == 2
+    assert outline.show_selected_label is True and outline.selected_label == 2
+
+
+def test_measurement_row_selected_minus_one_clears_highlight(widget):
+    img = np.zeros((30, 30, 3), dtype=np.uint8)
+    widget._show_results(img, _mask_2_cells())
+    widget._on_measurement_row_selected(1)
+    widget._on_measurement_row_selected(-1)
+    outline = widget.viewer.layers["sample_masks"]
+    assert outline.show_selected_label is False
+
+
+def test_measurement_row_selected_with_no_layers_is_a_noop(widget):
+    widget._on_measurement_row_selected(1)   # nothing predicted yet -> must not raise
+
+
+def test_open_measurements_wires_row_selected_exactly_once(widget, monkeypatch):
+    """A throwaway MeasurementsWindow, monkeypatched in as
+    get_measurements_window()'s return value, rather than the real
+    process-wide singleton — connecting/emitting on the real one from a
+    test turned out to corrupt it for whichever test runs next (the same
+    "wrapped C/C++ object ... has been deleted" class of shared-Qt-singleton
+    fragility the `widget` fixture above already works around for
+    _recompute_measurements; _open_measurements reaches the same singleton
+    by a path that fixture's stub doesn't cover).
+    """
+    img = np.zeros((30, 30, 3), dtype=np.uint8)
+    widget._show_results(img, _mask_2_cells())
+    from napari_app import analysis
+    widget._last_measure = analysis.compute_measurements(_mask_2_cells())
+
+    from napari_app.widgets import measurements_window as mw_mod
+    fresh = mw_mod.MeasurementsWindow()
+    monkeypatch.setattr(mw_mod, "get_measurements_window", lambda: fresh)
+    try:
+        calls = []
+        widget._on_measurement_row_selected = calls.append   # spy, replaces the bound method
+        widget._open_measurements()
+        widget._open_measurements()   # a second click must not double-connect
+        fresh.row_selected.emit(2)
+        assert calls == [2]   # not [2, 2] -- exactly one connection, not two
+    finally:
+        fresh.close()

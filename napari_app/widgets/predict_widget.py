@@ -121,6 +121,7 @@ class PredictWidget(QWidget):
         self._last_channel_stack = None
         self._last_measure  = None
         self._last_img_path = None
+        self._mw_row_selected_wired = False
         self._was_autofilled = False
         self._lora_paths    = {}
         self._controller    = PredictController()
@@ -415,12 +416,29 @@ class PredictWidget(QWidget):
         self.color_by = Combo()
         self.color_by.addItem("Instance ID (default)", "instance_id")
         self.color_by.currentIndexChanged.connect(self._on_color_by_changed)
+        self.color_by.setEnabled(False)   # nothing to colour by until a result exists
         self._color_card.addLayout(_param_row("Colour cells by", self.color_by,
             "Paint every cell's fill + outline by one of its measured values "
             "instead of a random per-instance colour — a heatmap over the "
             "population (e.g. spot the biggest or roundest cells at a "
             "glance). Uses matplotlib's viridis colormap by default."))
-        self._color_card.setVisible(False)
+        self._color_legend = _ColorLegend()
+        self._color_legend.setVisible(False)
+        self._color_card.addWidget(self._color_legend)
+
+        self.scale_bar_cb = QCheckBox("Show scale bar")
+        self.scale_bar_cb.setStyleSheet(f"color:{LABEL}; font-size:11.5px; background:transparent;")
+        self.scale_bar_cb.toggled.connect(self._on_scale_bar_toggled)
+        self._color_card.addWidget(self.scale_bar_cb)
+
+        self.view3d_cb = QCheckBox("View in 3D (rotate the volume)")
+        self.view3d_cb.setStyleSheet(f"color:{LABEL}; font-size:11.5px; background:transparent;")
+        self.view3d_cb.toggled.connect(self._on_view3d_toggled)
+        self.view3d_cb.setVisible(False)   # only meaningful for a z-stack/time-lapse result
+        self._color_card.addWidget(self.view3d_cb)
+        # Card stays visible even with no result yet — the scale-bar toggle
+        # is meaningful as soon as an image is shown, independent of
+        # "Colour cells by" (only that control is disabled above).
         L.addWidget(self._color_card)
 
         # ── Ground truth & evaluation (collapsed — validation tool) ────────────
@@ -1250,9 +1268,46 @@ class PredictWidget(QWidget):
         self.progress_bar.setTextVisible(False)
         self._populate_lora_combo()
 
+    def _layer_scale_kwargs(self, ndim: int) -> dict:
+        """``scale=``/``units=`` kwargs for add_image/add_labels, so napari's
+        scale bar (and anything else that reads world coordinates) reflects
+        real µm instead of raw pixels.
+
+        Empty when the µm/pixel field is at its "off" sentinel (0 — see
+        ``self.pixel_size``'s ``setSpecialValueText``), so uncalibrated
+        images keep napari's plain 1-unit-per-pixel default exactly as
+        before. ``ndim`` is the number of *spatial* axes — a Labels mask's
+        own ndim (2 for a plane, 3 for a z-stack/time-lapse); a leading z/t
+        axis has no pixel-size calibration of its own so it gets scale 1 /
+        unit "pixel", while the last two (always the imaging plane) get the
+        real value. The same tuple length is correct for the matching
+        add_image call too *once that call also passes an explicit ``rgb=``*
+        (see ``_is_rgb_like``) — napari's Image layer only strips the
+        trailing colour channel axis when it's told the data is RGB, and
+        its own size-based auto-guess (both non-channel dims > 30px) isn't
+        reliable enough to lean on for an arbitrary user image.
+        """
+        px = self.pixel_size.value()
+        if px <= 0:
+            return {}
+        lead = ndim - 2
+        return dict(scale=(1.0,) * lead + (px, px),
+                   units=("pixel",) * lead + ("um", "um"))
+
+    @staticmethod
+    def _is_rgb_like(arr: np.ndarray, spatial_ndim: int) -> bool:
+        """Whether ``arr`` has a trailing colour-channel axis on top of
+        ``spatial_ndim`` spatial axes (matching mask.ndim), so ``add_image``
+        can be told ``rgb=`` explicitly instead of relying on napari's own
+        size-based guess (>30px on the non-channel axes) — a fine heuristic
+        for a typical microscopy image, but wrong for a small crop/thumbnail,
+        which would then get an extra unwanted axis in `scale`/`units`.
+        """
+        return arr.ndim == spatial_ndim + 1 and arr.shape[-1] in (3, 4)
+
     def _add_filled_labels(self, mask: np.ndarray, name: str, *,
                            outline_opacity: float = 0.7, fill_opacity: float = 0.35,
-                           solid_rgba: tuple | None = None):
+                           solid_rgba: tuple | None = None, scale_kwargs: dict | None = None):
         """Add a mask as two stacked Labels layers instead of outline-only:
         a low-opacity filled wash underneath a crisp outline on top, so a
         cell reads clearly even where its border happens to blend into the
@@ -1272,8 +1327,9 @@ class PredictWidget(QWidget):
         colour rather than a rainbow that would blend with the prediction
         layer). Returns the outline layer (the one on top, contour=1).
         """
-        fill = self.viewer.add_labels(mask, name=f"{name}_fill", opacity=fill_opacity)
-        outline = self.viewer.add_labels(mask, name=name, opacity=outline_opacity)
+        sk = scale_kwargs or {}
+        fill = self.viewer.add_labels(mask, name=f"{name}_fill", opacity=fill_opacity, **sk)
+        outline = self.viewer.add_labels(mask, name=name, opacity=outline_opacity, **sk)
         outline.contour = 1
         # Remembered so "Colour cells by" can restore napari's default
         # per-instance colours later without having to reconstruct them.
@@ -1286,10 +1342,15 @@ class PredictWidget(QWidget):
 
     def _refresh_color_by_options(self):
         """(Re)populate "Colour cells by" from the current result's numeric
-        columns, and show/hide the whole card. Called after any measurement
-        — 2-D (_recompute_measurements) or 3-D (_show_volume_results) — so
-        it always reflects whichever schema the current result actually
-        used (analysis._SCHEMA vs. _SCHEMA_3D have different columns).
+        columns, and enable/disable it. Called after any measurement — 2-D
+        (_recompute_measurements) or 3-D (_show_volume_results) — so it
+        always reflects whichever schema the current result actually used
+        (analysis._SCHEMA vs. _SCHEMA_3D have different columns).
+
+        Only the combo itself is disabled when there's nothing to colour by
+        — the "Display" card it lives in stays visible regardless, since
+        the scale-bar toggle alongside it is meaningful even before any
+        prediction has cells to measure.
         """
         result = self._last_measure
         current = self.color_by.currentData() or "instance_id"
@@ -1303,12 +1364,23 @@ class PredictWidget(QWidget):
         self.color_by.setCurrentIndex(idx if idx >= 0 else 0)
         self.color_by.blockSignals(False)
 
-        show = bool(result) and int(result.get("n_cells", 0)) > 0
-        self._color_card.setVisible(show)
+        self.color_by.setEnabled(bool(result) and int(result.get("n_cells", 0)) > 0)
         self._apply_color_by(self.color_by.currentData() or "instance_id")
 
     def _on_color_by_changed(self, _idx=None):
         self._apply_color_by(self.color_by.currentData() or "instance_id")
+
+    def _on_scale_bar_toggled(self, checked: bool):
+        try:
+            self.viewer.scale_bar.visible = bool(checked)
+        except Exception:
+            pass   # older napari without a scale_bar overlay — no-op
+
+    def _on_view3d_toggled(self, checked: bool):
+        try:
+            self.viewer.dims.ndisplay = 3 if checked else 2
+        except Exception:
+            pass
 
     def _apply_color_by(self, metric_key: str):
         """Re-colour the current result's fill+outline layers by a measured
@@ -1332,12 +1404,18 @@ class PredictWidget(QWidget):
         if metric_key == "instance_id" or not self._last_measure:
             fill.colormap = fill.metadata.get("default_colormap", fill.colormap)
             outline.colormap = outline.metadata.get("default_colormap", outline.colormap)
+            self._color_legend.setVisible(False)
             return
 
         from napari_app import analysis
         id_to_rgba = analysis.label_colormap_from_measurement(self._last_measure, metric_key)
         if not id_to_rgba:
+            self._color_legend.setVisible(False)
             return
+        rng = analysis.measurement_range(self._last_measure, metric_key)
+        if rng is not None:
+            self._color_legend.set_range(*rng)
+            self._color_legend.setVisible(True)
         _color_labels_by_map(fill, fill.data, id_to_rgba)
         _color_labels_by_map(outline, outline.data, id_to_rgba)
 
@@ -1351,9 +1429,13 @@ class PredictWidget(QWidget):
             if lyr.name.startswith(name) and "_gt" not in lyr.name:
                 self.viewer.layers.remove(lyr)
 
-        self.viewer.add_image(img_arr, name=f"{name}_image")
+        self.view3d_cb.setChecked(False)   # a plain 2-D result has no volume to rotate
+        self.view3d_cb.setVisible(False)
+        sk = self._layer_scale_kwargs(2)
+        self.viewer.add_image(img_arr, name=f"{name}_image",
+                              rgb=self._is_rgb_like(img_arr, 2), **sk)
         if mask is not None and mask.max() > 0:
-            self._add_filled_labels(mask.astype(np.int32), f"{name}_masks")
+            self._add_filled_labels(mask.astype(np.int32), f"{name}_masks", scale_kwargs=sk)
         self._recompute_measurements()
         # Count the headline number up for a live, product feel.
         if mask is not None and int(mask.max()) > 0:
@@ -1377,7 +1459,9 @@ class PredictWidget(QWidget):
         mask should silently trigger; the full, correctly-labelled table is
         one click away in the Measurements window instead. The "Colour cells
         by" card (_refresh_color_by_options) isn't schema-specific though, so
-        it's shown here too. GT overlay is still 2-D-only.
+        it's shown here too, alongside a "View in 3D" toggle (viewer.dims.
+        ndisplay) that only makes sense for a real volume. GT overlay is
+        still 2-D-only.
         """
         name = Path(self.image_path.text()).stem
         self._last_mask     = None
@@ -1388,10 +1472,13 @@ class PredictWidget(QWidget):
             if lyr.name.startswith(name) and "_gt" not in lyr.name:
                 self.viewer.layers.remove(lyr)
 
-        self.viewer.add_image(img_vol, name=f"{name}_image")
+        self.view3d_cb.setVisible(True)   # leaves the checked-state as the user set it
+        sk = self._layer_scale_kwargs(mask_vol.ndim)
+        self.viewer.add_image(img_vol, name=f"{name}_image",
+                              rgb=self._is_rgb_like(img_vol, mask_vol.ndim), **sk)
         n_cells = int(mask_vol.max()) if mask_vol is not None and mask_vol.size else 0
         if n_cells > 0:
-            self._add_filled_labels(mask_vol.astype(np.int32), f"{name}_masks")
+            self._add_filled_labels(mask_vol.astype(np.int32), f"{name}_masks", scale_kwargs=sk)
 
         from napari_app import analysis
         try:
@@ -1498,9 +1585,37 @@ class PredictWidget(QWidget):
             self._append_log("[WARN] Run a prediction with detected cells first"); return
         from napari_app.widgets.measurements_window import get_measurements_window
         mw = get_measurements_window()
+        if not self._mw_row_selected_wired:
+            # get_measurements_window() is a module-level singleton reused
+            # across every "Open measurements" click — connect exactly once
+            # per PredictWidget instance rather than re-connecting (and thus
+            # firing _on_measurement_row_selected multiple times per click)
+            # on each call.
+            mw.row_selected.connect(self._on_measurement_row_selected)
+            self._mw_row_selected_wired = True
         mw.set_result(self._last_measure,
                       Path(self._last_img_path).name if self._last_img_path else "")
         mw.show_and_raise()
+
+    def _on_measurement_row_selected(self, cell_id: int):
+        """Highlight the clicked Measurements-table row's cell in the
+        viewer — QuPath's own "select in table -> selects on the image"
+        behaviour, so a value that stands out in the table can be found on
+        the image without hunting for it by eye. ``cell_id < 0`` means the
+        table selection was cleared, so the highlight lifts and every cell
+        is shown normally again.
+        """
+        name = Path(self.image_path.text()).stem
+        try:
+            fill = self.viewer.layers[f"{name}_masks_fill"]
+            outline = self.viewer.layers[f"{name}_masks"]
+        except (KeyError, TypeError):
+            return
+        show = cell_id >= 0
+        for layer in (fill, outline):
+            layer.show_selected_label = show
+            if show:
+                layer.selected_label = int(cell_id)
 
     # ── Ground truth: auto-detect + evaluate ──────────────────────────────────
 
@@ -1637,7 +1752,8 @@ class PredictWidget(QWidget):
                 if lyr.name in (lname, f"{lname}_fill"):
                     self.viewer.layers.remove(lyr)
             self._add_filled_labels(gt, lname, outline_opacity=0.9,
-                                    solid_rgba=(0.0, 1.0, 0.35, 1.0))  # uniform green
+                                    solid_rgba=(0.0, 1.0, 0.35, 1.0),  # uniform green
+                                    scale_kwargs=self._layer_scale_kwargs(gt.ndim))
             self._append_log(f"✓ GT loaded — {int(gt.max())} cells (green)")
         except Exception as e:
             self._append_log(f"[ERROR] {e}")
@@ -2055,6 +2171,40 @@ def _color_labels_by_map(layer, mask, id_to_rgba: dict, default_rgba=(0.5, 0.5, 
         layer.colormap = DirectLabelColormap(color_dict=cmap)
     except Exception:
         pass  # older napari — fall back to whatever colouring was already set
+
+
+class _ColorLegend(QWidget):
+    """A small gradient swatch + min/max value labels: the key for "Colour
+    cells by", so a heatmap has a way to read a value off it instead of
+    just floating colours (mirrors QuPath's measurement-map legend).
+    """
+
+    def __init__(self):
+        super().__init__()
+        row = QHBoxLayout(); row.setContentsMargins(0, 2, 0, 2); row.setSpacing(6)
+        self._lo = QLabel("")
+        self._lo.setStyleSheet(f"color:{DIM}; font-size:10px; background:transparent;")
+        self._swatch = QLabel()
+        self._swatch.setFixedHeight(10)
+        self._swatch.setMinimumWidth(50)
+        self._hi = QLabel("")
+        self._hi.setStyleSheet(f"color:{DIM}; font-size:10px; background:transparent;")
+        row.addWidget(self._lo)
+        row.addWidget(self._swatch, stretch=1)
+        row.addWidget(self._hi)
+        self.setLayout(row)
+
+    def set_range(self, lo: float, hi: float, cmap_name: str = "viridis"):
+        from matplotlib import colormaps
+        cmap = colormaps[cmap_name]
+        stops = ", ".join(
+            f"stop:{t:.2f} rgba({int(r * 255)},{int(g * 255)},{int(b * 255)},255)"
+            for t, (r, g, b, _a) in ((t, cmap(t)) for t in (0.0, 0.25, 0.5, 0.75, 1.0)))
+        self._swatch.setStyleSheet(
+            "border-radius:3px;"
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, {stops});")
+        self._lo.setText(f"{lo:.3g}")
+        self._hi.setText(f"{hi:.3g}")
 
 
 def _make_stat_chip(caption: str):

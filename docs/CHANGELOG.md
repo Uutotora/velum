@@ -18,6 +18,68 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-08 — more viewer polish, researched and requested directly
+
+Four more features researched against current napari/QuPath conventions and
+implemented without asking first, per standing instruction. All in the
+Predict tab's "Display" card (now always visible, not just while a result
+with cells exists — see below) plus the Measurements window.
+
+- **Real µm scale bar.** A "Show scale bar" toggle drives napari's own
+  built-in `viewer.scale_bar` overlay. Backing it: `add_image`/`add_labels`
+  now pass `scale=`/`units=` (µm/pixel from the existing calibration field)
+  so the scale bar — and anything else reading world coordinates — reflects
+  real units instead of raw pixels, only when the user has actually
+  calibrated (pixel size at its "off" sentinel keeps everything at the
+  previous 1-unit-per-pixel default). Found a real correctness risk while
+  wiring this up: napari's own RGB auto-detection requires *both*
+  non-channel axes to exceed 30px, so a small crop/thumbnail could silently
+  be treated as a 3-plane grayscale stack instead of colour, corrupting the
+  scale/units tuple length and crashing `add_image`. Fixed by passing `rgb=`
+  explicitly (`_is_rgb_like`), based on shape alone, not size.
+- **Colour-by-measurement legend.** The heatmap card added 2026-07-07 had no
+  key — a gradient with no way to read a value off it. `analysis.
+  measurement_range()` plus a small custom gradient-swatch widget
+  (`_ColorLegend`) now show the min/max the current colour choice spans,
+  mirroring QuPath's own measurement-map legend.
+- **View in 3D.** A toggle (volume results only) flips `viewer.dims.
+  ndisplay` between 2 and 3 — an actual rotatable 3D rendering of a
+  segmented z-stack/time-lapse, not just a slice scrollbar. napari's Labels/
+  Image layers are n-D natively, so this needed nothing beyond the toggle
+  itself.
+- **Click a cell in the table, see it highlighted on the image.** QuPath's
+  own signature "linked views" behaviour. `MeasurementsWindow` gained a
+  `row_selected` signal (emits the clicked row's cell_id, or -1 when the
+  selection clears) — deliberately not napari-aware itself, so
+  `PredictWidget` is the only side that knows about layers, toggling each
+  result layer's existing `show_selected_label`/`selected_label` (a real,
+  already-shipped napari Labels feature, not something new).
+
+The "Display" card's own visibility is no longer tied to having cells to
+colour by — the scale bar and 3D toggles are meaningful even then, so only
+the "Colour cells by" combo itself disables in that case.
+
+Caught (and fixed) one real cross-test-contamination bug while writing the
+linked-selection test: exercising `_open_measurements()`'s real
+`get_measurements_window()` singleton left its underlying Qt object
+corrupted for whichever test ran next in the same process — the same class
+of shared-singleton fragility already documented against `_recompute_
+measurements` in `tests/test_predict_labels_display_wiring.py`, reached
+here by a different path that fixture's stub didn't cover. Fixed by
+monkeypatching a throwaway `MeasurementsWindow` in for that one test rather
+than touching the real singleton.
+
+23 new tests (303 -> 326): `analysis.measurement_range`, `_is_rgb_like`/
+`_layer_scale_kwargs`, the scale-bar/legend/3D-toggle/linked-selection
+wiring, and — a first for that file — `MeasurementsWindow`'s own
+`row_selected` signal. Full suite green in the full conda env (326 passed,
+stable across repeats) and in a venv matching CI's exact `pip install
+--group test` (251 passed, 7 skipped for PyQt6-gated files).
+
+**Not verified:** the actual rendered look/feel on a real screen (no display
+in this sandbox) — in particular, whether napari's scale bar and 3D view
+render exactly as expected is inferred from its own API/docs, not seen.
+
 ## 2026-07-07 (yet even later) — requested features, not backlog items
 
 - **Colour cells by a measurement** (a "Display" card in the Predict tab).

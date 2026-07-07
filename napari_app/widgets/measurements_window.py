@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog, QAbstractItemView,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 
 from napari_app.theme import (
@@ -88,6 +88,13 @@ class Histogram(QWidget):
 
 
 class MeasurementsWindow(QWidget):
+    # Emits the selected row's cell_id when a table row is (de)selected, or
+    # -1 when the selection is cleared — lets the Predict panel highlight
+    # the matching cell in the viewer (QuPath's own "select in table ->
+    # selects on the image" behaviour), without this window needing to know
+    # anything about napari layers itself.
+    row_selected = pyqtSignal(int)
+
     def __init__(self):
         super().__init__(None, Qt.WindowType.Window)
         self.setWindowTitle("CellSeg1 — Measurements")
@@ -123,7 +130,9 @@ class MeasurementsWindow(QWidget):
         self._table.setAlternatingRowColors(True)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._table.verticalHeader().setVisible(False)
+        self._table.itemSelectionChanged.connect(self._on_selection_changed)
         body.addWidget(self._table, stretch=3)
 
         right = QVBoxLayout(); right.setSpacing(8)
@@ -231,6 +240,20 @@ class MeasurementsWindow(QWidget):
         self.show(); self.raise_(); self.activateWindow()
 
     # ── Internal ───────────────────────────────────────────────────────────────
+
+    def _on_selection_changed(self):
+        rows = {idx.row() for idx in self._table.selectedIndexes()}
+        if not rows:
+            self.row_selected.emit(-1)
+            return
+        # Column 0 is always cell_id (see set_result) — read it back from the
+        # table item itself rather than indexing self._result["rows"] by row
+        # number, since sorting (setSortingEnabled) can reorder table rows
+        # independently of the underlying result's row order.
+        item = self._table.item(next(iter(rows)), 0)
+        if item is None:
+            return
+        self.row_selected.emit(int(item.data(Qt.ItemDataRole.DisplayRole)))
 
     def _redraw_hist(self):
         if not self._result or not self._result["rows"]:
