@@ -251,9 +251,32 @@ def test_ensure_dashboard_running_launches_aim_up_with_expected_args(monkeypatch
     url = tracking.ensure_dashboard_running()
     assert url.startswith("http://127.0.0.1:")
     cmd = calls[0]
-    assert cmd[:2] == ["aim", "up"]
+    assert cmd[0].endswith("aim") and cmd[1] == "up"
     assert "--repo" in cmd and str(tmp_path / "aim_repo") in cmd
     assert "--host" in cmd and "127.0.0.1" in cmd
+
+
+# ── _aim_cli_path: a bare "aim" only resolves via PATH, which a real Aim
+#    install is not guaranteed to be on (confirmed against a real install in
+#    a non-activated venv: `subprocess.Popen(["aim", ...])` raised
+#    FileNotFoundError there) ─────────────────────────────────────────────
+
+def test_aim_cli_path_prefers_the_sibling_of_the_running_interpreter(monkeypatch, tmp_path):
+    fake_python = tmp_path / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_bytes(b"")
+    (tmp_path / "bin" / "aim").write_bytes(b"")   # sibling console-script
+    monkeypatch.setattr(sys, "executable", str(fake_python))
+    assert tracking._aim_cli_path() == str(tmp_path / "bin" / "aim")
+
+
+def test_aim_cli_path_falls_back_to_bare_command_without_a_sibling(monkeypatch, tmp_path):
+    fake_python = tmp_path / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_bytes(b"")
+    # no sibling "aim" file created
+    monkeypatch.setattr(sys, "executable", str(fake_python))
+    assert tracking._aim_cli_path() == "aim"
 
 
 def test_ensure_dashboard_running_reuses_a_live_process(monkeypatch, tmp_path):

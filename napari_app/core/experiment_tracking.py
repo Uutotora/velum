@@ -145,6 +145,21 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _aim_cli_path() -> str:
+    """Locate the ``aim`` console-script reliably: a sibling of the
+    currently-running Python interpreter, which is where pip installs it —
+    this works even when the environment's ``bin/`` isn't on ``PATH`` (e.g.
+    the app launched via a GUI entry point or wrapper script rather than an
+    activated shell), unlike a bare ``"aim"`` lookup (confirmed to actually
+    fail that way against a real Aim install in a non-activated venv — see
+    docs/BACKLOG.md). Falls back to the bare command name for an unusual
+    install layout where this sibling doesn't exist.
+    """
+    import sys
+    sibling = Path(sys.executable).parent / "aim"
+    return str(sibling) if sibling.exists() else "aim"
+
+
 def ensure_dashboard_running() -> str:
     """Start Aim's own dashboard server (``aim up``) once, reusing it across
     every call from any widget — a shared singleton, the same idea as this
@@ -159,7 +174,7 @@ def ensure_dashboard_running() -> str:
     repo_path().mkdir(parents=True, exist_ok=True)
     port = _free_port()
     _dashboard_proc = subprocess.Popen(
-        ["aim", "up", "--repo", str(repo_path()), "--port", str(port), "--host", "127.0.0.1"],
+        [_aim_cli_path(), "up", "--repo", str(repo_path()), "--port", str(port), "--host", "127.0.0.1"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     _dashboard_url = f"http://127.0.0.1:{port}"
     return _dashboard_url

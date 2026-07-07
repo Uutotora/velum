@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QSpinBox, QDoubleSpinBox,
     QProgressBar, QFileDialog, QScrollArea,
-    QTextEdit, QSizePolicy, QFrame, QAbstractSpinBox, QButtonGroup,
+    QSizePolicy, QFrame, QAbstractSpinBox, QButtonGroup,
 )
 from napari_app.widgets.log_window import get_log_window
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -354,12 +354,22 @@ class TrainWidget(QWidget):
         self.loss_chart = LossChart()
         L.addWidget(self.loss_chart)
 
-        # ── Training history card ─────────────────────────────────────────────
-        hist_card = SectionCard("Training history", icon="log")
-        self.history_box = QTextEdit()
-        self.history_box.setReadOnly(True)
-        self.history_box.setFixedHeight(96)
-        hist_card.addWidget(self.history_box)
+        # ── Run history card ──────────────────────────────────────────────────
+        # Every run's loss curve + hyperparameters now go to the Dashboard
+        # (Aim) instead of a plain local text summary — one real, comparable
+        # history across Predict/Train/Auto-tune rather than a Train-only log.
+        hist_card = SectionCard("Run history", icon="chart")
+        hist_note = QLabel(
+            "Every training run is logged to the Dashboard — loss curves, "
+            "hyperparameters, and every run compared side by side.")
+        hist_note.setWordWrap(True)
+        hist_note.setStyleSheet(f"color:{DIM}; font-size:11px; background:transparent;")
+        hist_card.addWidget(hist_note)
+        open_hist_btn = QPushButton("Open Dashboard")
+        open_hist_btn.setFixedHeight(32)
+        open_hist_btn.setStyleSheet(BTN_SECONDARY)
+        open_hist_btn.clicked.connect(self._open_dashboard)
+        hist_card.addWidget(open_hist_btn)
         L.addWidget(hist_card)
 
         L.addStretch()
@@ -402,7 +412,6 @@ class TrainWidget(QWidget):
         viewer.bind_key('Escape',    lambda v: self._stop_training()  if self.stop_btn.isEnabled()  else None)
 
         self._update_eff()
-        self._refresh_history()
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -566,22 +575,6 @@ class TrainWidget(QWidget):
         n_cells = int(mask.max())
         self._layer_status_lbl.setText(f"✓ Saved {img_path.name}  ({n_cells} cells)")
 
-    def _refresh_history(self):
-        h = STATE_MANAGER.load_history()
-        if not h:
-            self.history_box.setPlainText("No training runs yet."); return
-        lines = []
-        for r in h[:6]:
-            ts  = r.get("started_at","")[:16].replace("T", " ")
-            fl  = r.get("final_loss")
-            ep  = r.get("epochs_run", 0)
-            epm = r.get("epoch_max","")
-            ck  = Path(r.get("checkpoint","")).name
-            st  = "✓" if r.get("status") == "completed" else "✗"
-            ls  = f"{fl:.5f}" if fl is not None else "—"
-            lines.append(f"{st} {ts}  {ep}/{epm} ep  {ls}  {ck}")
-        self.history_box.setPlainText("\n".join(lines))
-
     # ── Mask validation ───────────────────────────────────────────────────────
 
     def _validate_masks(self, mask_dir: str, min_cell_area: int) -> tuple[str, bool]:
@@ -677,4 +670,4 @@ class TrainWidget(QWidget):
 
     def _on_finish(self):
         self.start_btn.setEnabled(True); self.stop_btn.setEnabled(False)
-        self._timer.stop(); self._refresh_history()
+        self._timer.stop()
