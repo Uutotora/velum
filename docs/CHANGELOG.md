@@ -18,6 +18,39 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-08 (later) — scale bar always on + a canvas info caption
+
+Direct user feedback on the previous entry: "why does the scale bar need a
+toggle — just always show it", plus a request to think about what other
+information the canvas overlay could usefully carry.
+
+- **Scale bar has no toggle any more — always on.** Removed `scale_bar_cb`
+  entirely; `viewer.scale_bar.visible = True` is set once at construction,
+  no user action needed. A screenshot/exported figure should be self-
+  contained by default, not depend on remembering to switch something on.
+- **New one-line canvas caption** (napari's built-in `text_overlay`,
+  top-left — the scale bar keeps its own default corner, bottom-right, so
+  they don't collide), refreshed alongside every result and every "Colour
+  cells by" change: cell count, the headline size stat (median diameter for
+  2-D, mean volume for a z-stack), and calibration status (`0.25 µm/px` or
+  `uncalibrated (px)` — a figure should never silently imply real units
+  when none were actually set). When a colour-by-measurement is active, a
+  second line names the metric and the range it spans, so a screenshot
+  without the side panel in frame is still self-interpreting, e.g.:
+  ```
+  2 cells  ·  Ø 10.2 µm  ·  0.25 µm/px
+  Coloured by Area (µm²): 56.2 – 112
+  ```
+
+5 new tests (326 -> 331) for the overlay's content across the uncalibrated/
+calibrated and 2-D/volume/colour-by-active cases, plus one updated test
+confirming the scale bar is on immediately at construction with no toggle
+to click. Full suite green in the full conda env, stable across repeats.
+
+**Not verified:** the actual rendered look on a real screen (no display in
+this sandbox) — in particular whether the two overlays' corners visually
+stay clear of each other as intended.
+
 ## 2026-07-08 — more viewer polish, researched and requested directly
 
 Four more features researched against current napari/QuPath conventions and

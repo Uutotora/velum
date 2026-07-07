@@ -426,20 +426,23 @@ class PredictWidget(QWidget):
         self._color_legend.setVisible(False)
         self._color_card.addWidget(self._color_legend)
 
-        self.scale_bar_cb = QCheckBox("Show scale bar")
-        self.scale_bar_cb.setStyleSheet(f"color:{LABEL}; font-size:11.5px; background:transparent;")
-        self.scale_bar_cb.toggled.connect(self._on_scale_bar_toggled)
-        self._color_card.addWidget(self.scale_bar_cb)
-
         self.view3d_cb = QCheckBox("View in 3D (rotate the volume)")
         self.view3d_cb.setStyleSheet(f"color:{LABEL}; font-size:11.5px; background:transparent;")
         self.view3d_cb.toggled.connect(self._on_view3d_toggled)
         self.view3d_cb.setVisible(False)   # only meaningful for a z-stack/time-lapse result
         self._color_card.addWidget(self.view3d_cb)
-        # Card stays visible even with no result yet — the scale-bar toggle
-        # is meaningful as soon as an image is shown, independent of
-        # "Colour cells by" (only that control is disabled above).
+        # Card stays visible even with no result yet — "Colour cells by" is
+        # the only part disabled below when there's nothing to colour by.
         L.addWidget(self._color_card)
+
+        # Scale bar + a one-line info caption are always on, no toggle —
+        # every screenshot/figure should be self-contained by default rather
+        # than depend on the user remembering to switch something on. See
+        # _refresh_info_overlay for what the caption shows.
+        try:
+            self.viewer.scale_bar.visible = True
+        except Exception:
+            pass   # older napari without a scale_bar overlay — no-op
 
         # ── Ground truth & evaluation (collapsed — validation tool) ────────────
         _gt_card = CollapsibleCard("Ground truth & evaluation", collapsed=True, icon="check")
@@ -1370,17 +1373,53 @@ class PredictWidget(QWidget):
     def _on_color_by_changed(self, _idx=None):
         self._apply_color_by(self.color_by.currentData() or "instance_id")
 
-    def _on_scale_bar_toggled(self, checked: bool):
-        try:
-            self.viewer.scale_bar.visible = bool(checked)
-        except Exception:
-            pass   # older napari without a scale_bar overlay — no-op
-
     def _on_view3d_toggled(self, checked: bool):
         try:
             self.viewer.dims.ndisplay = 3 if checked else 2
         except Exception:
             pass
+
+    def _refresh_info_overlay(self):
+        """Keep a one-line caption burned onto the canvas itself (napari's
+        built-in text_overlay), in sync with the current result.
+
+        This is deliberately not just a mirror of the side panel's stat
+        chips: its whole point is to survive a screenshot/exported figure
+        that doesn't include the panel, the way a scale bar does — cell
+        count, the headline size stat, calibration status (so a figure
+        never silently implies real units when none were set), and which
+        measurement the colours mean, if "Colour cells by" is active.
+        """
+        try:
+            ov = self.viewer.text_overlay
+        except Exception:
+            return   # older napari without a text_overlay — no-op
+
+        result = self._last_measure
+        if not result or not int(result.get("n_cells", 0)):
+            ov.visible = False
+            return
+
+        from napari_app import analysis
+        n = result["n_cells"]
+        s = result["summary"]
+        size_key = "volume" if "volume" in s else "diameter"
+        size_label = "volume" if size_key == "volume" else "Ø"
+        size_unit = next((u for k, _l, u in result["columns"] if k == size_key), "")
+        size_val = s.get(size_key, {}).get("median" if size_key == "diameter" else "mean", 0)
+        calib = f"{self.pixel_size.value():g} µm/px" if self.pixel_size.value() > 0 else "uncalibrated (px)"
+
+        lines = [f"{n} cell{'s' if n != 1 else ''}  ·  {size_label} {size_val:.1f} {size_unit}  ·  {calib}"]
+
+        metric_key = self.color_by.currentData()
+        if metric_key and metric_key != "instance_id":
+            rng = analysis.measurement_range(result, metric_key)
+            if rng is not None:
+                lines.append(f"Coloured by {self.color_by.currentText()}: {rng[0]:.3g} – {rng[1]:.3g}")
+
+        ov.text = "\n".join(lines)
+        ov.position = "top_left"   # scale bar's own default is bottom_right — keep them apart
+        ov.visible = True
 
     def _apply_color_by(self, metric_key: str):
         """Re-colour the current result's fill+outline layers by a measured
@@ -1389,7 +1428,14 @@ class PredictWidget(QWidget):
         right after clearing, before the layers exist) — never raises, since
         this can fire from a signal at almost any point in the widget's
         lifecycle.
+
+        Also the single point that keeps the canvas info caption in sync —
+        called on every new result (via _refresh_color_by_options) *and*
+        every manual "Colour cells by" change (via _on_color_by_changed), so
+        rather than duplicate that trigger, the caption refresh just piggy-
+        backs here instead of needing its own call site in both places.
         """
+        self._refresh_info_overlay()
         name = Path(self.image_path.text()).stem
         try:
             fill = self.viewer.layers[f"{name}_masks_fill"]
