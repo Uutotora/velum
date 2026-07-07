@@ -355,13 +355,100 @@ for a credible product · P1 differentiation · P2 later.
   paths introduce that MPS can't execute would silently fall back to the CPU
   per-op — slower than plain eager MPS, not faster.
 
-### [ ] Agentic tuning loop  · L
+### [x] Agentic tuning loop  · L
 - **Goal:** the Assistant can itself run predict → score → adjust until AP
   plateaus, showing the trajectory.
 - **Why:** today `advisor.diagnose` proposes changes but a human clicks Apply.
 - **Acceptance:** a tool-calling loop with `run_predict`/`score`/`apply`
   tools; stops on plateau; every step visible and undoable.
 - **Touch:** `advisor.py`, `widgets/assistant_widget.py`.
+- **Done:** built as automation of the cycle a user already runs by hand from
+  the Assistant tab — Diagnose, Apply & re-run, Evaluate against ground
+  truth, look, repeat — rather than a literal LLM tool-calling loop: the
+  three "tools" (`run_predict`/`score`/`apply`) are `_predict_cached`,
+  `benchmark.evaluate`, and `advisor.diagnose`'s existing rule-based
+  `changes` dicts, called by a plain Python loop instead of by a model
+  deciding what to invoke. This was a deliberate interpretation, not a
+  shortcut: the acceptance criterion is literally "until **AP** plateaus" —
+  AP is only defined against ground truth, and a deterministic loop over the
+  advisor's own (already-shipped, already-tested) suggestions is fully
+  unit-testable without an LLM in the loop, whereas Ollama is optional and
+  its output non-deterministic — matching this file's own house rule of
+  reusing what already exists over introducing a parallel mechanism.
+  New `napari_app/core/tuning_loop.py` (Qt/torch-free): `run_tuning_loop`
+  repeatedly calls a `predict_fn`, scores the mask with a `score_fn`
+  (`default_score_fn` wraps `benchmark.evaluate`, scoring on the mean of
+  AP@0.5/0.75/0.9 — the same "mAP" the engine-benchmark table already
+  reports), and asks a `propose_fn` (`default_propose_fn` wraps
+  `advisor.diagnose`, merging every finding's `changes` and dropping any
+  that wouldn't actually move a parameter) what to change next. It stops on
+  the first of: `patience` consecutive rounds that fail to beat the best
+  score by more than `min_delta` (the plateau); `max_steps`; the advisor
+  running out of suggestions; a change repeating one already tried (guards
+  an oscillation looping forever); or cooperative cancellation. Every round
+  is recorded with its own full parameter snapshot (a `TuningStep`), not
+  just the winner, so a caller can jump back to *any* step — that is what
+  makes it "undoable" rather than a black box reporting only a final
+  answer. `PredictController.run_tuning_loop_async`/`stop_tuning` (new,
+  alongside the three existing `run_*_async` orchestration methods) thread
+  this through the real `build_config` + `_predict_cached` on a background
+  daemon thread, reporting each `TuningStep` via `on_step` and errors via
+  `on_log`, exactly the callback shape every other controller method
+  already uses. `PredictWidget` gained `has_ground_truth`/`start_auto_tune`/
+  `stop_auto_tune`/`restore_tuning_step` — the last two exactly mirror the
+  existing `apply_params`+`rerun` pair the Assistant's manual "Apply &
+  re-run" already calls, so restoring a step re-runs the real pipeline
+  instead of just repainting a cached array. The Assistant tab gained an
+  "Auto-tune" icon button (next to the existing "Diagnose" one) that starts/
+  stops the loop and streams each `TuningStep` into the chat as a
+  `AutoTuneStepCard` (score, delta from the previous round, cell count, the
+  changes that produced it, and a "Use these params" button) as it arrives
+  — deliberately never touching the viewer mid-loop (the loop's own
+  `predict_fn` calls `_predict_cached` directly, bypassing the widget's
+  normal result-display path entirely) so a multi-round background search
+  can't flicker or corrupt the live prediction the user is looking at;
+  only an explicit "Use these params" click calls `restore_tuning_step`,
+  which does go through the normal `apply_params` + `rerun` path and so
+  does update the viewer. Finishing posts a summary naming the best step's
+  score/cell count.
+  56 new tests (369 total): `tests/test_tuning_loop.py` (19 — the pure loop's
+  plateau/budget/dedup/cancellation logic against scripted fakes, plus
+  `default_score_fn`/`default_propose_fn` against the same synthetic
+  label-array style `test_benchmark.py`/`test_advisor.py` already use, plus
+  one real-defaults-end-to-end case), 3 more in `tests/test_predict_controller.py`
+  (threaded orchestration through the real fake-connected-components
+  cellpose path already established there — success/step-sequencing, error
+  handling, `stop_tuning` cancellation), `tests/test_assistant_widget_wiring.py`
+  (7, new — a first for this widget, which had zero test coverage before;
+  drives a real `AssistantWidget` against a small fake predict-widget stand-
+  in rather than a full `PredictWidget`, since the Assistant only ever calls
+  its documented small API), and `tests/test_predict_widget_autotune_wiring.py`
+  (11, new — a real `PredictWidget` under offscreen Qt, the
+  `test_predict_labels_display_wiring.py` pattern, covering the new hooks'
+  own precondition/GT-loading/resize/dispatch glue with the controller call
+  itself monkeypatched out).
+  Caught one real gap while verifying against the *true* light CI
+  dependency-group (not the full conda env — see the `AGENTS.md` fix in the
+  same change): two new controller tests exercised `build_config`'s
+  `cellpose` branch for the first time with a real (not hand-built) params
+  dict, which checks `engine_registry`'s `cellpose.available()` — false in
+  the light group (no real `cellpose` package there) — fixed the same way
+  `test_build_config_cellpose_shape` already does, by monkeypatching
+  `engines.cellpose_available`.
+  **Not verified anywhere in this work:** the real GUI (button/card layout
+  inspected by code, not seen rendered with a display attached) and real
+  model inference — every test drives the loop against the fake
+  connected-components engine already used throughout
+  `test_predict_controller.py`, never real SAM/Cellpose/SAM2 weights, so the
+  loop's *plumbing* (threading, stopping rules, undo, rendering) is proven
+  but a real advisor-guided AP improvement on a real model has not been
+  observed. **Deliberately out of scope:** a user-facing "advanced" panel to
+  tune `max_steps`/`patience`/`min_delta` themselves (hardcoded to sensible
+  defaults, matching how tile size/overlap are computed rather than exposed
+  elsewhere in this file) and letting a local LLM (Ollama) drive the loop's
+  choices instead of the deterministic advisor — a natural follow-up once
+  someone actually wants the model's judgement in this specific loop rather
+  than only in chat.
 
 ### [ ] Vision-grounded QC in the Assistant  · L
 - **Goal:** the agent inspects the actual mask (not just scalar stats) and

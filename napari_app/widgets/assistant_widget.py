@@ -89,6 +89,46 @@ class ChangeCard(QFrame):
         self.setLayout(L)
 
 
+class AutoTuneStepCard(QFrame):
+    """One round of the auto-tune trajectory: its score/changes plus a
+    one-click way to restore its exact parameters (the loop's "undo" — jump
+    back to any recorded step, not only the one it ended on)."""
+
+    def __init__(self, step_no, changes, score, delta, n_cells, on_restore):
+        super().__init__()
+        self.setObjectName("TuneStep")
+        self.setStyleSheet(
+            f"QFrame#TuneStep {{ background:{INPUT}; border:1px solid {BORDER};"
+            f" border-radius:8px; }}")
+        L = QVBoxLayout(); L.setContentsMargins(13, 11, 13, 11); L.setSpacing(6)
+
+        if delta is None:
+            score_txt = f"score {score:.3f}"
+        else:
+            sign = "+" if delta >= 0 else ""
+            score_txt = f"score {score:.3f} ({sign}{delta:.3f})"
+        title = QLabel(f"Step {step_no}   ·   {score_txt}   ·   {n_cells} cells")
+        title.setStyleSheet(f"color:{TEXT}; font-size:12px; font-weight:600; background:transparent;")
+        title.setWordWrap(True)
+        L.addWidget(title)
+
+        chg = ("  ·  ".join(f"{k} → {v}" for k, v in changes.items())
+               if changes else "(baseline parameters)")
+        c = QLabel(chg)
+        c.setStyleSheet(
+            f"color:{ACCENT}; font-size:10px; font-family:{MONO};"
+            f"background:transparent; padding-top:2px;")
+        c.setWordWrap(True)
+        L.addWidget(c)
+
+        btns = QHBoxLayout(); btns.setSpacing(7); btns.setContentsMargins(0, 3, 0, 0)
+        b = QPushButton("Use these params"); b.setFixedHeight(34); b.setStyleSheet(BTN_SECONDARY)
+        b.clicked.connect(on_restore)
+        btns.addWidget(b); btns.addStretch()
+        L.addLayout(btns)
+        self.setLayout(L)
+
+
 class AssistantWidget(QWidget):
     _token_signal   = pyqtSignal(str)
     _chat_done      = pyqtSignal()
@@ -96,6 +136,8 @@ class AssistantWidget(QWidget):
     _pull_done      = pyqtSignal(str, bool)
     _create_status  = pyqtSignal(str)
     _create_done    = pyqtSignal(bool)
+    _autotune_step   = pyqtSignal(object)
+    _autotune_finish = pyqtSignal()
 
     def __init__(self, viewer, predict_widget):
         super().__init__()
@@ -105,6 +147,9 @@ class AssistantWidget(QWidget):
         self._chat_thread = None
         self._reply_buf: list[str] = []
         self._worker = None
+        self._autotune_active = False
+        self._autotune_prev_score = None
+        self._autotune_best = None
 
         self.setStyleSheet(WIDGET_SS)
         outer = QVBoxLayout(self); outer.setSpacing(0); outer.setContentsMargins(0, 0, 0, 0)
@@ -126,6 +171,14 @@ class AssistantWidget(QWidget):
         self._diag_btn.setToolTip("Diagnose the current result — offline, no model needed")
         self._diag_btn.clicked.connect(self._run_diagnose)
         in_row.addWidget(self._diag_btn)
+        self._autotune_btn = QPushButton()
+        self._autotune_btn.setFixedSize(36, 36); self._autotune_btn.setStyleSheet(BTN_SECONDARY)
+        self._autotune_btn.setIcon(icons.icon("target", LABEL, 16))
+        self._autotune_btn.setToolTip(
+            "Auto-tune: predict, score against ground truth, adjust, repeat "
+            "until the score plateaus")
+        self._autotune_btn.clicked.connect(self._toggle_autotune)
+        in_row.addWidget(self._autotune_btn)
         self._input = QLineEdit()
         self._input.setPlaceholderText("Ask about your segmentation…")
         self._input.returnPressed.connect(self._send)
@@ -216,6 +269,8 @@ class AssistantWidget(QWidget):
         self._pull_done.connect(self._on_pull_done)
         self._create_status.connect(lambda s: self._model_status.setText(s))
         self._create_done.connect(self._on_create_done)
+        self._autotune_step.connect(self._on_autotune_step)
+        self._autotune_finish.connect(self._on_autotune_finished)
 
         self._refresh_models()
 
@@ -249,6 +304,54 @@ class AssistantWidget(QWidget):
         if applied:
             self._system_note(f"Applied: {', '.join(applied)} — re-running…")
         self.predict.rerun()
+
+    # ── Auto-tune (agentic predict -> score -> adjust loop) ─────────────────────
+
+    def _toggle_autotune(self):
+        if self._autotune_active:
+            self.predict.stop_auto_tune()
+            return
+        err = self.predict.start_auto_tune(
+            on_step=lambda step: self._autotune_step.emit(step),
+            on_finish=lambda: self._autotune_finish.emit())
+        if err:
+            self._chat.system_note(err)
+            return
+        self._autotune_active = True
+        self._autotune_prev_score = None
+        self._autotune_best = None
+        self._autotune_btn.setStyleSheet(
+            f"QPushButton {{ background:{WARN}; border:1px solid {WARN}; border-radius:8px; }}")
+        self._autotune_btn.setToolTip("Auto-tuning… click to stop")
+        self._chat.system_note("Auto-tuning against ground truth…")
+
+    def _on_autotune_step(self, step):
+        prev = self._autotune_prev_score
+        delta = (step.score - prev) if prev is not None else None
+        self._autotune_prev_score = step.score
+        if self._autotune_best is None or step.score > self._autotune_best.score:
+            self._autotune_best = step
+        self._chat.add_widget(AutoTuneStepCard(
+            step.step, step.changes, step.score, delta, step.n_cells,
+            lambda p=step.params: self._restore_autotune_step(p)))
+
+    def _on_autotune_finished(self):
+        self._autotune_active = False
+        self._autotune_btn.setStyleSheet(BTN_SECONDARY)
+        self._autotune_btn.setToolTip(
+            "Auto-tune: predict, score against ground truth, adjust, repeat "
+            "until the score plateaus")
+        best = self._autotune_best
+        if best is not None:
+            self._chat.system_note(
+                f"Auto-tune finished — best score {best.score:.3f} at step "
+                f"{best.step} ({best.n_cells} cells). Use its card above to keep it.")
+        else:
+            self._chat.system_note("Auto-tune finished — no steps completed.")
+
+    def _restore_autotune_step(self, params):
+        self.predict.restore_tuning_step(params)
+        self._system_note("Restored that step's parameters and re-ran.")
 
     # ── Model management ───────────────────────────────────────────────────────
 

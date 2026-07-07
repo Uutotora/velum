@@ -135,9 +135,15 @@ every dependency installed, so it can't reveal a module the light `test`
 dependency-group is missing (this bit the predict-controller split: `data/
 utils.py` hard-imports `nibabel`, which no `test`-group package pulls in
 transitively, and the local suite stayed green while CI failed). Check with a
-throwaway venv that installs *only* the declared group:
+throwaway venv that installs *only* the declared group — run from the repo
+root, **no trailing `.`**: that would also pull in the project's own
+`[project.dependencies]` (torch/napari/PyQt6 — everything this check exists
+to exclude), silently turning it back into the full-env check it's supposed
+to replace (`pytest.ini`'s `pythonpath = .` is what makes `napari_app`/`data`/
+etc. importable with nothing installed, so the package itself never needs to
+be):
 ```
-python3.12 -m venv /tmp/civenv && /tmp/civenv/bin/pip install --group test . \
+python3.12 -m venv /tmp/civenv && /tmp/civenv/bin/pip install --group test \
   && /tmp/civenv/bin/python -m pytest -q
 ```
 (needs a `python<3.13` on PATH — `requires-python` caps at 3.12).

@@ -395,6 +395,88 @@ def test_run_prediction_async_forwards_on_tile(tmp_path, monkeypatch):
     assert calls and calls[-1][0] == calls[-1][1]  # ends at total/total
 
 
+# ── run_tuning_loop_async (agentic predict -> score -> adjust loop) ──────────
+
+def _cellpose_blob_setup(tmp_path):
+    """A real one-blob PNG + the matching perfect-GT label mask, so a
+    prediction through the fake connected-components engine scores 1.0."""
+    import cv2
+    img = np.zeros((40, 40, 3), dtype=np.uint8)
+    img[10:30, 10:30] = 200
+    path = tmp_path / "real.png"
+    cv2.imwrite(str(path), img)
+    gt = np.zeros((40, 40), dtype=np.int32)
+    gt[10:30, 10:30] = 1
+    return path, gt
+
+
+def test_run_tuning_loop_async_sequences_steps_then_finish(tmp_path, monkeypatch):
+    import napari_app.engines as engines
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+    monkeypatch.setattr(engines, "cellpose_available", lambda: True)
+    path, gt = _cellpose_blob_setup(tmp_path)
+    params = _base_params(tmp_path, engine="cellpose", image_path=str(path), resize_size=40)
+
+    events = []
+    controller = PredictController()
+    t = controller.run_tuning_loop_async(
+        params, gt, patience=1,
+        on_step=lambda step: events.append(("step", step)),
+        on_finish=lambda: events.append(("finish",)))
+    t.join(timeout=10)
+
+    assert [e[0] for e in events] == ["step", "step", "finish"]  # plateaus after 1 flat repeat
+    steps = [e[1] for e in events if e[0] == "step"]
+    assert steps[0].step == 0 and steps[1].step == 1
+    assert steps[0].score == pytest.approx(1.0)   # perfect match -> mAP 1.0
+    assert steps[0].n_cells == 1
+    assert steps[1].score == pytest.approx(1.0)   # cellpose config ignores advisor's
+                                                   # suggested keys -> identical re-run
+
+
+def test_run_tuning_loop_async_error_still_calls_log_and_finish(tmp_path):
+    params = _base_params(tmp_path, engine="cellpose",
+                          image_path=str(tmp_path / "missing.png"))
+    gt = np.zeros((10, 10), dtype=np.int32)
+    events = []
+    controller = PredictController()
+    t = controller.run_tuning_loop_async(
+        params, gt,
+        on_step=lambda step: events.append(("step", step)),
+        on_log=lambda s: events.append(("log", s)),
+        on_finish=lambda: events.append(("finish",)))
+    t.join(timeout=10)
+    assert events[0][0] == "log" and "[ERROR]" in events[0][1]
+    assert events[1] == ("finish",)
+    assert not any(e[0] == "step" for e in events)   # failed before a single round completed
+
+
+def test_run_tuning_loop_async_stop_tuning_halts_the_loop(tmp_path, monkeypatch):
+    import napari_app.engines as engines
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+    monkeypatch.setattr(engines, "cellpose_available", lambda: True)
+    path, gt = _cellpose_blob_setup(tmp_path)
+    params = _base_params(tmp_path, engine="cellpose", image_path=str(path), resize_size=40)
+
+    controller = PredictController()
+    steps = []
+
+    def on_step(step):
+        steps.append(step)
+        controller.stop_tuning()   # request cancellation right after round 1
+
+    events = []
+    # patience=10 so a plateau alone would not stop the loop this early —
+    # isolates stop_tuning() as the actual reason it halts at one round.
+    t = controller.run_tuning_loop_async(
+        params, gt, patience=10, max_steps=10,
+        on_step=on_step, on_finish=lambda: events.append("finish"))
+    t.join(timeout=10)
+
+    assert len(steps) == 1
+    assert events == ["finish"]
+
+
 # ── z-stack / time-lapse orchestration (_predict_volume / run_volume_prediction_async) ──
 
 def _write_zstack(tmp_path):

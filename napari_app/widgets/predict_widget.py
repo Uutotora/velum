@@ -1191,6 +1191,51 @@ class PredictWidget(QWidget):
         """(image_rgb, mask) of the most recent prediction, or (None, None)."""
         return self._last_img_rgb, self._last_mask
 
+    # ── Agentic tuning loop (the Assistant's "Auto-tune") ─────────────────────
+
+    def has_ground_truth(self) -> bool:
+        p = self.gt_path.text().strip()
+        return bool(p) and Path(p).exists()
+
+    def start_auto_tune(self, on_step, on_finish) -> str | None:
+        """Start the tuning loop against the current image + loaded ground
+        truth. Returns an error string (and starts nothing) if a
+        precondition isn't met, else ``None`` once the loop has started in
+        the background. ``on_step``/``on_finish`` are forwarded to
+        :meth:`PredictController.run_tuning_loop_async` verbatim — they fire
+        from a background thread exactly like every other async controller
+        callback, so the caller (the Assistant widget) is responsible for
+        making them thread-safe (a Qt signal), same as it already does for
+        ``rerun``'s own callbacks.
+        """
+        if self._last_mask is None:
+            return "Run a prediction first."
+        if not self.has_ground_truth():
+            return "Set a ground-truth mask first (Ground truth card) to auto-tune against."
+        try:
+            gt = self._load_gt_mask()
+        except ValueError as e:
+            return str(e)
+        if gt.shape != self._last_mask.shape:
+            import cv2
+            gt = cv2.resize(gt.astype(np.float32),
+                            (self._last_mask.shape[1], self._last_mask.shape[0]),
+                            interpolation=cv2.INTER_NEAREST).astype(np.int32)
+        params = self._gather_params()
+        self._controller.run_tuning_loop_async(
+            params, gt, on_step=on_step, on_log=self._append_log, on_finish=on_finish)
+        return None
+
+    def stop_auto_tune(self):
+        self._controller.stop_tuning()
+
+    def restore_tuning_step(self, params: dict):
+        """Apply a previous tuning step's full parameter snapshot and
+        re-run — the loop's "undo": jump back to any recorded step, not only
+        the one it happened to end on."""
+        self.apply_params(params)
+        self.rerun()
+
     # ── Actions ───────────────────────────────────────────────────────────────
 
     def _predict_active_layer(self):

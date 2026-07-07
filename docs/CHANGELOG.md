@@ -18,7 +18,49 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
-## 2026-07-08 (later) — scale bar always on + a canvas info caption
+## 2026-07-07 (midday) — agentic tuning loop, plus two documentation fixes
+
+- **Agentic tuning loop** (top open P1 backlog item). The Assistant can now
+  run predict → score-against-ground-truth → adjust → repeat on its own
+  instead of a human clicking Diagnose/Apply/Evaluate one round at a time —
+  new "Auto-tune" button next to the existing "Diagnose" one. Built as
+  automation of that exact existing manual cycle (reusing
+  `advisor.diagnose`'s rule-based suggestions and `benchmark.evaluate`'s
+  AP/F1 scoring verbatim) rather than a literal LLM tool-calling loop: the
+  acceptance criterion is "until **AP** plateaus", AP only means anything
+  against ground truth, and a deterministic loop is fully unit-testable
+  without Ollama in the picture. New `napari_app/core/tuning_loop.py`
+  (`run_tuning_loop`, Qt/torch-free) stops on a plateau (`patience` rounds
+  without a `min_delta` improvement), a step budget, the advisor running dry,
+  or a repeated change (an oscillation guard) — every round keeps its own
+  full parameter snapshot, not just the best one, so any step is one click
+  ("Use these params") away, restoring parameters *and* re-running for real
+  rather than just replaying a cached result. See `docs/BACKLOG.md` for the
+  full writeup (touch points, all 56 new tests, what's not verified).
+- **Fixed two stale dates in this changelog.** The previous two entries were
+  headed "2026-07-08", a full calendar day ahead of `git log`'s actual
+  commit dates (both really landed 2026-07-07, 00:18–03:22) — a session
+  boundary that flipped the date this file used without anyone flipping the
+  actual clock. Relabelled to "(late night)" rather than reordering anything
+  (the entries were already in the right relative order — only the calendar
+  label was wrong). Caught while sanity-checking the backlog against `git
+  log` before picking this session's task, per this file's own house rule.
+- **Fixed a second, unrelated documentation bug in `AGENTS.md`** while
+  verifying this change against the light CI dependency group: the
+  documented throwaway-venv check (`pip install --group test .`) has a
+  trailing `.` that installs the whole project — pulling in
+  `[project.dependencies]` (torch/napari/PyQt6, exactly what the check
+  exists to exclude) on top of the `test` group, silently turning it back
+  into a full-env check indistinguishable from the one it's meant to
+  replace. This bit the very tests added in this change: two new
+  `PredictController` tests only failed once run through the *real* light
+  group (no `.`), for an unrelated reason (`cellpose_available()` is false
+  without the real optional `cellpose` package) — fixed the same way an
+  existing test already does, by monkeypatching it. Corrected the documented
+  command to drop the `.` and noted why (`pytest.ini`'s `pythonpath = .`
+  already makes the source tree importable with nothing installed).
+
+## 2026-07-07 (late night) — scale bar always on + a canvas info caption
 
 Direct user feedback on the previous entry: "why does the scale bar need a
 toggle — just always show it", plus a request to think about what other
@@ -51,7 +93,7 @@ to click. Full suite green in the full conda env, stable across repeats.
 this sandbox) — in particular whether the two overlays' corners visually
 stay clear of each other as intended.
 
-## 2026-07-08 — more viewer polish, researched and requested directly
+## 2026-07-07 (late night) — more viewer polish, researched and requested directly
 
 Four more features researched against current napari/QuPath conventions and
 implemented without asking first, per standing instruction. All in the
