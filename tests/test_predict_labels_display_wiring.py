@@ -332,11 +332,11 @@ def test_show_results_calibrated_image_and_labels_scale_stay_aligned(widget):
     assert tuple(img_layer.scale) == (0.25, 0.25)
 
 
-def test_scale_bar_toggle_sets_viewer_visibility(widget):
-    widget.scale_bar_cb.setChecked(True)
+def test_scale_bar_is_on_by_default_no_toggle(widget):
+    # No user action at all -- constructing the widget must already have
+    # armed it, since there's no "Show scale bar" control to click anymore.
     assert widget.viewer.scale_bar.visible is True
-    widget.scale_bar_cb.setChecked(False)
-    assert widget.viewer.scale_bar.visible is False
+    assert not hasattr(widget, "scale_bar_cb")
 
 
 # ── view-in-3D toggle (volume results only) ─────────────────────────────────
@@ -426,3 +426,55 @@ def test_open_measurements_wires_row_selected_exactly_once(widget, monkeypatch):
         assert calls == [2]   # not [2, 2] -- exactly one connection, not two
     finally:
         fresh.close()
+
+
+# ── canvas info caption (napari's text_overlay, always on like the scale bar) ─
+
+def test_info_overlay_hidden_when_no_cells(widget):
+    # _show_results routes through the stubbed _recompute_measurements (see
+    # the widget fixture above), so it's exercised via _show_volume_results
+    # instead, which calls _refresh_info_overlay (via _apply_color_by)
+    # directly and isn't affected by that stub either way.
+    img_vol = np.zeros((2, 20, 20, 3), dtype=np.uint8)
+    mask_vol = np.zeros((2, 20, 20), dtype=np.int32)
+    widget._show_volume_results(img_vol, mask_vol)
+    assert widget.viewer.text_overlay.visible is False
+
+
+def test_info_overlay_shows_count_and_uncalibrated_status(widget):
+    from napari_app import analysis
+    widget._last_measure = analysis.compute_measurements(_mask_2_cells())
+    widget._refresh_info_overlay()
+
+    ov = widget.viewer.text_overlay
+    assert ov.visible is True
+    assert "2 cells" in ov.text
+    assert "uncalibrated (px)" in ov.text
+    assert ov.position == "top_left"
+
+
+def test_info_overlay_shows_calibrated_units(widget):
+    widget.pixel_size.setValue(0.25)
+    from napari_app import analysis
+    widget._last_measure = analysis.compute_measurements(_mask_2_cells())
+    widget._refresh_info_overlay()
+    assert "0.25 µm/px" in widget.viewer.text_overlay.text
+
+
+def test_info_overlay_volume_result_shows_volume_stat(widget):
+    img_vol, mask_vol = _volume_two_cells()
+    widget._show_volume_results(img_vol, mask_vol)
+    assert "volume" in widget.viewer.text_overlay.text
+
+
+def test_info_overlay_mentions_active_color_by_metric(widget):
+    img_vol, mask_vol = _volume_two_cells()
+    widget._show_volume_results(img_vol, mask_vol)
+    assert "Coloured by" not in widget.viewer.text_overlay.text
+
+    widget.color_by.setCurrentIndex(widget.color_by.findData("volume"))
+    text = widget.viewer.text_overlay.text
+    assert "Coloured by" in text and "Volume" in text
+
+    widget.color_by.setCurrentIndex(widget.color_by.findData("instance_id"))
+    assert "Coloured by" not in widget.viewer.text_overlay.text
