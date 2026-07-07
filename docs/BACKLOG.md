@@ -411,7 +411,7 @@ for a credible product · P1 differentiation · P2 later.
   which does go through the normal `apply_params` + `rerun` path and so
   does update the viewer. Finishing posts a summary naming the best step's
   score/cell count.
-  56 new tests (369 total): `tests/test_tuning_loop.py` (19 — the pure loop's
+  38 new tests (331 → 369): `tests/test_tuning_loop.py` (18 — the pure loop's
   plateau/budget/dedup/cancellation logic against scripted fakes, plus
   `default_score_fn`/`default_propose_fn` against the same synthetic
   label-array style `test_benchmark.py`/`test_advisor.py` already use, plus
@@ -423,7 +423,7 @@ for a credible product · P1 differentiation · P2 later.
   drives a real `AssistantWidget` against a small fake predict-widget stand-
   in rather than a full `PredictWidget`, since the Assistant only ever calls
   its documented small API), and `tests/test_predict_widget_autotune_wiring.py`
-  (11, new — a real `PredictWidget` under offscreen Qt, the
+  (10, new — a real `PredictWidget` under offscreen Qt, the
   `test_predict_labels_display_wiring.py` pattern, covering the new hooks'
   own precondition/GT-loading/resize/dispatch glue with the controller call
   itself monkeypatched out).
@@ -442,13 +442,97 @@ for a credible product · P1 differentiation · P2 later.
   `test_predict_controller.py`, never real SAM/Cellpose/SAM2 weights, so the
   loop's *plumbing* (threading, stopping rules, undo, rendering) is proven
   but a real advisor-guided AP improvement on a real model has not been
-  observed. **Deliberately out of scope:** a user-facing "advanced" panel to
-  tune `max_steps`/`patience`/`min_delta` themselves (hardcoded to sensible
-  defaults, matching how tile size/overlap are computed rather than exposed
-  elsewhere in this file) and letting a local LLM (Ollama) drive the loop's
-  choices instead of the deterministic advisor — a natural follow-up once
-  someone actually wants the model's judgement in this specific loop rather
-  than only in chat.
+  observed.
+
+  **Follow-up pass (same session), on direct instruction to go further:**
+  the first pass explicitly deferred both a user-facing settings panel and
+  an LLM-driven strategy as "a natural follow-up" — the user then asked for
+  exactly that, plus asked to research how comparable products instrument
+  this kind of loop and bring the best of it in ("больше полезной
+  информации — я смогу её убрать", i.e. bias toward more instrumentation,
+  not less). Researched: AutoML/sweep dashboards (Optuna's
+  `plot_optimization_history`/`plot_param_importances`; Weights & Biases'
+  sweep parameter-importance panel), the ReAct tool-calling-loop pattern and
+  its stop-condition/infinite-loop failure modes, agentic-coding-tool UX
+  (Cursor/Devin's one-click checkpoints), and this app's own segmentation
+  neighbourhood (CellSeg3D's grid-search threshold tuner; the
+  "the-segmentation-game" napari plugin's sortable Highscore table). Four
+  concrete features came out of that, all real, none cosmetic:
+  - **A genuine LLM tool-calling strategy.** `tuning_loop.llm_propose_fn`
+    hands the "what to change next" decision to a connected local Ollama
+    model each round instead of the fixed rule table — a real ReAct round
+    (reason, then act): `advisor.build_tuning_prompt` shows the model the
+    full score trajectory so far and asks for one `SUGGEST:` line or a
+    `STOP: <reason>` line (parsed by the new `advisor.parse_stop`), reusing
+    the exact `SUGGEST:` protocol the chat already speaks. Falls back to
+    the rule-based advisor whenever the model errors, is unreachable, or
+    replies with nothing usable — a flaky/slow local model degrades the
+    loop, never crashes it. `run_tuning_loop`/`PredictController.
+    run_tuning_loop_async` gained a `strategy`/`model` parameter (default
+    `"advisor"`, unchanged behaviour); the Assistant's new settings row
+    lets the user pick "Local model" only once one is actually connected.
+  - **A settings panel, exposed rather than hardcoded.** Reversing the
+    first pass's own "deliberately out of scope" call: `max_steps`/
+    `patience`/`min_delta` are now three spinboxes in the new "Auto-tune"
+    card, not fixed constants — same reasoning the rest of this app's
+    Inference-parameters card already uses for every other numeric knob.
+  - **Product-grade trajectory instrumentation**, replacing the first
+    pass's per-round chat cards: a live score-vs-round chart (`TuningChart`
+    — pyqtgraph if present, else matplotlib, the exact fallback
+    `train_widget.LossChart`/`measurements_window.Histogram` already use —
+    an Optuna/W&B-style optimization-history plot with the best round
+    marked); a sortable `QTableWidget` leaderboard (round,
+    score, Δ, cell count, reason — the "the-segmentation-game" Highscore-
+    table idea) that a click-then-"Use selected round" restores from,
+    exactly like a Cursor/Devin checkpoint; a CSV export
+    (`tuning_loop.write_trajectory_csv`) for taking the raw run elsewhere;
+    and a plain-language "what mattered most" panel
+    (`tuning_loop.parameter_importance` — Pearson correlation between each
+    varying numeric parameter and the score across the run, W&B's
+    parameter-importance panel without needing enough trials for its
+    random-forest model). The chat still gets one short line per round (the
+    conversational, "what just happened" narrative) instead of a growing
+    pile of cards.
+  - **Every stop is explained, not just coded.** `TuningResult` carries
+    both a machine `stop_reason` (`STOP_REASONS`/`describe_stop_reason`:
+    plateau, max_steps, no_more_suggestions, repeated_change, cancelled,
+    error) *and* a free-text `stop_detail` — the advisor's or the local
+    model's own words for why it stopped, not discarded once the loop
+    exits, surfaced verbatim in the finish banner.
+
+  This pass touches every file the first one did (`tuning_loop.py`,
+  `predict_controller.py`, `predict_widget.py`, `assistant_widget.py`) plus
+  `advisor.py` (new `build_tuning_prompt`/`parse_stop`); `AutoTuneStepCard`
+  (the first pass's chat-card widget) was removed in favour of the table.
+  24 more net-new tests (369 → 393, 62 total across both passes; the
+  pure-loop and controller suites were also rewritten in place for the new
+  `Proposal`/`TuningResult`/4-arg-`ProposeFn` contracts, so more than 24
+  individual test functions changed even though 24 is the net count):
+  `llm_propose_fn`'s success/stop/no-usable-
+  suggestion/model-error paths (a monkeypatched `advisor.ollama_chat`, never
+  a real network call), `parameter_importance`/`write_trajectory_csv`/
+  `describe_stop_reason` against synthetic trajectories, the controller's
+  `strategy="llm"` wiring (confirms the fake Ollama call actually happens,
+  confirms a missing model name degrades to the advisor instead of
+  crashing), and the Assistant's settings-row/chart/table/CSV-export/
+  parameter-importance wiring end to end via a fake predict-widget. Full
+  suite green in the full conda env (393 passed) and in a from-scratch venv
+  with only `pip install --group test` (the corrected command — 288 passed,
+  9 skipped for PyQt6-gated files).
+  **Not verified in this pass either:** the real GUI (chart/table
+  rendering, in particular whether pyqtgraph or the matplotlib fallback
+  actually engages on a real screen, and whether the two coexist visually
+  with the rest of the card) and a real local model's actual tuning
+  judgement (the LLM strategy's tests all use a scripted fake
+  `ollama_chat` — no real Ollama install in this sandbox to verify a real
+  model gives *useful* suggestions, only that the plumbing around whatever
+  it says is correct). **Still deliberately out of scope:** a beam-search/
+  multi-candidate-per-round strategy (CellSeg3D's grid search tries many
+  combinations per pass; this loop still tries exactly one per round) and a
+  parallel-coordinates-style multi-parameter plot (W&B's other headline
+  sweep visualization) — the single-parameter importance ranking captures
+  most of the same insight without a custom multi-axis renderer neither
+  pyqtgraph nor matplotlib gives for free in a ~100px-tall embedded widget.
 
 ### [ ] Vision-grounded QC in the Assistant  · L
 - **Goal:** the agent inspects the actual mask (not just scalar stats) and

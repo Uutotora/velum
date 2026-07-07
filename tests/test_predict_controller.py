@@ -422,16 +422,19 @@ def test_run_tuning_loop_async_sequences_steps_then_finish(tmp_path, monkeypatch
     t = controller.run_tuning_loop_async(
         params, gt, patience=1,
         on_step=lambda step: events.append(("step", step)),
-        on_finish=lambda: events.append(("finish",)))
+        on_round_start=lambda s, tot: events.append(("round_start", s, tot)),
+        on_finish=lambda reason, detail: events.append(("finish", reason, detail)))
     t.join(timeout=10)
 
-    assert [e[0] for e in events] == ["step", "step", "finish"]  # plateaus after 1 flat repeat
+    kinds = [e[0] for e in events]
+    assert kinds == ["round_start", "step", "round_start", "step", "finish"]
     steps = [e[1] for e in events if e[0] == "step"]
     assert steps[0].step == 0 and steps[1].step == 1
     assert steps[0].score == pytest.approx(1.0)   # perfect match -> mAP 1.0
     assert steps[0].n_cells == 1
     assert steps[1].score == pytest.approx(1.0)   # cellpose config ignores advisor's
                                                    # suggested keys -> identical re-run
+    assert events[-1] == ("finish", "plateau", "")   # a plateau stop has no free-text detail
 
 
 def test_run_tuning_loop_async_error_still_calls_log_and_finish(tmp_path):
@@ -444,10 +447,10 @@ def test_run_tuning_loop_async_error_still_calls_log_and_finish(tmp_path):
         params, gt,
         on_step=lambda step: events.append(("step", step)),
         on_log=lambda s: events.append(("log", s)),
-        on_finish=lambda: events.append(("finish",)))
+        on_finish=lambda reason, detail: events.append(("finish", reason, detail)))
     t.join(timeout=10)
     assert events[0][0] == "log" and "[ERROR]" in events[0][1]
-    assert events[1] == ("finish",)
+    assert events[1] == ("finish", "error", "")
     assert not any(e[0] == "step" for e in events)   # failed before a single round completed
 
 
@@ -470,11 +473,65 @@ def test_run_tuning_loop_async_stop_tuning_halts_the_loop(tmp_path, monkeypatch)
     # isolates stop_tuning() as the actual reason it halts at one round.
     t = controller.run_tuning_loop_async(
         params, gt, patience=10, max_steps=10,
-        on_step=on_step, on_finish=lambda: events.append("finish"))
+        on_step=on_step, on_finish=lambda reason, detail: events.append(reason))
     t.join(timeout=10)
 
     assert len(steps) == 1
-    assert events == ["finish"]
+    assert events == ["cancelled"]
+
+
+def test_run_tuning_loop_async_llm_strategy_calls_ollama_chat(tmp_path, monkeypatch):
+    """strategy="llm" threads the model name into tuning_loop.llm_propose_fn
+    instead of the default rule-based advisor — verified by monkeypatching
+    advisor.ollama_chat and confirming it's actually consulted (with a
+    STOP reply, so the loop is short and deterministic). The model's own
+    stop rationale ("looks fine already.") must reach on_finish's
+    stop_detail, not just the generic stop_reason code."""
+    import napari_app.engines as engines
+    from napari_app import advisor
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+    monkeypatch.setattr(engines, "cellpose_available", lambda: True)
+    calls = []
+
+    def fake_chat(model, messages, on_token):
+        calls.append(model)
+        return "STOP: looks fine already."
+
+    monkeypatch.setattr(advisor, "ollama_chat", fake_chat)
+    path, gt = _cellpose_blob_setup(tmp_path)
+    params = _base_params(tmp_path, engine="cellpose", image_path=str(path), resize_size=40)
+
+    events = []
+    controller = PredictController()
+    t = controller.run_tuning_loop_async(
+        params, gt, strategy="llm", model="qwen2.5:7b", patience=10,
+        on_step=lambda step: events.append(("step", step)),
+        on_finish=lambda reason, detail: events.append(("finish", reason, detail)))
+    t.join(timeout=10)
+
+    assert calls == ["qwen2.5:7b"]
+    assert events[-1] == ("finish", "no_more_suggestions", "looks fine already.")
+
+
+def test_run_tuning_loop_async_llm_strategy_without_model_falls_back_to_advisor(tmp_path, monkeypatch):
+    """strategy="llm" with no model name given (e.g. the UI's own guard
+    failed to catch it) must not crash — it degrades to the rule-based
+    advisor, same as if strategy="advisor" had been requested."""
+    import napari_app.engines as engines
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+    monkeypatch.setattr(engines, "cellpose_available", lambda: True)
+    path, gt = _cellpose_blob_setup(tmp_path)
+    params = _base_params(tmp_path, engine="cellpose", image_path=str(path), resize_size=40)
+
+    events = []
+    controller = PredictController()
+    t = controller.run_tuning_loop_async(
+        params, gt, strategy="llm", model=None, patience=1,
+        on_step=lambda step: events.append(step),
+        on_finish=lambda reason, detail: events.append(reason))
+    t.join(timeout=10)
+
+    assert events[-1] == "plateau"   # same outcome as the advisor-strategy test above
 
 
 # ── z-stack / time-lapse orchestration (_predict_volume / run_volume_prediction_async) ──
