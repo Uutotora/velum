@@ -312,19 +312,20 @@ class GuideScreen(QWidget):
 
     # ── nav rail ─────────────────────────────────────────────────────────────
     def _build_nav(self) -> QWidget:
+        # No enclosing card here (no background/border/radius wrapper at
+        # all) — a big panel-sized "card" behind content that already has
+        # its own distinct rows/blocks is a redundant extra layer of boxing
+        # ("looks like unstyled HTML div soup" was the exact complaint).
+        # Home/Projects never wrap a whole *column* in a card either — only
+        # the individual cards within it are boxed, floating directly on
+        # the page canvas. Matching that here: just a plain, fixed-width
+        # layout column: the search field and nav rows provide their own
+        # (correct) visual structure without a container drawn around them.
         t = self._t
-        card = QFrame()
-        card.setObjectName("GuideNavCard")
-        card.setFixedWidth(self.NAV_WIDTH)
-        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        card.setStyleSheet(f"#GuideNavCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}")
-        # No soft_shadow(): a full-height panel doesn't read as "elevated" the
-        # way a small floating card does — the shadow just smears into a
-        # dark halo against an already-dark page background. A plain border
-        # (as Workspace's own full-height panels use) gives the same
-        # separation without the murk.
-        v = QVBoxLayout(card)
-        v.setContentsMargins(14, 14, 14, 14)
+        panel = QWidget()
+        panel.setFixedWidth(self.NAV_WIDTH)
+        v = QVBoxLayout(panel)
+        v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(10)
 
         search = QLineEdit()
@@ -336,7 +337,7 @@ class GuideScreen(QWidget):
 
         inner = QWidget()
         iv = QVBoxLayout(inner)
-        iv.setContentsMargins(0, 4, 6, 8)
+        iv.setContentsMargins(0, 4, 8, 8)
         iv.setSpacing(1)
         self._category_headers: dict[str, QLabel] = {}
         current_cat: Optional[str] = None
@@ -353,7 +354,7 @@ class GuideScreen(QWidget):
             iv.addWidget(row)
         iv.addStretch(1)
         v.addWidget(scroll(inner), 1)
-        return card
+        return panel
 
     def _nav_row(self, article: guide_content.Article) -> tuple[QFrame, QLabel]:
         t = self._t
@@ -405,27 +406,19 @@ class GuideScreen(QWidget):
 
     # ── content ──────────────────────────────────────────────────────────────
     def _build_content(self) -> QWidget:
-        # No soft_shadow() here: all but the first of these cards start
-        # hidden (QStackedWidget only shows the current page), and a
-        # QGraphicsDropShadowEffect installed on a still-hidden widget
-        # leaves Qt's effect-source cache stale once it's later shown —
-        # the same rendering bug already hit (and fixed the same way, by
-        # not installing it) for the Projects list view; see
-        # docstudio/CHANGELOG.md 2026-07-08. The border alone still gives
-        # the card definition.
+        # No enclosing card here either (see _build_nav) — the article text
+        # and its individual content blocks (steps/table/shortcuts/callout/
+        # FAQ, each already boxed on its own) sit directly on the page
+        # canvas, the same way Home's body text does.
         t = self._t
         self._content_stack = QStackedWidget()
         for article in guide_content.ARTICLES:
             inner = _render_article(t, article, self._run_action)
-            card = QFrame()
-            card.setObjectName("GuideContentCard")
-            card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-            card.setStyleSheet(
-                f"#GuideContentCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}")
-            cv = QVBoxLayout(card)
-            cv.setContentsMargins(28, 26, 28, 30)
-            cv.addWidget(inner)
-            page = scroll(card)
+            wrap = QWidget()
+            wv = QVBoxLayout(wrap)
+            wv.setContentsMargins(0, 4, 10, 0)  # top breathing room, scrollbar clearance
+            wv.addWidget(inner)
+            page = scroll(wrap)
             self._article_pages[article.id] = page
             self._content_stack.addWidget(page)
         return self._content_stack

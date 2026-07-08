@@ -5,6 +5,40 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-09 — Guide & Docs: dropped the redundant outer "card" entirely
+
+A second round of direct user feedback on the previous day's contrast fix:
+still looked like a backing layer behind the content, "as if you'd pasted in
+raw HTML." Right call, wrong fix — the token/shadow pass treated the
+*symptom* (murky colour), not the actual cause.
+
+The real problem: `GuideScreen` wrapped the **entire** nav rail and the
+**entire** content pane each in one big bordered/filled panel — and *within*
+that, the individual step/table/shortcut blocks were *also* boxed. Two
+nested layers of "this is a boxed region," one of them serving no purpose
+except to sit decoratively behind content that was already visually
+structured on its own. Home and Projects never do this — every card there
+is small and sized to its own content, floating directly on the page
+canvas with visible gaps between; there's never an outer card whose only
+job is to contain other cards.
+
+Fix: removed the outer panel entirely from both `_build_nav()` and
+`_build_content()` — no background, no border, no radius, just a plain
+layout column. The search field, nav rows, and each content block (steps,
+shortcuts, comparison table, callout, FAQ accordion) keep their own
+(correct) styling and now float directly on the page background, the same
+way Home's cards and body text already do. Confirmed via fresh offscreen
+screenshots in both themes — reads as one cohesive page now, not boxes
+inside a box inside a box.
+
+Verified: `studio/tests` green (no test changes needed — nothing asserted
+on the removed panels' styling specifically, only on behaviour, which is
+unchanged). Confirmed visually via real offscreen screenshots, both themes.
+Not verified: how this reads on the user's actual display — asking for
+confirmation after this pass.
+
+---
+
 ## 2026-07-08 — A real crash fixed, Guide gets a Close button, and a contrast fix
 
 Direct user feedback on a real (non-offscreen) run, the same day Guide & Docs
