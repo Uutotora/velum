@@ -200,6 +200,52 @@ def test_active_project_survives_theme_toggle(app, controller):
     assert project.name in win._screens["workspace"]._crumb.text()
 
 
+# ── regression: a project created elsewhere must show up immediately ──────────
+# (Home/Projects are built once and kept alive across navigation -- the stack
+# just swaps pages -- so without an explicit refresh, a project created via
+# the New Project dialog wouldn't appear until the whole app was restarted.)
+def test_navigate_refreshes_home_and_projects_screens(app, empty_controller):
+    from PyQt6.QtWidgets import QFrame
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=empty_controller)
+
+    def rrows():
+        return [f for f in win._screens["home"].findChildren(QFrame) if f.objectName() == "RRow"]
+
+    def pcards():
+        return [f for f in win._screens["projects"].findChildren(QFrame) if f.objectName() == "PCard"]
+
+    assert rrows() == []
+    assert pcards() == []  # only the ghost "New Project" card, which isn't a PCard
+
+    empty_controller.store.create("Late Arrival")
+    win.navigate("home")
+    assert len(rrows()) == 1
+    win.navigate("projects")
+    assert len(pcards()) == 1
+
+
+def test_creating_a_project_via_dialog_shows_up_immediately(app, empty_controller):
+    """End-to-end regression for the exact bug reported: create -> navigate
+    away and back -> the new project is there without restarting the app."""
+    from PyQt6.QtWidgets import QFrame
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=empty_controller)
+
+    dlg = win._new_project_dialog
+    dlg.open()
+    dlg._set_name("Freshly Created")
+    dlg._go_next()
+    dlg._go_next()
+    dlg._go_next()  # creates + navigates to workspace
+
+    win.navigate("home")
+    home_rows = [f for f in win._screens["home"].findChildren(QFrame) if f.objectName() == "RRow"]
+    assert len(home_rows) == 1
+
+    win.navigate("projects")
+    project_cards = [f for f in win._screens["projects"].findChildren(QFrame) if f.objectName() == "PCard"]
+    assert len(project_cards) == 1
+
+
 def test_assistant_and_logs_toggle_as_overlays(app, controller):
     # isHidden() is the explicit flag; isVisible() needs the top-level shown.
     win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)

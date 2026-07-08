@@ -325,6 +325,8 @@ class Toast(QFrame):
         self._title = label("Segmentation complete", 13, t["text"], 600)
         col.addWidget(self._title)
         self._subtitle = label("247 cells · F1 0.94 vs ground truth · 3.2 s", 11.5, t["text_muted"])
+        self._subtitle.setWordWrap(True)
+        self._subtitle.setMaximumWidth(280)  # wrap long messages instead of clipping/overflowing
         col.addWidget(self._subtitle)
         row.addLayout(col)
         self._hide_timer = QTimer(self)

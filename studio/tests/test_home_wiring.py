@@ -155,6 +155,21 @@ def test_open_github_noop_when_no_remote(monkeypatch):
     assert calls == []
 
 
+# ── refresh() picks up projects created elsewhere ─────────────────────────────
+def test_refresh_shows_a_project_created_after_construction(app, empty_controller):
+    from PyQt6.QtWidgets import QFrame, QLabel
+    home = _home(app, empty_controller)
+    assert len([f for f in home.findChildren(QFrame) if f.objectName() == "RRow"]) == 0
+
+    empty_controller.store.create("Brand New Project")
+    home.refresh()
+
+    rows = [f for f in home.findChildren(QFrame) if f.objectName() == "RRow"]
+    assert len(rows) == 1
+    labels = [lb.text() for lb in rows[0].findChildren(QLabel)]
+    assert any("Brand New Project" in text for text in labels)
+
+
 # ── hover-lift wiring ────────────────────────────────────────────────────────
 def test_quick_cards_and_recent_rows_get_hover_shadow(app, controller):
     home = _home(app, controller)

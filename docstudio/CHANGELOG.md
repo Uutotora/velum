@@ -5,6 +5,39 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-08 — Fix: a newly created project didn't show up until restart
+
+User-reported: creating a project via the New Project modal didn't add it to
+Home's "Recent projects" or the Projects grid until the whole app was
+relaunched. Root cause: `HomeScreen`/`ProjectsScreen` are built once and kept
+alive across navigation (`StudioWindow.navigate()` just swaps the visible
+`QStackedWidget` page) — so their content reflected whatever the store looked
+like at construction time, and nothing ever told them to rebuild afterwards.
+
+- `HomeScreen.refresh()` / `ProjectsScreen.refresh()` (new) rebuild the
+  recent-projects list / the grid + header counts from the store's current
+  state. `StudioWindow.navigate()` now calls a screen's `refresh()` (if it
+  has one) every time it becomes the active page — so switching to Home or
+  Projects always shows current data, not just right after a create.
+  `ProjectsScreen.refresh()` preserves whatever search/favourites-only
+  filter was already active.
+- Also fixed while verifying this: `Toast`'s subtitle could get clipped
+  instead of wrapping for a long project name + engine combination
+  (`setWordWrap` + a max width, rather than relying on `adjustSize()` timing
+  after a dynamic `setText()`).
+
+Verified: reproduced the exact bug first (constructed the window, created a
+project, counted rendered project-card/row widgets before and after — stayed
+at 0 after create+navigate without the fix, confirming the root cause), then
+confirmed the fix with the same reproduction. Three new regression tests
+(`studio/tests`, now 118 total, all green): `HomeScreen`/`ProjectsScreen`
+picking up a project created directly through the store, and a full
+app-level end-to-end test creating a project through the real dialog and
+navigating to both Home and Projects. Repo-root throwaway-venv check (`pip
+install --group test` only) still green. Offscreen-screenshot-reconfirmed
+(`QWidget.grab()`): the new project now appears immediately in Home's recent
+list after creation, and the toast wraps correctly for a long name.
+
 ## 2026-07-08 — Home screen: every element real, + the New Project modal
 
 Follow-up pass focused entirely on Home (Projects tab intentionally left

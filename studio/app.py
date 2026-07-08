@@ -164,6 +164,9 @@ class StudioWindow(QMainWindow):
             return
         if key in self._screens:
             screen = self._screens[key]
+            refresh = getattr(screen, "refresh", None)
+            if refresh is not None:
+                refresh()
             self._stack.setCurrentWidget(screen)
             self._sidebar.set_active(key)
             if key != "workspace":

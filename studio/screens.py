@@ -128,12 +128,31 @@ class HomeScreen(QWidget):
         left.setSpacing(24)
         self._quick_grid = self._quick()
         left.addLayout(self._quick_grid)
-        left.addWidget(self._recent_section())
+        self._recent_widget = self._recent_section()
+        left.addWidget(self._recent_widget)
         left.addStretch(1)
+        self._left = left
         grid.addLayout(left, 1)
         grid.addLayout(self._aside(), 0)
 
         outer.addWidget(scroll(body))
+
+    def refresh(self) -> None:
+        """Rebuild the recent-projects list from the store's current state.
+
+        HomeScreen is built once and kept alive across navigation (the stack
+        just swaps the visible page), so anything that changes the store
+        elsewhere -- most importantly creating a project -- needs this
+        called before Home is shown again, or it'd still show what the store
+        looked like at construction time.
+        """
+        idx = self._left.indexOf(self._recent_widget)
+        old = self._recent_widget
+        self._recent_widget = self._recent_section()
+        self._left.insertWidget(idx, self._recent_widget)
+        self._left.removeWidget(old)
+        old.setParent(None)
+        old.deleteLater()
 
     def _quick(self) -> QGridLayout:
         t = self._t
@@ -320,12 +339,9 @@ class ProjectsScreen(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        cta = PillButton("New Project", t, "primary", "plus")
-        cta.clicked.connect(lambda: on_navigate("workspace"))
-        n_projects, n_images, n_engines = controller.summary()
-        subtitle = (f"{n_projects} project{'s' if n_projects != 1 else ''} · "
-                    f"{n_images} images · {n_engines} engine{'s' if n_engines != 1 else ''}")
-        outer.addWidget(page_header("Projects", subtitle, t, cta))
+        self._outer = outer
+        self._header_widget = self._build_header()
+        outer.addWidget(self._header_widget)
         outer.addWidget(self._toolbar())
 
         body = QWidget()
@@ -337,6 +353,32 @@ class ProjectsScreen(QWidget):
         host.addStretch(1)
         outer.addWidget(scroll(body))
 
+        self._populate_grid()
+
+    def _build_header(self) -> QWidget:
+        t = self._t
+        cta = PillButton("New Project", t, "primary", "plus")
+        cta.clicked.connect(lambda: self._nav("workspace"))
+        n_projects, n_images, n_engines = self._controller.summary()
+        subtitle = (f"{n_projects} project{'s' if n_projects != 1 else ''} · "
+                    f"{n_images} images · {n_engines} engine{'s' if n_engines != 1 else ''}")
+        return page_header("Projects", subtitle, t, cta)
+
+    def refresh(self) -> None:
+        """Recompute the header counts and repopulate the grid.
+
+        ProjectsScreen is built once and kept alive across navigation (see
+        HomeScreen.refresh for why), so anything that changes the store
+        elsewhere needs this called before Projects is shown again. The
+        current search query / favourites-only filter are preserved.
+        """
+        idx = self._outer.indexOf(self._header_widget)
+        old = self._header_widget
+        self._header_widget = self._build_header()
+        self._outer.insertWidget(idx, self._header_widget)
+        self._outer.removeWidget(old)
+        old.setParent(None)
+        old.deleteLater()
         self._populate_grid()
 
     def _toolbar(self) -> QWidget:
