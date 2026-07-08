@@ -5,6 +5,99 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-08 — Guide & Docs: real in-app documentation, not a no-op
+
+Took the P2 backlog item "Guide & Docs screen (currently a no-op sidebar
+item)" end to end. Home's "Documentation" and "Getting started guide"
+resource links used to shell out to `QDesktopServices.openUrl()` on raw
+`.md` files — `README.md`, and, worse, `docstudio/OVERVIEW.md`, an internal
+agent-facing dev doc with no business being shown to a microscopist. Neither
+that nor the sidebar's "Guide & Docs" row (a literal no-op,
+`open_guide.connect(lambda: None)`) held up as a real product surface.
+
+- **`studio/guide_content.py`** — pure content, no Qt (mirrors `demo.py`'s
+  spirit but is real, shipping copy, not placeholder data): 10 articles
+  across 5 topics (Guide · Working with projects · Segmenting · Training ·
+  Analysis), written for the product's actual audience — microscopists, not
+  ML engineers (repo-root `AGENTS.md`) — and checked line-by-line against
+  what's actually implemented today (exact engine keys/labels from
+  `project.py`, the New Project wizard's real 3 step titles, the two real
+  key bindings in `app.py`, the Segment workspace's actual panels from
+  `workspace.py`) rather than aspirational copy. Assistant isn't documented
+  at all — it isn't wired yet, and a diagnostic chat article that doesn't
+  diagnose anything would be worse than no article.
+- **`studio/guide_screen.py`** — `GuideScreen`: a searchable article nav rail
+  + the selected article, composed entirely from existing atoms
+  (`components.py`) and plain `QLabel`/`QFrame`, the same idiom every other
+  screen already uses, rather than a rich-text engine — keeps typography and
+  colour on the same tokens in both themes instead of fighting a second
+  rendering paradigm's own defaults. Getting Started's steps are real
+  actions, not just prose: "New Project" and "Open a sample" call the exact
+  same callbacks `HomeScreen`'s quick cards do; "Go to Segment/Dashboard"
+  navigates for real; "Choosing an engine" jumps to that article in place.
+  Constructor mirrors `HomeScreen`/`ProjectsScreen` exactly (same 4
+  callbacks) so wiring it into `app.py` was a one-line addition to
+  `_STACK_KEYS` + the screens dict, not new plumbing.
+- **Wiring**: sidebar's `open_guide` signal now navigates to `"guide"`
+  instead of a no-op; `StudioWindow.navigate()` gained a `"guide:<id>"`
+  prefix so a resource link can deep-link straight to an article (Getting
+  started guide → the `getting-started` article) without changing the
+  `Callable[[str], None]` signature every screen already takes.
+  `_open_local_doc` (the raw-file-opening helper) is gone; GitHub is the one
+  resource link still legitimately external.
+- **`components.Accordion`** gained an additive `caps: bool = True` parameter
+  (default preserves all 4 existing call sites byte-for-byte) — FAQ questions
+  needed a full-sentence title, and the existing all-caps 11.5px micro-label
+  treatment reads as shouting for a question like "Do I need a GPU?".
+- **A real rendering bug, caught only by an actual offscreen screenshot, not
+  by tests passing:** every paragraph/bullet/heading in the new screen
+  painted with a second, tightly-fitted rounded-rect box around just its own
+  text. Root cause: several card frames set their background/border/radius
+  via an *unqualified* `setStyleSheet("background:…;border:…")` (no
+  selector) — Qt Style Sheets cascade an unqualified rule to every
+  descendant widget, and `QLabel` paints border/background natively (it's a
+  `QFrame` subclass), so each label re-painted the same rounded box at its
+  own small bounds. Invisible when a card's fill is opaque and identical to
+  its children's inherited fill (the pre-existing, still-unfixed instances
+  of this same pattern in `extra_screens.py`'s cards and
+  `HomeScreen._card()`/its "Tip" callout — confirmed by an offscreen
+  screenshot of Home showing the identical double-box on the Tip card's
+  text, just easy to miss against small single-line labels); glaring here
+  because the callout uses a translucent `primary_weak` fill that visibly
+  doubles up, and because multi-line prose makes each stray box's rounded
+  corners obvious. Reproduced in isolation (a minimal QFrame+QLabel repro,
+  confirmed by scanning rendered pixels for the border colour) and fixed the
+  same way `HomeScreen._quick_card`'s `#QCard` / `ProjectsScreen`'s `#PCard`
+  already do it correctly: scope every card's stylesheet to its own
+  `#ObjectName` selector instead of a bare/unqualified one, which stops the
+  cascade at that widget. Left the pre-existing Home/Models/Dashboard
+  instances alone (invisible in current usage, out of scope for this
+  change) rather than drive-by refactoring unrelated screens.
+- Also fixed along the way: a `QGraphicsDropShadowEffect` installed on the
+  per-article content cards while 9 of the 10 start hidden inside a
+  `QStackedWidget` — the exact bug class already diagnosed for the Projects
+  list view (stale effect-source cache once later shown) — same fix,
+  don't install the shadow there; the border alone still gives definition.
+
+Verified: `studio/tests` green (166 tests, 32 net new — 35 added across the
+two new files plus 4 app-wiring/sidebar tests, minus 3 removed
+`_open_local_doc` tests that no longer apply: pure-content tests for the
+article data — unique ids, step actions only reference real nav
+keys/articles, no Assistant content, shortcuts match `app.py`'s actual key
+bindings; headless screen tests — nav/search/selection, block renderers,
+Getting Started's steps firing the real callbacks; sidebar/app wiring for
+`open_guide` and `"guide:<id>"`). The repo-root throwaway-venv light-`test`-
+group check passes clean (no PyQt6/torch/napari pulled in — the new pure
+`guide_content` tests run for real there, the Qt ones skip via
+`importorskip`, same as every other Studio Qt test). The rendering bug above
+was caught and confirmed fixed via real offscreen screenshots
+(`QT_QPA_PLATFORM=offscreen`, `QWidget.grab()`), in both themes, across
+every article. Not verified here: on-screen behaviour with a real display
+(font hinting, animation smoothness) and real model/file-system integration
+(none of this touches the ML core).
+
+---
+
 ## 2026-07-08 — Projects tab: three more real rendering bugs, from a live screenshot
 
 A same-day follow-up after a real (non-offscreen) screenshot of the running

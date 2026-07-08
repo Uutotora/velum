@@ -373,9 +373,16 @@ class GroupLabel(QLabel):
 
 
 class Accordion(QFrame):
-    """A collapsible section with a leading icon, title, chevron, and body."""
+    """A collapsible section with a leading icon, title, chevron, and body.
 
-    def __init__(self, title: str, t: dict, lead: str = "check", open_: bool = False):
+    ``caps=True`` (the default) is the original micro-label treatment for
+    short section headers ("GROUND TRUTH", "BATCH PREDICTION"). Pass
+    ``caps=False`` for a full-sentence title — e.g. an FAQ question — which
+    reads badly shouted in all-caps at 11.5px.
+    """
+
+    def __init__(self, title: str, t: dict, lead: str = "check", open_: bool = False,
+                 caps: bool = True):
         super().__init__()
         self._t = t
         self._open = open_
@@ -396,9 +403,13 @@ class Accordion(QFrame):
         hr.setSpacing(9)
         licon = QLabel()
         licon.setPixmap(icons.pixmap(lead, t["signal"], 15))
-        title_lb = QLabel(title.upper())
-        title_lb.setStyleSheet(
-            f"color:{t['text_subtle']}; font-size:11.5px; font-weight:600; letter-spacing:0.5px;")
+        title_lb = QLabel(title.upper() if caps else title)
+        title_lb.setWordWrap(not caps)
+        if caps:
+            title_lb.setStyleSheet(
+                f"color:{t['text_subtle']}; font-size:11.5px; font-weight:600; letter-spacing:0.5px;")
+        else:
+            title_lb.setStyleSheet(f"color:{t['text']}; font-size:13px; font-weight:600;")
         self._chev = QLabel()
         self._chev.setPixmap(icons.pixmap("chevron" if not open_ else "chevron_down", t["text_muted"], 14))
         hr.addWidget(licon)

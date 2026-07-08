@@ -41,6 +41,7 @@ from studio.new_project_dialog import NewProjectDialog
 from studio.screens import HomeScreen, ProjectsScreen
 from studio.workspace import WorkspaceScreen
 from studio.extra_screens import ModelsScreen, DashboardScreen
+from studio.guide_screen import GuideScreen
 from studio.overlays import AssistantDrawer, LogsConsole, CommandPalette, Toast
 from studio.window_chrome import (
     TitleBar, install_corner_grips, layout_corner_grips,
@@ -60,7 +61,7 @@ _NAV = [
     ("assistant", "assistant", "Assistant",      "Tools"),
     ("logs",      "log",       "Logs",           "Tools"),
 ]
-_STACK_KEYS = ("home", "projects", "workspace", "train", "dashboard")
+_STACK_KEYS = ("home", "projects", "workspace", "train", "dashboard", "guide")
 
 
 def load_fonts() -> str:
@@ -124,7 +125,7 @@ class StudioWindow(QMainWindow):
         self._sidebar = Sidebar(_NAV, t)
         self._sidebar.navigate.connect(self.navigate)
         self._sidebar.toggle_theme.connect(self.toggle_theme)
-        self._sidebar.open_guide.connect(lambda: None)  # design skeleton: no-op
+        self._sidebar.open_guide.connect(lambda: self.navigate("guide"))
         row.addWidget(self._sidebar)
 
         self._new_project_dialog = NewProjectDialog(
@@ -139,6 +140,8 @@ class StudioWindow(QMainWindow):
             "workspace": WorkspaceScreen(t),
             "train": ModelsScreen(t),
             "dashboard": DashboardScreen(t),
+            "guide": GuideScreen(t, self._projects, self.navigate, self._open_project,
+                                 self._new_project_dialog.open),
         }
         # survives theme-toggle rebuilds, which recreate the workspace screen
         self._screens["workspace"].set_active_project(self._projects.get_active())
@@ -157,6 +160,9 @@ class StudioWindow(QMainWindow):
 
     # ── navigation ──────────────────────────────────────────────────────────
     def navigate(self, key: str) -> None:
+        if key.startswith("guide:"):
+            self._screens["guide"].open_article(key.split(":", 1)[1])
+            key = "guide"
         if key == "assistant":
             self._toggle_drawer(self._assistant)
             return

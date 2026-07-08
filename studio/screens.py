@@ -33,12 +33,6 @@ from studio.components import (
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _open_local_doc(*relative_parts: str) -> None:
-    path = _REPO_ROOT.joinpath(*relative_parts)
-    if path.exists():
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-
-
 def _github_url() -> Optional[str]:
     """The real origin remote, converted to an https:// web URL (or None)."""
     try:
@@ -279,8 +273,8 @@ class HomeScreen(QWidget):
 
         res = self._card("Resources")
         for name, icon_name, ext, on_click in [
-            ("Documentation", "guide", True, lambda: _open_local_doc("README.md")),
-            ("Getting started guide", "guide", False, lambda: _open_local_doc("docstudio", "OVERVIEW.md")),
+            ("Documentation", "guide", False, lambda: self._nav("guide")),
+            ("Getting started guide", "guide", False, lambda: self._nav("guide:getting-started")),
             ("Ask the Assistant", "assistant", False, lambda: self._nav("assistant")),
             ("GitHub", "settings", True, _open_github)]:
             res.layout().addWidget(self._res_link(name, icon_name, ext, on_click))

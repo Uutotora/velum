@@ -1,8 +1,9 @@
 """Headless tests for Home screen's clickable elements (studio/screens.py).
 
-Offscreen Qt, no napari/torch. External-open resource links (Documentation /
-Getting started guide / GitHub) are verified without ever really invoking
-QDesktopServices — that would try to open a browser/file viewer for real.
+Offscreen Qt, no napari/torch. Documentation / Getting started guide now open
+the in-app Guide screen (studio/guide_screen.py) rather than an external .md
+file; GitHub is the one resource link still verified without really invoking
+QDesktopServices — that would try to open a browser for real.
 """
 import os
 
@@ -13,7 +14,8 @@ import pytest
 pytest.importorskip("PyQt6")
 screens = pytest.importorskip("studio.screens")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication, QFrame, QLabel
 
 from studio import theme
 from studio.project import ProjectStore
@@ -111,27 +113,38 @@ def test_ask_the_assistant_navigates(app, controller):
     assert navigated == ["assistant"]
 
 
-def test_open_local_doc_opens_existing_real_file(monkeypatch):
-    calls = []
-    monkeypatch.setattr(screens.QDesktopServices, "openUrl", lambda url: calls.append(url.toString()))
-    screens._open_local_doc("README.md")
-    assert len(calls) == 1
-    assert calls[0].endswith("README.md")
+def _find_resource_row(home, link_text: str) -> QFrame:
+    """The real ``_res_link`` row whose label reads ``link_text`` — not a
+    re-fabricated stand-in — so this actually exercises HomeScreen's own
+    ``_aside()`` wiring, the same technique as
+    ``test_refresh_shows_a_project_created_after_construction`` below.
+
+    Direct children only: ``QScrollArea`` is itself a ``QFrame`` and
+    recursively contains every label on the page, so an unrestricted
+    ``findChildren(QLabel)`` matches that outer container first, not the
+    small row — and calling the *real* (non-monkeypatched)
+    ``mouseReleaseEvent`` on an arbitrary Qt widget with ``None`` instead of
+    a real ``QMouseEvent`` segfaults.
+    """
+    for frame in home.findChildren(QFrame):
+        direct_labels = frame.findChildren(QLabel, options=Qt.FindChildOption.FindDirectChildrenOnly)
+        if any(lb.text() == link_text for lb in direct_labels):
+            return frame
+    raise AssertionError(f"no resource row labelled {link_text!r}")
 
 
-def test_open_local_doc_noop_for_missing_file(monkeypatch):
-    calls = []
-    monkeypatch.setattr(screens.QDesktopServices, "openUrl", lambda url: calls.append(url))
-    screens._open_local_doc("does_not_exist_anywhere.md")
-    assert calls == []
+def test_documentation_link_opens_the_guide_screen(app, controller):
+    navigated = []
+    home = _home(app, controller, on_navigate=navigated.append)
+    _find_resource_row(home, "Documentation").mouseReleaseEvent(None)
+    assert navigated == ["guide"]
 
 
-def test_getting_started_guide_points_at_real_overview_doc(monkeypatch):
-    calls = []
-    monkeypatch.setattr(screens.QDesktopServices, "openUrl", lambda url: calls.append(url.toString()))
-    screens._open_local_doc("docstudio", "OVERVIEW.md")
-    assert len(calls) == 1
-    assert calls[0].endswith("OVERVIEW.md")
+def test_getting_started_guide_link_deep_links_to_the_getting_started_article(app, controller):
+    navigated = []
+    home = _home(app, controller, on_navigate=navigated.append)
+    _find_resource_row(home, "Getting started guide").mouseReleaseEvent(None)
+    assert navigated == ["guide:getting-started"]
 
 
 def test_github_url_is_none_or_a_real_https_url():

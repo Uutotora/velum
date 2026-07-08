@@ -116,7 +116,17 @@ When you finish a tab: log it in `CHANGELOG.md`, tick it here, update
 ## P2 — polish & platform
 
 - [ ] Live theme repaint without a full rebuild; persist the choice.
-- [ ] Guide & Docs screen (currently a no-op sidebar item).
+- [x] **Guide & Docs screen** — done (2026-07-08). A real, in-app documentation
+  surface (`studio/guide_content.py` + `guide_screen.py`): searchable article
+  nav (5 topics, 10 articles) + the selected article, reached from the
+  sidebar's "Guide & Docs" row (previously wired to a no-op) and from Home's
+  Documentation / Getting started guide resource links (previously
+  `QDesktopServices.openUrl`'d raw `.md` files — `README.md` /
+  `docstudio/OVERVIEW.md`, an internal dev doc that had no business being
+  user-facing). Getting Started's steps trigger the same real callbacks
+  Home's quick cards use (New Project, Open a sample, navigate a tab) rather
+  than being purely descriptive. Assistant is deliberately not documented —
+  it isn't wired yet (see below).
 - [ ] Onboarding / empty states for a fresh install.
 - [ ] Native macOS rounded corners + shadow via pyobjc (drop the mask) — optional.
 - [ ] Settings screen (device, storage, paths, defaults).

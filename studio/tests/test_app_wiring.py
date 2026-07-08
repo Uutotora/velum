@@ -78,12 +78,30 @@ def test_accordion_toggles(app):
     assert acc._open
 
 
+def test_accordion_caps_false_keeps_a_full_sentence_title_unshouted(app):
+    from PyQt6.QtWidgets import QLabel
+    acc = components.Accordion("Do I need a GPU?", theme.LIGHT, caps=False)
+    titles = [lb.text() for lb in acc.findChildren(QLabel)]
+    assert "Do I need a GPU?" in titles
+    assert "DO I NEED A GPU?" not in titles
+
+
 def test_sidebar_navigates(app):
     seen = []
     sb = components.Sidebar(app_mod._NAV, theme.DARK)
     sb.navigate.connect(seen.append)
     sb._items["workspace"].click()
     assert seen == ["workspace"]
+
+
+def test_sidebar_guide_button_emits_open_guide(app):
+    seen = []
+    sb = components.Sidebar(app_mod._NAV, theme.DARK)
+    sb.open_guide.connect(lambda: seen.append(True))
+    guide_buttons = [w for w in sb.findChildren(components._NavItem) if w.key == "__guide__"]
+    assert len(guide_buttons) == 1
+    guide_buttons[0].click()
+    assert seen == [True]
 
 
 # ── paint ────────────────────────────────────────────────────────────────────
@@ -345,6 +363,19 @@ def test_navigation_switches_stack_screens(app, controller):
     assert win._stack.currentWidget() is win._screens["dashboard"]
     win.navigate("workspace")
     assert win._stack.currentWidget() is win._screens["workspace"]
+
+
+def test_sidebars_guide_and_docs_row_opens_the_guide_screen(app, controller):
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+    win._sidebar.open_guide.emit()
+    assert win._stack.currentWidget() is win._screens["guide"]
+
+
+def test_navigate_guide_colon_id_deep_links_into_a_specific_article(app, controller):
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+    win.navigate("guide:engines")
+    assert win._stack.currentWidget() is win._screens["guide"]
+    assert win._screens["guide"]._current_id == "engines"
 
 
 def test_opening_a_project_sets_active_and_updates_workspace(app, controller):
