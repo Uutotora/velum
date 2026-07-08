@@ -62,12 +62,13 @@ tab" in `ARCHITECTURE.md`:
 
 ## Git — Studio lives on its OWN branch; NEVER merge to `main`
 
-- **All Studio work stays on the Studio branch** (`worktree-studio-app`).
+- **All Studio work stays on the one Studio branch** (`worktree-studio-app`).
   `main` is the classic napari app plus other important, unrelated work — **do
-  NOT merge Studio into `main`, and don't open PRs targeting `main`.**
-- Commit Studio changes on the Studio branch (or a short-lived sub-branch you
-  merge back **into the Studio branch**), and **always push** so local and
-  remote stay in sync — never leave work only local.
+  NOT merge Studio into `main`.**
+- **Commit straight to the Studio branch and push. Do NOT create a new branch
+  and do NOT open a PR** — CI runs on every push to every branch (`on: push:
+  branches: ["**"]`), so a PR buys nothing here and only piles up. Keep local
+  and remote in sync; never leave work only local.
 - Test before committing: `QT_QPA_PLATFORM=offscreen <python> -m pytest studio/tests -q`.
 - Log the tab in `docstudio/CHANGELOG.md`, tick it in `docstudio/BACKLOG.md`.
 
