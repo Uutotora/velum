@@ -134,7 +134,8 @@ class StudioWindow(QMainWindow):
         self._screens = {
             "home": HomeScreen(t, self._projects, self.navigate, self._open_project,
                                self._new_project_dialog.open),
-            "projects": ProjectsScreen(t, self._projects, self.navigate, self._open_project),
+            "projects": ProjectsScreen(t, self._projects, self.navigate, self._open_project,
+                                      self._new_project_dialog.open),
             "workspace": WorkspaceScreen(t),
             "train": ModelsScreen(t),
             "dashboard": DashboardScreen(t),

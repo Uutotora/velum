@@ -165,11 +165,19 @@ class ProjectController:
             self.store.save(project, touch=False)
 
     # ── queries ──────────────────────────────────────────────────────────────
-    def list_projects(self, query: str = "", favorites_only: bool = False) -> list[Project]:
-        """Projects matching ``query`` (name/description/tags/engine), newest first."""
+    def list_projects(self, query: str = "", favorites_only: bool = False,
+                       engines: Optional[set[str]] = None) -> list[Project]:
+        """Projects matching ``query`` (name/description/tags/engine), newest first.
+
+        ``engines``, when non-empty, restricts to projects whose engine key is
+        in the set (the Projects tab's "Filter" popover) — composes with
+        ``query``/``favorites_only``.
+        """
         projects = self.store.list()
         if favorites_only:
             projects = [p for p in projects if p.favorite]
+        if engines:
+            projects = [p for p in projects if p.engine in engines]
         q = query.strip().lower()
         if q:
             def matches(p: Project) -> bool:

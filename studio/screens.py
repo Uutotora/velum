@@ -13,16 +13,16 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from PyQt6.QtCore import Qt, QSize, QUrl
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QAction
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout,
-    QScrollArea, QLineEdit, QSizePolicy, QStackedWidget, QToolButton,
+    QScrollArea, QLineEdit, QSizePolicy, QStackedWidget, QToolButton, QMenu,
 )
 
 from studio import icons
 from studio import theme
 from studio import project_controller
-from studio.project import ENGINE_KIND
+from studio.project import ENGINE_KIND, ENGINE_LABELS, ENGINES
 from studio.paint import nuclei_pixmap, NucleiView
 from studio.motion import install_hover_lift
 from studio.components import (
@@ -325,16 +325,23 @@ class HomeScreen(QWidget):
 
 
 # ── Projects ─────────────────────────────────────────────────────────────────
+_SCOPES = ("all", "favorites", "shared")
+
+
 class ProjectsScreen(QWidget):
     def __init__(self, t: dict, controller: "project_controller.ProjectController",
-                 on_navigate: Callable[[str], None], on_open: Callable[[str], None]):
+                 on_navigate: Callable[[str], None], on_open: Callable[[str], None],
+                 on_new_project: Callable[[], None]):
         super().__init__()
         self._t = t
         self._controller = controller
         self._nav = on_navigate
         self._open = on_open
+        self._new_project = on_new_project
         self._query = ""
-        self._favorites_only = False
+        self._scope = "all"
+        self._engines: set[str] = set()
+        self._view = "grid"
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -344,33 +351,49 @@ class ProjectsScreen(QWidget):
         outer.addWidget(self._header_widget)
         outer.addWidget(self._toolbar())
 
+        self._empty_label = label("", 12.5, t["text_muted"])
+        self._empty_label.setWordWrap(True)
+        self._empty_label.setContentsMargins(34, 0, 34, 16)
+        self._empty_label.setVisible(False)
+        outer.addWidget(self._empty_label)
+
         body = QWidget()
         host = QVBoxLayout(body)
         host.setContentsMargins(34, 0, 34, 40)
-        self._grid = QGridLayout()
+        self._grid_host = QWidget()
+        self._grid = QGridLayout(self._grid_host)
+        self._grid.setContentsMargins(0, 0, 0, 0)
         self._grid.setSpacing(16)
-        host.addLayout(self._grid)
+        for col in range(3):
+            self._grid.setColumnStretch(col, 1)
+        self._list_host = QWidget()
+        self._list = QVBoxLayout(self._list_host)
+        self._list.setContentsMargins(0, 0, 0, 0)
+        self._list.setSpacing(10)
+        host.addWidget(self._grid_host)
+        host.addWidget(self._list_host)
         host.addStretch(1)
         outer.addWidget(scroll(body))
 
-        self._populate_grid()
+        self._populate()
 
     def _build_header(self) -> QWidget:
         t = self._t
         cta = PillButton("New Project", t, "primary", "plus")
-        cta.clicked.connect(lambda: self._nav("workspace"))
+        cta.clicked.connect(lambda: self._new_project())
         n_projects, n_images, n_engines = self._controller.summary()
         subtitle = (f"{n_projects} project{'s' if n_projects != 1 else ''} · "
                     f"{n_images} images · {n_engines} engine{'s' if n_engines != 1 else ''}")
         return page_header("Projects", subtitle, t, cta)
 
     def refresh(self) -> None:
-        """Recompute the header counts and repopulate the grid.
+        """Recompute the header counts and repopulate the grid/list.
 
         ProjectsScreen is built once and kept alive across navigation (see
         HomeScreen.refresh for why), so anything that changes the store
         elsewhere needs this called before Projects is shown again. The
-        current search query / favourites-only filter are preserved.
+        current search query / scope tab / engine filter / grid-or-list view
+        are all preserved (the toolbar itself is never rebuilt).
         """
         idx = self._outer.indexOf(self._header_widget)
         old = self._header_widget
@@ -379,7 +402,7 @@ class ProjectsScreen(QWidget):
         self._outer.removeWidget(old)
         old.setParent(None)
         old.deleteLater()
-        self._populate_grid()
+        self._populate()
 
     def _toolbar(self) -> QWidget:
         t = self._t
@@ -387,51 +410,135 @@ class ProjectsScreen(QWidget):
         row = QHBoxLayout(bar)
         row.setContentsMargins(34, 2, 34, 20)
         row.setSpacing(10)
+
         search = QLineEdit()
         search.setPlaceholderText("Search projects, tags, engines…")
         search.setClearButtonEnabled(True)
         search.setMaximumWidth(420)
-        search.addAction(icons.icon("diagnose", t["text_muted"], 15), QLineEdit.ActionPosition.LeadingPosition)
+        search.addAction(icons.icon("search", t["text_muted"], 15), QLineEdit.ActionPosition.LeadingPosition)
         search.textChanged.connect(self._on_search)
         row.addWidget(search)
+
+        self._scope_seg = SegControl(["All", "Favorites", "Shared"], t, 0)
+        self._scope_seg.changed.connect(self._on_scope_changed)
+        row.addWidget(self._scope_seg)
+
         row.addStretch(1)
+
         self._filter_btn = PillButton("Filter", t, "ghost", "filter", small=True)
-        self._filter_btn.setToolTip("Show favourites only")
-        self._filter_btn.clicked.connect(self._on_toggle_filter)
+        self._filter_btn.setToolTip("Filter by engine")
+        self._filter_btn.clicked.connect(self._open_filter_menu)
         row.addWidget(self._filter_btn)
-        view = SegControl(["▦", "☰"], t, 0, compact=True)
-        view.setFixedWidth(78)
-        row.addWidget(view)
+
+        self._view_seg = SegControl(["", ""], t, 0, icons_=["grid", "list"])
+        self._view_seg.changed.connect(self._on_view_changed)
+        row.addWidget(self._view_seg)
         return bar
 
+    # ── toolbar handlers ─────────────────────────────────────────────────────
     def _on_search(self, text: str) -> None:
         self._query = text
-        self._populate_grid()
+        self._populate()
 
-    def _on_toggle_filter(self) -> None:
-        self._favorites_only = not self._favorites_only
-        kind = "primary" if self._favorites_only else "ghost"
+    def _on_scope_changed(self, idx: int) -> None:
+        self._scope = _SCOPES[idx]
+        self._populate()
+
+    def _on_view_changed(self, idx: int) -> None:
+        self._view = "grid" if idx == 0 else "list"
+        self._grid_host.setVisible(self._view == "grid")
+        self._list_host.setVisible(self._view == "list")
+
+    def _open_filter_menu(self) -> None:
+        """A checkable engine multi-select, anchored under the Filter button.
+
+        ``popup()`` (not ``exec()``) so opening it never blocks — the filter
+        is applied via the ``toggled`` signal, no return value needed.
+        """
+        menu = QMenu(self)
+        for key in ENGINES:
+            act = QAction(ENGINE_LABELS[key], menu)
+            act.setCheckable(True)
+            act.setChecked(key in self._engines)
+            act.toggled.connect(lambda checked, k=key: self._on_engine_toggled(k, checked))
+            menu.addAction(act)
+        if self._engines:
+            menu.addSeparator()
+            menu.addAction("Clear engine filter", self._clear_engine_filter)
+        menu.popup(self._filter_btn.mapToGlobal(self._filter_btn.rect().bottomLeft()))
+        self._filter_menu = menu  # keep a ref alive while it's open
+
+    def _on_engine_toggled(self, engine_key: str, checked: bool) -> None:
+        if checked:
+            self._engines.add(engine_key)
+        else:
+            self._engines.discard(engine_key)
+        self._restyle_filter_button()
+        self._populate()
+
+    def _clear_engine_filter(self) -> None:
+        self._engines.clear()
+        self._restyle_filter_button()
+        self._populate()
+
+    def _restyle_filter_button(self) -> None:
+        kind = "primary" if self._engines else "ghost"
         self._filter_btn.setStyleSheet(
             theme.button_qss(self._t, kind) + "QPushButton{padding:7px 11px; font-size:12.5px;}")
-        self._populate_grid()
 
     def _toggle_favorite(self, project_id: str) -> None:
         self._controller.toggle_favorite(project_id)
-        self._populate_grid()
+        self._populate()
 
-    def _populate_grid(self) -> None:
-        while self._grid.count():
-            item = self._grid.takeAt(0)
+    # ── data + rendering ─────────────────────────────────────────────────────
+    def _filtered_projects(self) -> list:
+        if self._scope == "shared":
+            return []  # no multi-user/sharing backend yet — always empty, honestly
+        return self._controller.list_projects(
+            query=self._query, favorites_only=(self._scope == "favorites"),
+            engines=self._engines)
+
+    def _empty_message(self, has_cards: bool) -> str:
+        if has_cards:
+            return ""
+        if self._scope == "shared":
+            return "Studio doesn't support shared projects yet — everything stays on this device."
+        if self._query:
+            return f"No projects match “{self._query}”."
+        if self._scope == "favorites":
+            return "No favorites yet — star a project to see it here."
+        if self._engines:
+            return "No projects use the selected engine filter."
+        return ""
+
+    @staticmethod
+    def _clear_layout(lay) -> None:
+        while lay.count():
+            item = lay.takeAt(0)
             w = item.widget()
             if w is not None:
                 w.setParent(None)
                 w.deleteLater()
-        projects = self._controller.list_projects(query=self._query, favorites_only=self._favorites_only)
-        cards = [project_controller.to_card(p) for p in projects]
+
+    def _populate(self) -> None:
+        cards = [project_controller.to_card(p) for p in self._filtered_projects()]
+
+        self._empty_label.setText(self._empty_message(bool(cards)))
+        self._empty_label.setVisible(not cards)
+
+        self._clear_layout(self._grid)
         for i, card in enumerate(cards):
             self._grid.addWidget(self._card(card), i // 3, i % 3)
         idx = len(cards)
         self._grid.addWidget(self._ghost(), idx // 3, idx % 3)
+
+        self._clear_layout(self._list)
+        for card in cards:
+            self._list.addWidget(self._list_row(card))
+        self._list.addWidget(self._ghost_row())
+
+        self._grid_host.setVisible(self._view == "grid")
+        self._list_host.setVisible(self._view == "list")
 
     def _card(self, p: "project_controller.ProjectCard") -> QFrame:
         t = self._t
@@ -442,29 +549,34 @@ class ProjectsScreen(QWidget):
         card.setStyleSheet(
             f"#PCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}"
             f"#PCard:hover{{border-color:{t['border_strong']};}}")
-        soft_shadow(card, 16, 26, 3)
+        install_hover_lift(card, base=(14, 22, 3), hover=(22, 34, 6))
         lay = QVBoxLayout(card)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
         # cover
         cover = QLabel()
-        cover.setFixedHeight(120)
-        cover.setPixmap(nuclei_pixmap(360, 120, p.seed, density=1.1, big=False))
+        cover.setFixedHeight(132)
+        cover.setPixmap(nuclei_pixmap(360, 132, p.seed, density=1.1, big=False))
         cover.setScaledContents(True)
         cover.setStyleSheet("border-top-left-radius:14px; border-top-right-radius:14px;")
         cwrap = QFrame()
-        cwrap.setFixedHeight(120)
+        cwrap.setFixedHeight(132)
         cwl = QVBoxLayout(cwrap)
         cwl.setContentsMargins(0, 0, 0, 0)
         cover.setParent(cwrap)
 
         top = QHBoxLayout()
-        top.setContentsMargins(8, 8, 8, 0)
+        top.setContentsMargins(0, 10, 10, 0)
         top.addStretch(1)
         star = IconButton("star", t, 26, "Favourite",
                            on_click=lambda pid=p.id: self._toggle_favorite(pid))
-        star_color = "#f0b357" if p.favorite else "rgba(255,255,255,0.65)"
+        # Opaque colours only: icons.py hands this straight to an SVG `stroke=`
+        # attribute, and QSvgRenderer silently drops rgba()/alpha there (no
+        # error, just an invisible icon) — confirmed by direct pixel-count
+        # rendering. A muted opaque grey reads as "dimmed" against the dark
+        # cover backdrop just as well as true alpha would have.
+        star_color = "#f0b357" if p.favorite else "#8b93a3"
         star.setIcon(icons.icon("star", star_color, 15))
         star.setStyleSheet(
             "QToolButton{background:rgba(8,12,16,0.4); border:1px solid transparent; border-radius:8px;}"
@@ -473,7 +585,7 @@ class ProjectsScreen(QWidget):
         cwl.addLayout(top)
 
         overlay = QHBoxLayout()
-        overlay.setContentsMargins(12, 0, 12, 10)
+        overlay.setContentsMargins(10, 0, 10, 10)
         eng = Chip(p.engine_label, t, ENGINE_KIND.get(p.engine_key, "primary"))
         eng.setStyleSheet(eng.styleSheet() + "background:rgba(8,12,16,0.55);color:#eaf0f8;border-color:rgba(255,255,255,0.15);")
         overlay.addWidget(eng, alignment=Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignLeft)
@@ -493,11 +605,11 @@ class ProjectsScreen(QWidget):
         b.addWidget(label(p.name, 14.5, t["text"], 600, -0.2))
         desc = label(p.description, 12, t["text_muted"])
         desc.setWordWrap(True)
-        desc.setMaximumHeight(34)
+        desc.setFixedHeight(34)
         b.addWidget(desc)
-        b.addSpacing(8)
+        b.addSpacing(12)
         b.addWidget(hline(t))
-        b.addSpacing(10)
+        b.addSpacing(12)
         b.addLayout(self._stats(p))
         if p.tags:
             tags = QHBoxLayout()
@@ -505,7 +617,7 @@ class ProjectsScreen(QWidget):
             for tag in p.tags[:3]:
                 tags.addWidget(Chip(tag, t, "muted"))
             tags.addStretch(1)
-            b.addSpacing(10)
+            b.addSpacing(12)
             b.addLayout(tags)
         lay.addWidget(body)
         card.mouseReleaseEvent = lambda e, pid=p.id: self._open(pid)
@@ -514,7 +626,7 @@ class ProjectsScreen(QWidget):
     def _stats(self, p: "project_controller.ProjectCard") -> QHBoxLayout:
         t = self._t
         row = QHBoxLayout()
-        row.setSpacing(16)
+        row.setSpacing(14)
         f1 = p.f1 or "—"
         for value, cap, ok in [(str(p.n_images), "Images", False), (p.n_cells, "Cells", False),
                                (f1, "F1 vs GT", p.f1 is not None)]:
@@ -534,26 +646,106 @@ class ProjectsScreen(QWidget):
         card = QFrame()
         card.setObjectName("Ghost")
         card.setCursor(Qt.CursorShape.PointingHandCursor)
-        card.setMinimumHeight(240)
+        card.setMinimumHeight(290)
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         card.setStyleSheet(
             f"#Ghost{{background:transparent; border:1px dashed {t['border_strong']}; border-radius:14px;}}"
-            f"#Ghost:hover{{border-color:{t['primary_line']}; background:{t['primary_weak']};}}")
+            f"#Ghost:hover{{border-color:{t['primary_line']}; background:{t['primary_weak']};}}"
+            f"#Ghost QFrame#PlusBox{{background:{t['surface2']}; border-radius:12px;}}"
+            f"#Ghost:hover QFrame#PlusBox{{background:{t['surface']};}}")
         v = QVBoxLayout(card)
         v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        plus_box = QFrame()
+        plus_box.setObjectName("PlusBox")
+        plus_box.setFixedSize(44, 44)
+        plus_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        pl = QVBoxLayout(plus_box)
+        pl.setContentsMargins(0, 0, 0, 0)
         ic = QLabel()
-        ic.setPixmap(icons.pixmap("plus", t["text_muted"], 26))
+        ic.setPixmap(icons.pixmap("plus", t["text_muted"], 22))
         ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        v.addWidget(ic)
-        v.addSpacing(8)
+        pl.addWidget(ic)
+        v.addWidget(plus_box, alignment=Qt.AlignmentFlag.AlignCenter)
+        v.addSpacing(12)
         title = label("New Project", 13.5, t["text_subtle"], 600)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(title)
         sub = label("Import images & pick an engine", 12, t["text_muted"])
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(sub)
-        card.mouseReleaseEvent = lambda e: self._nav("workspace")
+        card.mouseReleaseEvent = lambda e: self._new_project()
         return card
+
+    # ── list view ────────────────────────────────────────────────────────────
+    def _list_row(self, p: "project_controller.ProjectCard") -> QFrame:
+        t = self._t
+        row = QFrame()
+        row.setObjectName("PRow")
+        row.setCursor(Qt.CursorShape.PointingHandCursor)
+        row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        row.setStyleSheet(
+            f"#PRow{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:10px;}}"
+            f"#PRow:hover{{border-color:{t['border_strong']};}}")
+        # No install_hover_lift() here (unlike other rows/cards): this row's
+        # container starts out hidden (list view isn't the default), and a
+        # QGraphicsDropShadowEffect installed while hidden leaves Qt's effect
+        # source cache stale once the container is later shown — rows render
+        # with wildly inflated spacing. Reproduced and confirmed by disabling
+        # install_hover_lift() alone; the QSS :hover border-color above still
+        # gives real hover feedback without the broken effect.
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(14, 11, 14, 11)
+        lay.setSpacing(14)
+        lay.addWidget(cover_label(p.seed, 52, 40, 1.5))
+
+        meta = QVBoxLayout()
+        meta.setSpacing(2)
+        meta.addWidget(label(p.name, 13.5, t["text"], 600))
+        meta.addWidget(label(f"{p.engine_label} · {p.n_images} images · {p.n_cells} cells",
+                             11.5, t["text_muted"]))
+        lay.addLayout(meta, 1)
+
+        f1_col = QVBoxLayout()
+        f1_col.setSpacing(1)
+        f1_val = QLabel(p.f1 or "—")
+        f1_val.setAlignment(Qt.AlignmentFlag.AlignRight)
+        f1_val.setStyleSheet(
+            f"color:{t['success'] if p.f1 else t['text_muted']}; font-family:{theme.MONO};"
+            f"font-size:13px; font-weight:600;")
+        f1_col.addWidget(f1_val)
+        f1_cap = label("F1 VS GT", 9.5, t["text_muted"], 600, 0.5)
+        f1_cap.setAlignment(Qt.AlignmentFlag.AlignRight)
+        f1_col.addWidget(f1_cap)
+        lay.addLayout(f1_col)
+
+        star = IconButton("star", t, 30, "Favourite",
+                           on_click=lambda pid=p.id: self._toggle_favorite(pid))
+        star.setIcon(icons.icon("star", "#f0b357" if p.favorite else t["text_muted"], 15))
+        lay.addWidget(star)
+
+        row.mouseReleaseEvent = lambda e, pid=p.id: self._open(pid)
+        return row
+
+    def _ghost_row(self) -> QFrame:
+        t = self._t
+        row = QFrame()
+        row.setObjectName("GhostRow")
+        row.setCursor(Qt.CursorShape.PointingHandCursor)
+        row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        row.setStyleSheet(
+            f"#GhostRow{{background:transparent; border:1px dashed {t['border_strong']}; border-radius:10px;}}"
+            f"#GhostRow:hover{{border-color:{t['primary_line']}; background:{t['primary_weak']};}}")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(14, 11, 14, 11)
+        lay.setSpacing(11)
+        ic = QLabel()
+        ic.setPixmap(icons.pixmap("plus", t["text_muted"], 16))
+        lay.addWidget(ic)
+        lay.addWidget(label("New Project", 13, t["text_subtle"], 600))
+        lay.addWidget(label("· Import images & pick an engine", 12, t["text_muted"]))
+        lay.addStretch(1)
+        row.mouseReleaseEvent = lambda e: self._new_project()
+        return row
 
 
 from studio.workspace import WorkspaceScreen  # noqa: E402

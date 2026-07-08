@@ -239,14 +239,21 @@ class Stepper(QFrame):
 
 
 class SegControl(QFrame):
-    """Segmented buttons; one is 'on'. Clicking moves the selection (visual)."""
+    """Segmented buttons; one is 'on'. Clicking moves the selection (visual).
+
+    Pass ``icons_`` (parallel to ``options``, entries optional) for icon-only
+    segments — e.g. a grid/list view switch — instead of text labels; the icon
+    is recoloured to match the on/off state, same as text.
+    """
 
     changed = pyqtSignal(int)
 
-    def __init__(self, options: list[str], t: dict, active: int = 0, compact: bool = False):
+    def __init__(self, options: list[str], t: dict, active: int = 0, compact: bool = False,
+                 icons_: Optional[list[Optional[str]]] = None):
         super().__init__()
         self._t = t
         self._btns: list[QToolButton] = []
+        self._icon_names: list[Optional[str]] = list(icons_) if icons_ else [None] * len(options)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
             f"QFrame{{background:{t['inset'] if compact else t['surface2']};"
@@ -256,15 +263,19 @@ class SegControl(QFrame):
         row.setSpacing(2)
         for i, opt in enumerate(options):
             b = QToolButton()
-            b.setText(opt)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setCheckable(True)
             b.setChecked(i == active)
-            b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             b.setMinimumHeight(26)
+            if self._icon_names[i]:
+                b.setIconSize(QSize(14, 14))
+                b.setFixedWidth(32)
+            else:
+                b.setText(opt)
+                b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             b.clicked.connect(lambda _=False, idx=i: self._select(idx))
             self._btns.append(b)
-            row.addWidget(b, 1)
+            row.addWidget(b, 0 if self._icon_names[i] else 1)
         self._restyle()
 
     def _select(self, idx: int):
@@ -275,8 +286,11 @@ class SegControl(QFrame):
 
     def _restyle(self):
         t = self._t
-        for b in self._btns:
-            if b.isChecked():
+        for name, b in zip(self._icon_names, self._btns):
+            on = b.isChecked()
+            if name:
+                b.setIcon(icons.icon(name, t["text"] if on else t["text_muted"], 14))
+            if on:
                 b.setStyleSheet(
                     f"QToolButton{{background:{t['surface']}; color:{t['text']};"
                     f"border:none; border-radius:6px; font-size:12px; font-weight:600; padding:5px 10px;}}")

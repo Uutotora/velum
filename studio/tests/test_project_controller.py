@@ -126,6 +126,26 @@ def test_query_and_favorites_only_combine(store):
     assert result == []  # Organoid Membranes isn't a favourite
 
 
+def test_engines_filter(store):
+    ctrl = ProjectController(store)
+    result = ctrl.list_projects(engines={"sam2"})
+    assert {p.name for p in result} == {"Live-cell Mitosis"}
+    result = ctrl.list_projects(engines={"cellseg1", "sam2"})
+    assert {p.engine for p in result} == {"cellseg1", "sam2"}
+
+
+def test_engines_filter_empty_or_none_means_no_filter(store):
+    ctrl = ProjectController(store)
+    assert ctrl.list_projects(engines=None) == ctrl.list_projects()
+    assert ctrl.list_projects(engines=set()) == ctrl.list_projects()
+
+
+def test_engines_filter_combines_with_query_and_favorites(store):
+    ctrl = ProjectController(store)
+    result = ctrl.list_projects(query="nuclei", engines={"cellseg1"}, favorites_only=True)
+    assert {p.name for p in result} == {"Fluorescence Nuclei — DAPI"}
+
+
 # ── recent / summary ───────────────────────────────────────────────────────────
 def test_recent_respects_limit(store):
     ctrl = ProjectController(store)

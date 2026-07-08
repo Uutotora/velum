@@ -5,6 +5,87 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-08 — Projects tab: full toolbar fidelity + real grid/list views
+
+A design-fidelity + functionality pass on the Projects tab against the
+north-star mockup, prompted by a side-by-side review against the mockup
+artifact. The previous pass wired data (search/favourites/store); this one
+fixes everything the toolbar/cards still got wrong or left dead:
+
+- **The mockup's "All · Favorites · Shared" segmented control was missing
+  entirely** — the "Filter" button had been repurposed as a favourites-only
+  toggle instead. Restored the real 3-way `SegControl` (matching the mockup
+  exactly) and gave "Filter" its own, real job: a checkable engine multi-select
+  popover (`QMenu`, one entry per engine) — composes with search and the scope
+  tab. "Shared" is a genuine, wired scope (not a dead label): it always yields
+  zero projects, honestly, since Studio has no multi-user/sharing backend
+  anywhere in the roadmap — with its own empty-state message rather than a
+  silent blank grid. `ProjectController.list_projects()` gained an `engines=`
+  filter to back this (pure-logic, tested).
+- **The grid/list view toggle was decorative** — two text glyphs (`▦`/`☰`)
+  that changed nothing when clicked. `SegControl` (`components.py`) now
+  supports icon-only segments (an `icons_=` param, backward-compatible with
+  every existing text-only caller) so the toggle uses the mockup's actual
+  grid/list SVGs; clicking it now really switches between the card grid and a
+  new dense list view (row = cover thumb, name/engine/stats meta line, F1,
+  favourite star — reusing Home's `.rrow` visual language, since the mockup
+  itself never designed a Projects list view to match against). Both views
+  stay populated behind the scenes so toggling is instant.
+- **The Projects tab's own "+ New Project"** (top-right CTA and the grid's
+  ghost card) still just navigated straight to a blank workspace — the New
+  Project dialog existed (wired to Home a pass ago) but nothing on this
+  screen opened it. Both now open the real dialog, same as Home.
+- **Pixel fidelity against the mockup CSS** (fetched and read directly, not
+  eyeballed): cover art 120→132px, the ghost "new project" card's
+  `min-height` 240→290px plus its missing 44×44 rounded plus-icon box, the
+  search icon (was reusing the "diagnose"/magnifier icon — close but not the
+  mockup's own path), stats row gap 16→14px, card-body spacing tightened to
+  match `padding-top`+`border-top`+`margin-top` (was 19px total, now 25px),
+  star/engine-chip/progress-badge overlay margins 8/12→10px, and a
+  `install_hover_lift` shadow-elevation on hover (cards had a permanently-on
+  static shadow instead of the mockup's rest→hover shadow-sm→shadow-md
+  transition; list rows deliberately do *not* get this — see the bug below).
+  Grid columns now get explicit equal stretch, so a heavily filtered result
+  (1–2 cards) no longer renders one card stretched absurdly wide.
+- **Two real rendering bugs caught by actually looking at offscreen
+  screenshots, not just construct-without-crashing tests:**
+  1. The non-favourited star icon was invisible on every project card. Root
+     cause: `icons.py` hands its colour argument straight into an SVG
+     `stroke="..."` attribute, and `QSvgRenderer` silently drops CSS
+     `rgba(255,255,255,0.65)` syntax there (no error — zero pixels drawn).
+     The favourited state used a plain hex (`#f0b357`) and was fine, which is
+     exactly why this went unnoticed since the tab was first wired. Confirmed
+     by direct pixel-count rendering of the SVG in isolation, fixed with an
+     opaque muted grey, and locked down with a new regression test that
+     renders the icon and asserts at least one non-transparent pixel — a
+     construct-only test would never have caught this.
+  2. Switching to list view could render rows with wildly inflated spacing
+     and an overlapping ghost row. Root cause: list rows call
+     `install_hover_lift()` (a `QGraphicsDropShadowEffect`) while their
+     container starts hidden (list isn't the default view) — Qt's effect
+     source cache goes stale once the container is later shown, and the
+     widgets paint at the wrong extents despite reporting correct
+     `.geometry()`. Confirmed by toggling `install_hover_lift` off and
+     watching the bug disappear; fixed by not installing it on list rows
+     (the existing QSS `:hover` border-color still gives real hover
+     feedback). Grid cards are unaffected — they're visible from
+     construction, since grid is the default view.
+
+Verified: `studio/tests` green (136 tests, 21 new — engine-filter/scope/view
+toggle logic, the two regression tests above, new-project wiring for the
+Projects tab's own CTA/ghost/ghost-row); repo-root throwaway-venv check (`pip
+install --group test` only, Python 3.11, no torch/napari/PyQt6) exit code 0,
+zero failures. Offscreen-screenshot-verified end to end (`QWidget.grab()`,
+both themes): grid view, list view, the Favorites/Shared scopes (including
+the real button-click path via `SegControl._select()`, not just calling the
+handler), the engine filter's active-button restyle, and the shared-scope
+empty state — all matched intent, including the two bugs above being
+visually confirmed fixed after the code changes, not just asserted by a
+passing test. Not verified here (no physical display): real hover-lift
+animation smoothness, real QMenu popover interaction (its resulting filter
+logic is tested directly; the popup itself is a thin, hard-to-drive-headless
+Qt native menu).
+
 ## 2026-07-08 — Fix: a newly created project didn't show up until restart
 
 User-reported: creating a project via the New Project modal didn't add it to

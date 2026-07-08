@@ -24,17 +24,23 @@ When you finish a tab: log it in `CHANGELOG.md`, tick it here, update
 
 ## P0 — make the shell truly usable
 
-### Projects tab · M · ✅ done (2026-07-08)
-- **Goal:** real projects, not demo cards.
+### Projects tab · M · ✅ done (2026-07-08, fidelity pass same day)
+- **Goal:** real projects, not demo cards — and matching the mockup exactly.
 - **Work:** reintroduced the `Project`/`ProjectStore` data model (in git history,
   `studio/project.py`); backed Home "recent" + Projects grid with it;
-  wired search/filter/favourite; card click opens that project in the workspace.
+  wired search/favourite; card click opens that project in the workspace.
+  Follow-up same day: the toolbar's "All · Favorites · Shared" scope control
+  and the grid/list view toggle were rebuilt for real (see `CHANGELOG.md`) —
+  the first pass had repurposed "Filter" as a favourites toggle instead of
+  building the mockup's actual scope control, and the view toggle was
+  decorative; both the Projects tab's own "+ New Project" CTA and ghost card
+  now open the real dialog too (previously only Home's did).
 - **Tasks:** ☑ restore + adapt data model · ☑ store→screens binding ·
-  ☑ live search/filter/favourite · ☑ "active project" state shared to workspace ·
-  ☑ tests (store pure-logic + screen wiring).
-- Not done here (separate backlog item below, now also done): the
-  "+ New Project" creation flow itself. Still not done: the workspace's own
-  layers/canvas/predict wiring (Segment tab, unstarted).
+  ☑ live search/favourite/scope(All·Favorites·Shared)/engine-filter ·
+  ☑ real grid↔list views · ☑ "active project" state shared to workspace ·
+  ☑ tests (store pure-logic + screen wiring + 2 rendering-bug regressions).
+- Still not done: the workspace's own layers/canvas/predict wiring (Segment
+  tab, unstarted — see below, the flagship item).
 
 ### New-project dialog · S · ✅ done (2026-07-08)
 - **Goal:** the "+ New Project" flow (name · description · import · engine),

@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 
 from studio import theme
+from studio import project_controller
 from studio.project import ProjectStore
 from studio.project_controller import ProjectController
 
@@ -99,7 +100,7 @@ def test_all_screens_construct(app, controller):
     from studio.extra_screens import ModelsScreen, DashboardScreen
     t = theme.DARK
     assert HomeScreen(t, controller, lambda k: None, lambda i: None, lambda: None) is not None
-    assert ProjectsScreen(t, controller, lambda k: None, lambda i: None) is not None
+    assert ProjectsScreen(t, controller, lambda k: None, lambda i: None, lambda: None) is not None
     assert WorkspaceScreen(t) is not None
     assert ModelsScreen(t) is not None
     assert DashboardScreen(t) is not None
@@ -117,47 +118,139 @@ def test_home_screen_handles_empty_store(app, empty_controller):
     assert home._recent_section() is not None
 
 
-def test_projects_screen_grid_shows_seeded_projects_plus_ghost(app, controller):
+def _projects_screen(controller, on_navigate=None, on_open=None, on_new_project=None):
     from studio.screens import ProjectsScreen
-    scr = ProjectsScreen(theme.DARK, controller, lambda k: None, lambda i: None)
+    return ProjectsScreen(
+        theme.DARK, controller,
+        on_navigate or (lambda k: None),
+        on_open or (lambda i: None),
+        on_new_project or (lambda: None))
+
+
+def test_projects_screen_grid_shows_seeded_projects_plus_ghost(app, controller):
+    scr = _projects_screen(controller)
     assert scr._grid.count() == 6 + 1  # 6 sample projects + the "New Project" ghost
+    assert scr._list.count() == 6 + 1  # both views are always kept populated
 
 
 def test_projects_screen_search_narrows_grid(app, controller):
-    from studio.screens import ProjectsScreen
-    scr = ProjectsScreen(theme.DARK, controller, lambda k: None, lambda i: None)
+    scr = _projects_screen(controller)
     scr._on_search("mitosis")
     assert scr._grid.count() == 1 + 1  # one match + ghost
     scr._on_search("")
     assert scr._grid.count() == 6 + 1
 
 
-def test_projects_screen_favorites_filter(app, controller):
-    from studio.screens import ProjectsScreen
-    scr = ProjectsScreen(theme.DARK, controller, lambda k: None, lambda i: None)
-    scr._on_toggle_filter()
+def test_projects_screen_search_with_no_matches_shows_empty_message(app, controller):
+    scr = _projects_screen(controller)
+    scr._on_search("nonexistent-xyz")
+    assert scr._grid.count() == 0 + 1  # just the ghost
+    assert not scr._empty_label.isHidden()
+    assert "nonexistent-xyz" in scr._empty_label.text()
+
+
+def test_projects_screen_favorites_scope_filter(app, controller):
+    scr = _projects_screen(controller)
+    scr._on_scope_changed(1)  # "Favorites"
     n_favorites = len(controller.list_projects(favorites_only=True))
     assert scr._grid.count() == n_favorites + 1
-    scr._on_toggle_filter()
+    assert scr._empty_label.isHidden()  # the seed set has favourites
+    scr._on_scope_changed(0)  # "All"
     assert scr._grid.count() == 6 + 1
 
 
+def test_projects_screen_shared_scope_is_always_empty(app, controller):
+    scr = _projects_screen(controller)
+    scr._on_scope_changed(2)  # "Shared"
+    assert scr._grid.count() == 0 + 1  # just the ghost — no sharing backend yet
+    assert not scr._empty_label.isHidden()
+    assert "doesn't support shared projects" in scr._empty_label.text()
+
+
+def test_projects_screen_card_star_renders_visibly_when_not_favorite(app, controller):
+    """Regression test: the non-favourite star colour was an SVG rgba() string,
+
+    which QSvgRenderer silently drops (no error, just an invisible icon) —
+    the amber favourited star used a plain hex and was fine, masking this for
+    every non-favourited card. Assert the rendered icon actually has visible
+    (non-transparent) pixels, not just that construction doesn't raise.
+    """
+    scr = _projects_screen(controller)
+    non_favorite = next(p for p in controller.list_projects() if not p.favorite)
+    card = scr._card(project_controller.to_card(non_favorite))
+    star = card.findChild(components.IconButton)
+    assert star is not None
+    image = star.icon().pixmap(star.iconSize()).toImage()
+    assert any(
+        image.pixelColor(x, y).alpha() > 0
+        for x in range(image.width()) for y in range(image.height())
+    ), "star icon rendered fully transparent — invalid SVG stroke colour"
+
+
+def test_projects_screen_engine_filter(app, controller):
+    scr = _projects_screen(controller)
+    scr._on_engine_toggled("sam2", True)
+    n = len(controller.list_projects(engines={"sam2"}))
+    assert scr._grid.count() == n + 1
+    scr._on_engine_toggled("cellseg1", True)
+    n2 = len(controller.list_projects(engines={"sam2", "cellseg1"}))
+    assert scr._grid.count() == n2 + 1
+    scr._clear_engine_filter()
+    assert scr._grid.count() == 6 + 1
+
+
+def test_projects_screen_filter_menu_lists_every_engine(app, controller):
+    scr = _projects_screen(controller)
+    scr._open_filter_menu()
+    assert [a.text() for a in scr._filter_menu.actions()] == [
+        "CellSeg1 · LoRA", "Cellpose-SAM", "SAM 2"]
+    scr._filter_menu.close()
+
+
+def test_projects_screen_view_toggle_switches_grid_and_list(app, controller):
+    scr = _projects_screen(controller)
+    assert scr._view == "grid"
+    assert not scr._grid_host.isHidden()
+    assert scr._list_host.isHidden()
+    scr._on_view_changed(1)
+    assert scr._view == "list"
+    assert scr._grid_host.isHidden()
+    assert not scr._list_host.isHidden()
+
+
 def test_projects_screen_open_callback_uses_project_id(app, controller):
-    from studio.screens import ProjectsScreen
     opened = []
-    scr = ProjectsScreen(theme.DARK, controller, lambda k: None, opened.append)
+    scr = _projects_screen(controller, on_open=opened.append)
     first = controller.list_projects()[0]
     scr._open(first.id)
     assert opened == [first.id]
 
 
 def test_projects_screen_star_toggles_favorite(app, controller):
-    from studio.screens import ProjectsScreen
-    scr = ProjectsScreen(theme.DARK, controller, lambda k: None, lambda i: None)
+    scr = _projects_screen(controller)
     target = controller.list_projects(favorites_only=True)[0]
     assert target.favorite
     scr._toggle_favorite(target.id)
     assert not controller.store.load(target.id).favorite
+
+
+def test_projects_screen_list_row_opens_project(app, controller):
+    scr = _projects_screen(controller)
+    p = controller.list_projects()[0]
+    row = scr._list_row(project_controller.to_card(p))
+    opened = []
+    scr._open = opened.append
+    row.mouseReleaseEvent(None)
+    assert opened == [p.id]
+
+
+def test_projects_screen_new_project_cta_and_ghosts_open_dialog(app, controller):
+    seen = []
+    scr = _projects_screen(controller, on_new_project=lambda: seen.append(True))
+    scr._header_widget.findChild(components.PillButton).click()
+    scr._ghost().mouseReleaseEvent(None)
+    scr._ghost_row().mouseReleaseEvent(None)
+    assert seen == [True, True, True]
 
 
 # ── window ───────────────────────────────────────────────────────────────────
