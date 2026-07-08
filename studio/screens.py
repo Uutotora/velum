@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QLineEdit, QSizePolicy, QStackedWidget, QToolButton, QMenu,
 )
 
+from studio import hardware
 from studio import icons
 from studio import theme
 from studio import project_controller
@@ -369,7 +370,8 @@ class HomeScreen(QWidget):
         col.addWidget(res)
 
         dev = self._card("This device")
-        for name, val in [("Compute", "Apple M-series · MPS"), ("SAM backbone", "ViT-H · cached"),
+        compute = hardware.detect().label
+        for name, val in [("Compute", compute), ("SAM backbone", "ViT-H · cached"),
                           ("Storage", "data_store · 3.1 GB")]:
             dev.layout().addWidget(FieldRow(name, Badge(val, t), t))
         col.addWidget(dev)

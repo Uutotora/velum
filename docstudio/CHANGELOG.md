@@ -2140,6 +2140,34 @@ training (every test monkeypatches `TrainController.start_training` rather
 than spawning actual model training — `train_model()` itself is exercised
 by the classic app's own suite, not re-tested here).
 
+---
+
+## 2026-07-09 — Home's "This device" card: real hardware, not a hard-coded Mac string
+
+First Linux check of the app (Studio had only ever run on macOS). Home's
+"This device" card showed `("Compute", "Apple M-series · MPS")` unconditionally
+— demo content nobody had wired, wrong on every non-Mac machine, and on Linux
+specifically it said "MPS" (an Apple-only API) on a box with an NVIDIA GPU.
+
+Added `studio/hardware.py` (`detect()` → a `DeviceInfo(kind, label, os_name)`,
+lazy `import torch` inside the function so it stays out of Studio's shared-
+module import graph): CUDA on Linux/Windows, MPS on Apple Silicon, `"<OS> ·
+CPU"` as the honest fallback (e.g. `"Linux · CPU"`). The device-kind label
+delegates the actual "is this GPU real" check to the new repo-root
+`device_utils.py` (shared with the classic app's device dropdowns/status
+label — see `docs/CHANGELOG.md` for that half) rather than trusting
+`torch.cuda.is_available()` alone, since that call can be `True` for a GPU
+the installed torch build ships no kernels for.
+
+Verified: `studio/tests` (189 tests, +13 new in `test_hardware.py`) green
+under real PyQt6 on Linux; confirmed end-to-end on a real Linux box with an
+NVIDIA GTX 1070 — the Home screen now renders `"Linux · CPU"` (that card's
+GPU is present but its torch build's CUDA 13 wheel doesn't ship kernels for
+Pascal, so CPU is the honest answer there) instead of the old Mac string.
+Not verified: rendering on an actual CUDA-usable Linux GPU or on Windows (the
+capability-check logic is unit-tested with a fake torch module standing in
+for both, not run against real matching hardware).
+
 ## 2026-07-09 — A third rendering bug in the same family: bare QWidget() wrappers
 
 Third round of direct user feedback, pointing at two specific remaining

@@ -16,6 +16,11 @@ project.py        Project/ProjectSettings/ProjectStats/ProjectStore — the real
 project_controller.py  ProjectController (Qt-free): search/filter, favourites,
                   the active project shared with the Workspace tab, sample
                   seeding. Home/Projects screens are bound to it.
+hardware.py       detect() -> DeviceInfo for Home's "This device" card: real
+                  CUDA/MPS/CPU, not a hard-coded platform string. Lazy
+                  `import torch` inside the function; the actual "is this
+                  GPU usable" check delegates to the repo-root
+                  device_utils.py (shared with the classic app).
 screens.py        HomeScreen, ProjectsScreen — bound to project_controller
                   (+ shared page_header/scroll helpers, the latter now
                   components.SmoothScrollArea — see components.py). Live
