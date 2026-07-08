@@ -81,6 +81,11 @@ ML core (shared, imported by the app — do not delete):
   data/                dataset + image IO (data/utils.py has read/resize)
   predict.py cellseg1_train.py metrics.py sampler.py mask_nms.py
   cell_loss.py set_environment.py gpu_memory_tracker.py project_root.py
+  device_utils.py      shared CUDA-capability check (a GPU can be "available"
+                       per torch yet ship no kernels for the installed
+                       build's CUDA version — see its docstring); used by
+                       set_environment.py, napari_app/widgets/shell.py,
+                       predict_widget.py, train_widget.py, and studio/hardware.py
 
 tests/                 pytest suite (pure-logic, no GPU/GUI)
 .github/workflows/     CI (runs the pure-logic suite on py3.11/3.12)

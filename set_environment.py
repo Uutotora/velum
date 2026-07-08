@@ -6,7 +6,15 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 
-if torch.cuda.is_available():
+import device_utils
+
+# is_usable() guards against a present-but-incompatible GPU (e.g. a Pascal
+# card like a GTX 1070 against a CUDA 13 wheel that only ships kernels for
+# capability >= 7.5): torch.cuda.is_available() reports True there, but
+# `model.to("cuda")` would crash the first real op with "CUDA error: no
+# kernel image is available for execution on the device". See
+# device_utils.py's docstring for the real-hardware case this was found on.
+if torch.cuda.is_available() and device_utils.is_usable(torch):
     DEVICE = torch.device("cuda")
 elif torch.backends.mps.is_available():
     DEVICE = torch.device("mps")

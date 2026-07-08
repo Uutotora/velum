@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QButtonGroup, QSizePolicy,
 )
 
+import device_utils
 from napari_app import icons
 from napari_app.motion import fade_in, pulse, glow, clear_effect
 from napari_app.theme import (
@@ -218,10 +219,15 @@ def _dot_pixmap(color: str):
 
 
 def _device_label() -> str:
-    """Best-effort, read-only compute-device string for the status tooltip."""
+    """Best-effort, read-only compute-device string for the status tooltip.
+
+    Checks CUDA is actually usable, not just present -- see device_utils'
+    docstring for why (a GPU torch.cuda.is_available() calls "available" but
+    ships no kernels for still reports "cuda" without this check).
+    """
     try:
         import torch
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and device_utils.is_usable(torch):
             return "cuda · ready"
         if torch.backends.mps.is_available():
             return "mps · ready"

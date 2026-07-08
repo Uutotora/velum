@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 from napari_app.widgets.log_window import get_log_window
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
+import device_utils
 from napari_app.core.train_state_manager import TrainingStateManager
 from project_root import STORAGE_DIR
 from napari_app.theme import (
@@ -432,9 +433,8 @@ class TrainWidget(QWidget):
         self.device.addItem("cpu")
         if torch.backends.mps.is_available():
             self.device.addItem("mps"); self.device.setCurrentText("mps")
-        if torch.cuda.is_available():
-            for i in range(torch.cuda.device_count()):
-                self.device.addItem(str(i))
+        for i in device_utils.usable_cuda_indices(torch):
+            self.device.addItem(str(i))
 
     def _on_vit_changed(self, vit):
         names = {"vit_h": "sam_vit_h_4b8939.pth",

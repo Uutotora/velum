@@ -18,6 +18,41 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-09 — First real Linux verification; capability-aware CUDA detection
+
+The app had only ever been run on macOS. First Linux check (real Ubuntu box,
+an NVIDIA GTX 1070) surfaced two things:
+
+- **Every device check in the repo asked only `torch.cuda.is_available()`**
+  (`set_environment.py`, `napari_app/widgets/shell.py`, `predict_widget.py`,
+  `train_widget.py`), which answers "is a CUDA device present", not "will
+  this torch build actually run on it". Confirmed on real hardware: a GTX
+  1070 (Pascal, compute capability 6.1) against a current CUDA 13 wheel
+  (which only ships kernels for capability >= 7.5) reports
+  `is_available() == True` and `get_device_name()` works, but any real op
+  raises "CUDA error: no kernel image is available for execution on the
+  device" — `set_environment.DEVICE` would have handed CellSeg1's own
+  SAM+LoRA engine a device it can't actually use, crashing the first real
+  Run. Added `device_utils.py` (new shared, Qt-free, repo-root module —
+  alongside `set_environment.py`/`project_root.py`) with a capability check
+  (`torch.cuda.get_device_capability` vs `get_arch_list()`, no kernel launch
+  needed) and wired it into all four call sites; `predict_widget`/
+  `train_widget`'s device dropdowns now only list CUDA indices that are
+  actually usable, and `set_environment.DEVICE`/`shell.py`'s status label
+  fall back to CPU instead of silently picking a doomed device.
+- **Studio's Home screen** hard-coded `("Compute", "Apple M-series · MPS")`
+  regardless of platform — fixed, detail in `docstudio/CHANGELOG.md`.
+
+Verified: the full pure-logic + Studio suite (`pytest` — both `tests/` and
+`studio/tests/`) green on Linux via the throwaway light-group venv from
+`AGENTS.md`; `studio/tests` (189 tests) green under real PyQt6 on Linux; the
+GTX 1070 capability-mismatch scenario reproduced and fixed against a real
+`torch==2.12.1+cu130` install on that box, with unit tests
+(`tests/test_device_utils.py`, `studio/tests/test_hardware.py`) locking in
+the exact regression (fake-torch-module injection, no real GPU needed to run
+them). Not verified here: a real predict/train Run end-to-end on Linux (no
+SAM checkpoints downloaded in this pass) or any of it on Windows.
+
 ## 2026-07-08 — Studio promoted to its own top-level `studio/` package
 
 Restructured so the branch reads as a separate project: the Studio app moved

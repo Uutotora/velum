@@ -20,6 +20,7 @@ from napari_app.core.predict_controller import (
     _predict_tiled, _apply_clahe,
 )
 from napari_app import engine_registry
+import device_utils
 from project_root import STORAGE_DIR
 from napari_app.theme import (
     WIDGET_SS, BTN_PRIMARY, BTN_SUCCESS, BTN_SECONDARY, BTN_BROWSE,
@@ -1031,9 +1032,8 @@ class PredictWidget(QWidget):
         self.device.addItem("cpu")
         if torch.backends.mps.is_available():
             self.device.addItem("mps"); self.device.setCurrentText("mps")
-        if torch.cuda.is_available():
-            for i in range(torch.cuda.device_count()):
-                self.device.addItem(str(i))
+        for i in device_utils.usable_cuda_indices(torch):
+            self.device.addItem(str(i))
 
     def _on_vit_changed(self, vit):
         names = {"vit_h": "sam_vit_h_4b8939.pth",
