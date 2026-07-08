@@ -26,7 +26,7 @@ from studio import icons
 from studio import theme
 from studio import guide_content
 from studio import project_controller
-from studio.components import Accordion, GroupLabel, PillButton, hline, soft_shadow, label
+from studio.components import Accordion, GroupLabel, PillButton, hline, label
 from studio.screens import page_header, scroll
 
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
@@ -108,7 +108,11 @@ def _step_row(t: dict, index: int, step: guide_content.Step,
     card = QFrame()
     card.setObjectName("GuideStep")
     card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-    card.setStyleSheet(f"#GuideStep{{background:{t['inset']}; border:1px solid {t['border']}; border-radius:14px;}}")
+    # surface2 ("elevated fill"), not inset ("recessed well" — meant for
+    # input fields, darker than the page background itself): at this width
+    # inset read as a hole cut into the card revealing the canvas behind it,
+    # not a distinct raised row.
+    card.setStyleSheet(f"#GuideStep{{background:{t['surface2']}; border:1px solid {t['border']}; border-radius:14px;}}")
     row = QHBoxLayout(card)
     row.setContentsMargins(16, 14, 16, 14)
     row.setSpacing(14)
@@ -154,7 +158,7 @@ def _shortcuts_block(t: dict, shortcuts: list[guide_content.Shortcut]) -> QWidge
         row = QFrame()
         row.setObjectName("GuideShortcut")
         row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        row.setStyleSheet(f"#GuideShortcut{{background:{t['inset']}; border:1px solid {t['border']}; border-radius:10px;}}")
+        row.setStyleSheet(f"#GuideShortcut{{background:{t['surface2']}; border:1px solid {t['border']}; border-radius:10px;}}")
         h = QHBoxLayout(row)
         h.setContentsMargins(14, 11, 14, 11)
         h.setSpacing(12)
@@ -192,7 +196,7 @@ def _table_block(t: dict, headers: list[str], rows: list[list[str]]) -> QFrame:
     card = QFrame()
     card.setObjectName("GuideTable")
     card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-    card.setStyleSheet(f"#GuideTable{{background:{t['inset']}; border:1px solid {t['border']}; border-radius:12px;}}")
+    card.setStyleSheet(f"#GuideTable{{background:{t['surface2']}; border:1px solid {t['border']}; border-radius:12px;}}")
     v = QVBoxLayout(card)
     v.setContentsMargins(16, 13, 16, 5)
     v.setSpacing(8)
@@ -286,8 +290,15 @@ class GuideScreen(QWidget):
         outer.setSpacing(0)
         n_articles = len(guide_content.ARTICLES)
         n_topics = len({a.category for a in guide_content.ARTICLES})
+        # Every other full screen (Home/Projects/Segment/Models/Dashboard) is a
+        # sidebar-nav peer, nothing to "close". Guide is reached the same way
+        # but is conceptually a utility panel like Assistant/Logs (which do
+        # have an explicit close) — without this, there was no way back to
+        # where you were except remembering to click a sidebar item yourself.
+        self._close_btn = PillButton("Close", t, "ghost", "close", small=True)
+        self._close_btn.clicked.connect(lambda: self._nav("home"))
         outer.addWidget(page_header(
-            "Guide & Docs", f"{n_articles} articles across {n_topics} topics", t))
+            "Guide & Docs", f"{n_articles} articles across {n_topics} topics", t, self._close_btn))
 
         body = QWidget()
         row = QHBoxLayout(body)
@@ -307,7 +318,11 @@ class GuideScreen(QWidget):
         card.setFixedWidth(self.NAV_WIDTH)
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         card.setStyleSheet(f"#GuideNavCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}")
-        soft_shadow(card, 14, 20, 3)
+        # No soft_shadow(): a full-height panel doesn't read as "elevated" the
+        # way a small floating card does — the shadow just smears into a
+        # dark halo against an already-dark page background. A plain border
+        # (as Workspace's own full-height panels use) gives the same
+        # separation without the murk.
         v = QVBoxLayout(card)
         v.setContentsMargins(14, 14, 14, 14)
         v.setSpacing(10)

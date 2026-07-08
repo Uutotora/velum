@@ -5,6 +5,65 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-08 — A real crash fixed, Guide gets a Close button, and a contrast fix
+
+Direct user feedback on a real (non-offscreen) run, the same day Guide & Docs
+shipped: the app aborted after a while of use, Guide had no way back to
+where you were, and the guide read as one flat dark mass rather than
+distinct panels.
+
+- **The crash — root-caused and fixed, not just caught.** A macOS crash
+  report showed `SIGABRT` inside `sipQFrame::enterEvent` → PyQt6's
+  `pyqt6_err_print()` → `QMessageLogger::fatal()` → `abort()`: an unhandled
+  Python exception escaping a Qt-invoked callback takes the whole process
+  down, not just that interaction. Reproduced directly: `motion.
+  install_hover_lift()`'s `enter`/`leave` closures (installed on every Home/
+  Projects card) hold a `QGraphicsDropShadowEffect` + two
+  `QPropertyAnimation`s that outlive the widget being torn down (e.g.
+  `StudioWindow.toggle_theme()`'s `deleteLater()` rebuild, or any future
+  screen teardown) — touching them from a stale hover callback raises
+  `RuntimeError: wrapped C/C++ object ... has been deleted`, and that's what
+  PyQt6 escalates to `abort()`. `fade_in()`'s `finished` callback had the
+  identical hazard. Both now guard narrowly against `RuntimeError` (a
+  genuine new bug still surfaces — this doesn't swallow exceptions
+  generally); `studio/app.py:main()` also installs a `sys.excepthook` that
+  logs instead of the PyQt6 default, as defense in depth for anything not
+  yet found. New `studio/tests/test_motion.py` (motion.py had zero coverage
+  before this) — confirmed these regression tests actually fail against the
+  pre-fix code (not tautological) before confirming they pass against the
+  fix.
+- **Guide & Docs gets a Close button.** Every other full screen is a
+  sidebar-nav peer (nothing to "close"), but Guide is reached the same way
+  while conceptually being a utility panel like Assistant/Logs — which do
+  have one. Added a ghost "Close" button to its header, navigating home.
+- **Fixed the "everything looks like one dark canvas" complaint.** Two
+  contributing causes, both fixed: (1) `soft_shadow()` on the two large
+  nav/content panels — a soft shadow reads as "elevation" on a small
+  floating card, but on a nearly-full-viewport panel it just smears into a
+  murky halo against an already-dark page; dropped it, kept the plain
+  border (matching how Workspace's own full-height panels already do it).
+  (2) The bigger one: `_step_row`/`_shortcuts_block`/`_table_block` used
+  `t['inset']` — the *recessed field well* token, meant for input boxes,
+  darker than the page background itself — as the fill for large content
+  blocks sitting inside an already-dark `surface` card. At that width it
+  reads as a hole punched through the card to the canvas behind it, not a
+  distinct raised row. Switched to `t['surface2']` ("elevated fill") —
+  right token for "this sits *on* the card," confirmed lighter than
+  `surface` in both themes.
+
+Verified: `studio/tests` green. Repo-root throwaway-venv light-`test`-group
+check passes clean. Confirmed the crash-path regression tests fail against
+the pre-fix `motion.py` and pass against the fix (not just green by
+construction). Confirmed the contrast fix visually via real offscreen
+screenshots, both themes. Not verified here: the exact crash trigger
+sequence on a real display (no way to reproduce a live mouse hover mid
+theme-toggle-teardown outside a real session) — the fix addresses the
+*confirmed* underlying hazard (touching a deleted Qt object from a stale
+callback), which is sufficient regardless of the precise timing that
+triggered it for the user.
+
+---
+
 ## 2026-07-08 — Guide & Docs: real in-app documentation, not a no-op
 
 Took the P2 backlog item "Guide & Docs screen (currently a no-op sidebar

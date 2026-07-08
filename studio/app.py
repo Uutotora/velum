@@ -265,8 +265,29 @@ class StudioWindow(QMainWindow):
         self._round()
 
 
+def _install_exception_hook() -> None:
+    """Log unhandled exceptions from Qt callbacks instead of the default hook.
+
+    PyQt6 treats an exception that escapes a Qt-invoked Python callback
+    (an event override, a signal slot) as fatal by default — it prints the
+    traceback and then aborts the *entire process* rather than just failing
+    that one interaction (confirmed the hard way: a stale
+    QGraphicsDropShadowEffect touched from a hover `enterEvent` after its
+    widget was torn down — see motion.py). That specific hazard is now
+    guarded at the source; this is defense in depth for anything not yet
+    found, so a future bug prints a traceback instead of a bare crash log.
+    """
+    import traceback
+
+    def _hook(exc_type, exc_value, exc_tb):
+        traceback.print_exception(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _hook
+
+
 def main() -> None:
     """Launch CellSeg1 Studio (pure-design skeleton — no napari/torch needed)."""
+    _install_exception_hook()
     app = QApplication.instance() or QApplication(sys.argv)
     family = load_fonts()
     app.setFont(QFont(family, 10))

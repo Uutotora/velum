@@ -57,6 +57,13 @@ def test_default_article_is_shown_on_construction(app, controller):
     assert g._content_stack.currentWidget() is g._article_pages[guide_content.DEFAULT_ARTICLE_ID]
 
 
+def test_close_button_navigates_home(app, controller):
+    navigated = []
+    g = _guide(app, controller, on_navigate=navigated.append)
+    g._close_btn.click()
+    assert navigated == ["home"]
+
+
 def test_clicking_a_nav_row_opens_that_article(app, controller):
     g = _guide(app, controller)
     g._nav_rows["engines"].mouseReleaseEvent(None)
