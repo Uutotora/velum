@@ -2,11 +2,16 @@
 
 The signature screen: an adapted-napari **Layers** panel (list + full controls),
 the image **canvas** (nuclei stand-in with overlays and a napari-style viewer
-bar), and the **inspector** (Segment settings · Results). All static; the
+bar), and the **inspector** (Segment settings · Results). Still static — the
 tab-by-tab wiring (real napari layers, real predict/results) is tracked in
-``docstudio/BACKLOG.md``.
+``docstudio/BACKLOG.md`` — except the top-bar breadcrumb + engine chip, which
+reflect the real "active project" shared from the Projects tab
+(``set_active_project``).
 """
 from __future__ import annotations
+
+import html
+from typing import Optional
 
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtWidgets import (
@@ -16,6 +21,7 @@ from PyQt6.QtWidgets import (
 
 from studio import icons
 from studio import theme, demo
+from studio.project import ENGINE_LABELS, ENGINE_KIND, Project
 from studio.paint import nuclei_pixmap, NucleiView
 from studio.components import (
     Chip, Badge, PillButton, IconButton, SelectBox, Toggle, Slider, Stepper,
@@ -42,6 +48,7 @@ class WorkspaceScreen(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         outer.addWidget(self._topbar())
+        self.set_active_project(None)
 
         main = QWidget()
         row = QHBoxLayout(main)
@@ -61,14 +68,12 @@ class WorkspaceScreen(QWidget):
         row = QHBoxLayout(bar)
         row.setContentsMargins(18, 0, 18, 0)
         row.setSpacing(12)
-        crumb = QLabel(
-            f"<span style='color:{t['text_muted']}'>Projects</span>"
-            f"<span style='color:{t['border_strong']}'>&nbsp;/&nbsp;</span>"
-            f"<span style='color:{t['text']}'>Fluorescence Nuclei — DAPI</span>")
-        crumb.setStyleSheet("font-size:13px; font-weight:600;")
-        row.addWidget(crumb)
-        chip = Chip("CellSeg1 · LoRA", t, "primary")
-        row.addWidget(chip)
+        self._crumb = QLabel()
+        self._crumb.setStyleSheet("font-size:13px; font-weight:600;")
+        row.addWidget(self._crumb)
+        self._chip_row = row
+        self._engine_chip = Chip("", t, "muted")
+        row.addWidget(self._engine_chip)
         row.addStretch(1)
         row.addWidget(PillButton("Export", t, "ghost", "export", small=True))
         row.addWidget(PillButton("Run", t, "primary", "run", small=True))
@@ -82,6 +87,27 @@ class WorkspaceScreen(QWidget):
         wl.addWidget(bar)
         wl.addWidget(bottom)
         return wrap
+
+    # ── active project (shared from the Projects tab) ──────────────────────────
+    def set_active_project(self, project: Optional[Project]) -> None:
+        """Reflect the real active project in the breadcrumb + engine chip."""
+        t = self._t
+        if project is None:
+            name, engine_key, engine_label = "No project selected", None, "No project"
+        else:
+            name, engine_key = project.name, project.engine
+            engine_label = ENGINE_LABELS.get(engine_key, engine_key)
+        self._crumb.setText(
+            f"<span style='color:{t['text_muted']}'>Projects</span>"
+            f"<span style='color:{t['border_strong']}'>&nbsp;/&nbsp;</span>"
+            f"<span style='color:{t['text']}'>{html.escape(name)}</span>")
+        kind = ENGINE_KIND.get(engine_key, "muted") if engine_key else "muted"
+        idx = self._chip_row.indexOf(self._engine_chip)
+        self._chip_row.removeWidget(self._engine_chip)
+        self._engine_chip.setParent(None)
+        self._engine_chip.deleteLater()
+        self._engine_chip = Chip(engine_label, t, kind)
+        self._chip_row.insertWidget(idx, self._engine_chip)
 
     # ── left: Images | Layers ────────────────────────────────────────────────
     def _left_panel(self) -> QWidget:

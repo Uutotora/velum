@@ -5,6 +5,65 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-08 — Projects tab wired end to end (first real tab, skeleton → functional)
+
+The Projects tab is no longer demo cards — the first tab taken from
+`BACKLOG.md`'s "how to wire a tab" recipe, end to end:
+
+- **`studio/project.py` reintroduced** (the `Project`/`ProjectSettings`/
+  `ProjectStats`/`ProjectStore` data model, pure stdlib, previously removed in
+  the design-skeleton reset and preserved in git history) — adapted with
+  `ENGINE_LABELS`/`ENGINE_KIND` display-mapping constants (now the single
+  source every screen draws engine colour/label from) and a `touch=` escape
+  hatch on `ProjectStore.save` for callers that need explicit, deterministic
+  timestamps instead of "now".
+- **New `studio/project_controller.py`** — a Qt-free `ProjectController`
+  (mirrors `napari_app/core/predict_controller.py`'s shape): search/filter,
+  favourites, the "active project" shared with the Workspace tab, and
+  first-run sample seeding so a fresh install still shows the same 6 sample
+  projects the mockup always had — now real, persisted `Project` records
+  instead of hard-coded `demo` content. Small pure formatting helpers
+  (`to_card`, `format_count`, `relative_time`, `cover_seed`) keep screens.py
+  free of formatting/date logic.
+- **Home + Projects screens bound to the controller**: `demo.PROJECTS` /
+  `demo.RECENT_WHEN` reads replaced with live data; the search box and a new
+  "favourites only" toggle on the existing "Filter" button live-filter the
+  grid; a favourite star (new, on each card — the data model always had
+  `favorite`, the static skeleton just never rendered an affordance for it)
+  toggles and persists through the store; open callbacks switched from
+  list-index to project-id (index broke once filtering could reorder/drop
+  cards); the page header's counts are now computed from real data.
+- **"Active project" shared to the Workspace tab**: `WorkspaceScreen.
+  set_active_project()` updates the top-bar breadcrumb + engine chip — no
+  longer hardcoded to "Fluorescence Nuclei — DAPI" / "CellSeg1 · LoRA"
+  regardless of what you actually opened, and shows a neutral "No project
+  selected" state before any project is opened. Survives the theme-toggle
+  rebuild. The rest of the Workspace (layers, canvas, predict) is still the
+  Segment tab's own, separate, not-yet-started backlog item.
+- Cover art seeds are now derived deterministically from each project's id
+  (`zlib.crc32`) rather than the arbitrary integers `demo.py` used, since a
+  real project has no "seed" field to persist — same procedural nuclei-art
+  look, stable per project across relaunches, just no longer pinned to the
+  exact noise pattern the static mockup happened to show.
+- **Not wired here** (separate BACKLOG items): the "+ New Project" creation
+  dialog itself — cards/ghost-card still just navigate to a blank workspace,
+  no create-through-the-store flow yet.
+
+Verified: `studio/tests` green (87 tests: reintroduced + extended the historic
+pure-logic `project.py` suite, added a pure-logic `project_controller.py`
+suite, extended `test_app_wiring.py`'s screen/window tests to inject a
+`tmp_path`-backed controller — real `data_store/projects` is never touched by
+tests); the repo-root throwaway-venv check (`pip install --group test` only,
+Python 3.11, no torch/napari/PyQt6) collects and passes both `project.py` and
+`project_controller.py`'s suites for real (64 passed, `test_app_wiring.py`
+correctly skips as one unit via `importorskip("PyQt6")`); an offscreen
+end-to-end smoke run against the real default store (`data_store/projects`,
+which already has 4 real local projects from earlier manual testing) —
+construct, list, navigate to Projects, open a project, confirm the workspace
+breadcrumb and active-project state — all passed with neither napari nor
+torch imported. Not verified here (no display): the live look/animations of
+the new favourite star and filter-toggle states.
+
 ## 2026-07-08 — Studio is now its own top-level project + docs pivot to "own canvas"
 
 Structural + directional clarity, no behaviour change:

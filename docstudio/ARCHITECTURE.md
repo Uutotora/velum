@@ -10,10 +10,18 @@ window_chrome.py  TitleBar (own traffic lights, native move) + corner grips.
 theme.py          Design tokens (light+dark) + QSS builders + viridis ramp. Pure.
 components.py     The static UI kit (atoms) + the navigation Sidebar.
 paint.py          QPainter "nuclei" stand-in art (canvas, card covers, thumbs).
-demo.py           Static demo content mirroring the mockup. No logic.
-screens.py        HomeScreen, ProjectsScreen (+ shared page_header/scroll helpers).
+demo.py           Static demo content for tabs not yet wired. No logic.
+project.py        Project/ProjectSettings/ProjectStats/ProjectStore — the real,
+                  persisted data model (pure stdlib). The Projects tab's data layer.
+project_controller.py  ProjectController (Qt-free): search/filter, favourites,
+                  the active project shared with the Workspace tab, sample
+                  seeding. Home/Projects screens are bound to it.
+screens.py        HomeScreen, ProjectsScreen — bound to project_controller
+                  (+ shared page_header/scroll helpers). Live data, not demo.
 workspace.py      WorkspaceScreen — the signature Segment screen
                   (Images|Layers panel · canvas · Segment|Results inspector).
+                  Still static except the top-bar breadcrumb/engine chip,
+                  which reflect the real active project (set_active_project).
 extra_screens.py  ModelsScreen (train), DashboardScreen (charts + runs table).
 overlays.py       AssistantDrawer, LogsConsole, CommandPalette, Toast.
 icons.py          Studio's OWN icon set (from the mockup) — self-contained.
@@ -49,12 +57,13 @@ at a shared module's top level.
 Each tab goes from *static* to *functional* without changing how it looks.
 General recipe:
 
-1. **Re-introduce the data it needs.** For Projects, that's the `Project` /
-   `ProjectStore` data model (removed in the skeleton; it's in git history —
-   `git log -- studio/project.py` — reintroduce and adapt).
+1. **Re-introduce the data it needs.** If it was removed in the skeleton reset,
+   it's in git history (`git log -- studio/<name>.py`) — reintroduce and adapt.
+   Worked example: `studio/project.py` (the `Project`/`ProjectStore` model),
+   restored for the Projects tab.
 2. **Add a controller**, Qt-free where possible, that owns the logic and takes
    plain callbacks — mirror `napari_app/core/predict_controller.py`. Unit-test
-   it without Qt.
+   it without Qt. Worked example: `studio/project_controller.py`.
 3. **Bind the screen to the controller.** Replace the screen's `demo.*` reads
    with live data; connect its buttons/toggles/sliders to controller calls;
    feed results back into the same widgets. **Do not restyle** — reuse the

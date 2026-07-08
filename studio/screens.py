@@ -1,10 +1,11 @@
-"""CellSeg1 Studio — the screens (static design skeleton).
+"""CellSeg1 Studio — the screens.
 
-Native reproductions of the mockup, one screen per class, driven by
-``demo.py`` static content and the ``components``/``paint`` kits. No logic:
-buttons and controls render the design and give light visual feedback only.
-The Workspace is the signature screen (adapted-napari layers · canvas ·
-inspector). See ``docstudio/`` for the per-tab wiring plan.
+Native reproductions of the mockup, one screen per class, driven by the
+``components``/``paint`` kits. Home and Projects are wired to the real
+``ProjectController`` (live projects, search/filter/favourites); the other
+screens still render ``demo.py`` static content pending their own tab in
+``docstudio/BACKLOG.md``. The Workspace is the signature screen (adapted-napari
+layers · canvas · inspector). See ``docstudio/`` for the per-tab wiring plan.
 """
 from __future__ import annotations
 
@@ -17,7 +18,9 @@ from PyQt6.QtWidgets import (
 )
 
 from studio import icons
-from studio import theme, demo
+from studio import theme
+from studio import project_controller
+from studio.project import ENGINE_KIND
 from studio.paint import nuclei_pixmap, NucleiView
 from studio.components import (
     Chip, Badge, PillButton, IconButton, SelectBox, Toggle, Slider, Stepper,
@@ -59,14 +62,13 @@ def cover_label(seed: int, w: int, h: int, density: float, big: bool = False) ->
     return lb
 
 
-ENGINE_KIND = {"cellseg1": "primary", "cellpose": "signal", "sam2": "primary"}
-
-
 # ── Home ─────────────────────────────────────────────────────────────────────
 class HomeScreen(QWidget):
-    def __init__(self, t: dict, on_navigate: Callable[[str], None], on_open: Callable[[int], None]):
+    def __init__(self, t: dict, controller: "project_controller.ProjectController",
+                 on_navigate: Callable[[str], None], on_open: Callable[[str], None]):
         super().__init__()
         self._t = t
+        self._controller = controller
         self._nav = on_navigate
         self._open = on_open
 
@@ -152,11 +154,15 @@ class HomeScreen(QWidget):
         link.linkActivated.connect(lambda: self._nav("projects"))
         head.addWidget(link)
         v.addLayout(head)
-        for i, p in enumerate(demo.PROJECTS[:4]):
-            v.addWidget(self._recent_row(i, p))
+        recent = [project_controller.to_card(p) for p in self._controller.recent(limit=4)]
+        if not recent:
+            empty = label("No projects yet — create one to get started.", 12.5, t["text_muted"])
+            v.addWidget(empty)
+        for card in recent:
+            v.addWidget(self._recent_row(card))
         return w
 
-    def _recent_row(self, idx: int, p: demo.DemoProject) -> QFrame:
+    def _recent_row(self, p: "project_controller.ProjectCard") -> QFrame:
         t = self._t
         row = QFrame()
         row.setObjectName("RRow")
@@ -174,10 +180,10 @@ class HomeScreen(QWidget):
         meta.addWidget(label(p.name, 13.5, t["text"], 600))
         meta.addWidget(label(f"{p.engine_label} · {p.n_images} images · {p.n_cells} cells", 11.5, t["text_muted"]))
         lay.addLayout(meta, 1)
-        when = QLabel(demo.RECENT_WHEN[idx])
+        when = QLabel(p.when)
         when.setStyleSheet(f"color:{t['text_muted']}; font-size:11.5px; font-family:{theme.MONO};")
         lay.addWidget(when)
-        row.mouseReleaseEvent = lambda e, i=idx: self._open(i)
+        row.mouseReleaseEvent = lambda e, pid=p.id: self._open(pid)
         return row
 
     def _aside(self) -> QVBoxLayout:
@@ -250,32 +256,37 @@ class HomeScreen(QWidget):
 
 # ── Projects ─────────────────────────────────────────────────────────────────
 class ProjectsScreen(QWidget):
-    def __init__(self, t: dict, on_navigate: Callable[[str], None], on_open: Callable[[int], None]):
+    def __init__(self, t: dict, controller: "project_controller.ProjectController",
+                 on_navigate: Callable[[str], None], on_open: Callable[[str], None]):
         super().__init__()
         self._t = t
+        self._controller = controller
         self._nav = on_navigate
         self._open = on_open
+        self._query = ""
+        self._favorites_only = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         cta = PillButton("New Project", t, "primary", "plus")
         cta.clicked.connect(lambda: on_navigate("workspace"))
-        outer.addWidget(page_header("Projects", f"{len(demo.PROJECTS)} projects · 794 images · 3 engines", t, cta))
+        n_projects, n_images, n_engines = controller.summary()
+        subtitle = (f"{n_projects} project{'s' if n_projects != 1 else ''} · "
+                    f"{n_images} images · {n_engines} engine{'s' if n_engines != 1 else ''}")
+        outer.addWidget(page_header("Projects", subtitle, t, cta))
         outer.addWidget(self._toolbar())
 
         body = QWidget()
         host = QVBoxLayout(body)
         host.setContentsMargins(34, 0, 34, 40)
-        grid = QGridLayout()
-        grid.setSpacing(16)
-        for i, p in enumerate(demo.PROJECTS):
-            grid.addWidget(self._card(i, p), i // 3, i % 3)
-        idx = len(demo.PROJECTS)
-        grid.addWidget(self._ghost(), idx // 3, idx % 3)
-        host.addLayout(grid)
+        self._grid = QGridLayout()
+        self._grid.setSpacing(16)
+        host.addLayout(self._grid)
         host.addStretch(1)
         outer.addWidget(scroll(body))
+
+        self._populate_grid()
 
     def _toolbar(self) -> QWidget:
         t = self._t
@@ -288,15 +299,48 @@ class ProjectsScreen(QWidget):
         search.setClearButtonEnabled(True)
         search.setMaximumWidth(420)
         search.addAction(icons.icon("diagnose", t["text_muted"], 15), QLineEdit.ActionPosition.LeadingPosition)
+        search.textChanged.connect(self._on_search)
         row.addWidget(search)
         row.addStretch(1)
-        row.addWidget(PillButton("Filter", t, "ghost", "filter", small=True))
+        self._filter_btn = PillButton("Filter", t, "ghost", "filter", small=True)
+        self._filter_btn.setToolTip("Show favourites only")
+        self._filter_btn.clicked.connect(self._on_toggle_filter)
+        row.addWidget(self._filter_btn)
         view = SegControl(["▦", "☰"], t, 0, compact=True)
         view.setFixedWidth(78)
         row.addWidget(view)
         return bar
 
-    def _card(self, idx: int, p: demo.DemoProject) -> QFrame:
+    def _on_search(self, text: str) -> None:
+        self._query = text
+        self._populate_grid()
+
+    def _on_toggle_filter(self) -> None:
+        self._favorites_only = not self._favorites_only
+        kind = "primary" if self._favorites_only else "ghost"
+        self._filter_btn.setStyleSheet(
+            theme.button_qss(self._t, kind) + "QPushButton{padding:7px 11px; font-size:12.5px;}")
+        self._populate_grid()
+
+    def _toggle_favorite(self, project_id: str) -> None:
+        self._controller.toggle_favorite(project_id)
+        self._populate_grid()
+
+    def _populate_grid(self) -> None:
+        while self._grid.count():
+            item = self._grid.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        projects = self._controller.list_projects(query=self._query, favorites_only=self._favorites_only)
+        cards = [project_controller.to_card(p) for p in projects]
+        for i, card in enumerate(cards):
+            self._grid.addWidget(self._card(card), i // 3, i % 3)
+        idx = len(cards)
+        self._grid.addWidget(self._ghost(), idx // 3, idx % 3)
+
+    def _card(self, p: "project_controller.ProjectCard") -> QFrame:
         t = self._t
         card = QFrame()
         card.setObjectName("PCard")
@@ -321,6 +365,20 @@ class ProjectsScreen(QWidget):
         cwl = QVBoxLayout(cwrap)
         cwl.setContentsMargins(0, 0, 0, 0)
         cover.setParent(cwrap)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(8, 8, 8, 0)
+        top.addStretch(1)
+        star = IconButton("star", t, 26, "Favourite",
+                           on_click=lambda pid=p.id: self._toggle_favorite(pid))
+        star_color = "#f0b357" if p.favorite else "rgba(255,255,255,0.65)"
+        star.setIcon(icons.icon("star", star_color, 15))
+        star.setStyleSheet(
+            "QToolButton{background:rgba(8,12,16,0.4); border:1px solid transparent; border-radius:8px;}"
+            "QToolButton:hover{background:rgba(8,12,16,0.6);}")
+        top.addWidget(star)
+        cwl.addLayout(top)
+
         overlay = QHBoxLayout()
         overlay.setContentsMargins(12, 0, 12, 10)
         eng = Chip(p.engine_label, t, ENGINE_KIND.get(p.engine_key, "primary"))
@@ -357,10 +415,10 @@ class ProjectsScreen(QWidget):
             b.addSpacing(10)
             b.addLayout(tags)
         lay.addWidget(body)
-        card.mouseReleaseEvent = lambda e, i=idx: self._open(i)
+        card.mouseReleaseEvent = lambda e, pid=p.id: self._open(pid)
         return card
 
-    def _stats(self, p: demo.DemoProject) -> QHBoxLayout:
+    def _stats(self, p: "project_controller.ProjectCard") -> QHBoxLayout:
         t = self._t
         row = QHBoxLayout()
         row.setSpacing(16)

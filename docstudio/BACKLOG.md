@@ -24,14 +24,17 @@ When you finish a tab: log it in `CHANGELOG.md`, tick it here, update
 
 ## P0 — make the shell truly usable
 
-### Projects tab · M
+### Projects tab · M · ✅ done (2026-07-08)
 - **Goal:** real projects, not demo cards.
-- **Work:** reintroduce the `Project`/`ProjectStore` data model (in git history,
-  `studio/project.py`); back Home "recent" + Projects grid with it;
-  wire search/filter/favourite; card click opens that project in the workspace.
-- **Tasks:** ☐ restore + adapt data model · ☐ store→screens binding ·
-  ☐ live search/filter/favourite · ☐ "active project" state shared to workspace ·
-  ☐ tests (store pure-logic + screen wiring).
+- **Work:** reintroduced the `Project`/`ProjectStore` data model (in git history,
+  `studio/project.py`); backed Home "recent" + Projects grid with it;
+  wired search/filter/favourite; card click opens that project in the workspace.
+- **Tasks:** ☑ restore + adapt data model · ☑ store→screens binding ·
+  ☑ live search/filter/favourite · ☑ "active project" state shared to workspace ·
+  ☑ tests (store pure-logic + screen wiring).
+- Not done here (separate backlog items below): the "+ New Project" creation
+  flow itself (cards still open a blank workspace — no dialog yet), and the
+  workspace's own layers/canvas/predict wiring (Segment tab, unstarted).
 
 ### New-project dialog · S
 - **Goal:** the "+ New Project" flow (name · description · import · engine),

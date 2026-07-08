@@ -1,10 +1,11 @@
-"""CellSeg1 Studio — the application shell and entry point (design skeleton).
+"""CellSeg1 Studio — the application shell and entry point.
 
-A pure-design branch: this app is a faithful, **static** reproduction of the
-north-star mockup with **no business logic** — no napari, no torch, no model,
-no file/project IO. It launches on PyQt6 alone. Real functionality is wired
-back tab by tab; see ``docstudio/`` (OVERVIEW, ARCHITECTURE, BACKLOG,
-AGENT_PROMPT) for how, and why it's staged this way.
+This app is a faithful, native-Qt reproduction of the north-star mockup, with
+functionality wired back tab by tab (see ``docstudio/`` — OVERVIEW,
+ARCHITECTURE, BACKLOG, AGENT_PROMPT). The Home/Projects tabs are backed by a
+real ``ProjectController`` (``studio/project_controller.py``); the rest still
+render static ``demo`` content pending their own tab. No napari, no torch —
+those are reused lazily, only inside the tab that needs them.
 
 ``StudioWindow`` owns a frameless, rounded window with our own dark title bar,
 a navigation sidebar, a stack of screens (Home · Projects · Segment · Models &
@@ -17,6 +18,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Make the repo root importable before the ``studio`` imports below, so
 # ``python studio/app.py`` works from any cwd (``python -m`` would prepend the
@@ -34,6 +36,7 @@ from PyQt6.QtWidgets import (
 
 from studio import theme
 from studio.components import Sidebar
+from studio.project_controller import ProjectController
 from studio.screens import HomeScreen, ProjectsScreen
 from studio.workspace import WorkspaceScreen
 from studio.extra_screens import ModelsScreen, DashboardScreen
@@ -75,9 +78,11 @@ def load_fonts() -> str:
 class StudioWindow(QMainWindow):
     """Frameless rounded window: title bar + sidebar + screen stack + overlays."""
 
-    def __init__(self, theme_name: str = "dark"):
+    def __init__(self, theme_name: str = "dark",
+                 project_controller: Optional[ProjectController] = None):
         super().__init__()
         self._theme_name = theme_name
+        self._projects = project_controller or ProjectController()
         self._screens: dict[str, QWidget] = {}
         self.setWindowTitle("CellSeg1 Studio")
         self.resize(1320, 860)
@@ -123,12 +128,14 @@ class StudioWindow(QMainWindow):
 
         self._stack = QStackedWidget()
         self._screens = {
-            "home": HomeScreen(t, self.navigate, self._open_project),
-            "projects": ProjectsScreen(t, self.navigate, self._open_project),
+            "home": HomeScreen(t, self._projects, self.navigate, self._open_project),
+            "projects": ProjectsScreen(t, self._projects, self.navigate, self._open_project),
             "workspace": WorkspaceScreen(t),
             "train": ModelsScreen(t),
             "dashboard": DashboardScreen(t),
         }
+        # survives theme-toggle rebuilds, which recreate the workspace screen
+        self._screens["workspace"].set_active_project(self._projects.get_active())
         for key in _STACK_KEYS:
             self._stack.addWidget(self._screens[key])
         row.addWidget(self._stack, 1)
@@ -160,7 +167,9 @@ class StudioWindow(QMainWindow):
                 except Exception:
                     pass
 
-    def _open_project(self, _idx: int) -> None:
+    def _open_project(self, project_id: str) -> None:
+        project = self._projects.set_active(project_id)
+        self._screens["workspace"].set_active_project(project)
         self.navigate("workspace")
 
     def _toggle_drawer(self, drawer) -> None:
