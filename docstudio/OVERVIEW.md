@@ -43,6 +43,9 @@ against — then each tab is wired properly, in isolation, with its own plan.
 
 ## Ground rules
 
+- **Studio lives on its own branch — never merged into `main`.** `main` holds
+  the classic napari app plus other important, unrelated work; keep all Studio
+  work on the Studio branch (`worktree-studio-app`). See AGENT_PROMPT → *Git*.
 - **Keep the classic app untouched.** `napari_app/main.py`, `run_napari.sh`,
   the `cellseg1` console script must stay byte-for-byte. Studio ships behind
   `run_studio.sh` / `cellseg1-studio`.

@@ -31,6 +31,9 @@ This folder is Studio's own doc set — separate from the repo-wide `docs/`
 - The **classic app is untouched** (`napari_app/main.py`, `run_napari.sh`, the
   `cellseg1` command) — launch it any time to use the fully-functional (if
   less polished) product.
+- **Studio lives on its own branch and is never merged into `main`** (which
+  holds the classic app + other critical work). All Studio work happens on the
+  Studio branch.
 
 ## Run it
 

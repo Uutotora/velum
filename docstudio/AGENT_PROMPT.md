@@ -60,14 +60,15 @@ tab" in `ARCHITECTURE.md`:
   `pytest.importorskip("PyQt6")` (offscreen). Run the throwaway-venv light-group
   check from the repo `AGENTS.md` before committing so nothing heavy leaks into CI.
 
-## Git — keep local and remote in sync
+## Git — Studio lives on its OWN branch; NEVER merge to `main`
 
-- Work on a branch; **push it** before you stop (never leave work only local).
-- Branch → implement + test → PR (test plan + "not verified" note) → green CI on
-  **py3.11 and py3.12** → merge (the repo pre-authorises auto-merge of your own
-  green PRs; see `AGENTS.md`).
-- **After merging, sync local immediately** so it never drifts:
-  `git checkout main && git merge --ff-only origin/main && git branch -d <branch>`.
+- **All Studio work stays on the Studio branch** (`worktree-studio-app`).
+  `main` is the classic napari app plus other important, unrelated work — **do
+  NOT merge Studio into `main`, and don't open PRs targeting `main`.**
+- Commit Studio changes on the Studio branch (or a short-lived sub-branch you
+  merge back **into the Studio branch**), and **always push** so local and
+  remote stay in sync — never leave work only local.
+- Test before committing: `QT_QPA_PLATFORM=offscreen <python> -m pytest studio/tests -q`.
 - Log the tab in `docstudio/CHANGELOG.md`, tick it in `docstudio/BACKLOG.md`.
 
 ## Environment
