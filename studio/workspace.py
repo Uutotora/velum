@@ -205,6 +205,7 @@ class WorkspaceScreen(QWidget):
         self._rebuild_results_pane()
         if self._canvas is not None:
             self._canvas.home()
+            self._sync_toolbars()
 
     # ── top bar ──────────────────────────────────────────────────────────────
     def _topbar(self) -> QWidget:
@@ -382,7 +383,9 @@ class WorkspaceScreen(QWidget):
             except Exception:
                 pass
         if self._canvas is not None:
+            self._canvas.mip = False  # the previous image's volume context (if any) no longer applies
             self._canvas.home()
+            self._sync_toolbars()
         self._refresh_images_pane()
         self._rebuild_layer_controls()
         self._rebuild_results_pane()
@@ -750,6 +753,7 @@ class WorkspaceScreen(QWidget):
     def _set_canvas_mode(self, mode: str) -> None:
         self._canvas.set_mode(mode)
         self._rebuild_layer_controls()
+        self._sync_toolbars()
 
     def _set_layer_opacity(self, layer, value: float, badge: Badge) -> None:
         layer.opacity = value
@@ -855,11 +859,13 @@ class WorkspaceScreen(QWidget):
         tl = QVBoxLayout(tools)
         tl.setContentsMargins(5, 5, 5, 5)
         tl.setSpacing(4)
+        self._floating_tool_buttons: list[tuple[QToolButton, str]] = []
         for icon_name, action in [("target", PAN_ZOOM), ("brush", PAINT),
                                    ("points", "__add_point__"), ("target", "__home__")]:
             b = IconButton(icon_name, t, 30)
             b.clicked.connect(lambda _=False, a=action: self._on_floating_tool(a))
             tl.addWidget(b)
+            self._floating_tool_buttons.append((b, action))
         self._vp_tools = tools
 
         vbar = QFrame(vp)
@@ -875,9 +881,11 @@ class WorkspaceScreen(QWidget):
             ("grid", "Grid mode", self._toggle_grid),
             ("home", "Reset view", self._canvas.home),
         ]
+        self._vbar_buttons: dict[str, QToolButton] = {}
         for icon_name, tip, handler in vbar_defs:
             b = IconButton(icon_name, t, 30, tip, handler)
             vl.addWidget(b)
+            self._vbar_buttons[icon_name] = b
         self._vp_bar = vbar
 
         self._vp_status = QLabel("", vp)
@@ -888,7 +896,35 @@ class WorkspaceScreen(QWidget):
         vp._overlays = (legend, tools, vbar, self._vp_status)
         vp.resizeEvent = lambda e: self._place_overlays(vp)
         self._update_legend()
+        self._sync_toolbars()
         return vp
+
+    def _sync_toolbars(self) -> None:
+        """Re-style (never rebuild) the floating tool strip + viewer bar so
+        their "on" highlight always matches live Canvas state — mirrors the
+        Labels controls' mode-tool-grid highlight treatment exactly."""
+        t = self._t
+        mode = self._canvas.mode if self._canvas is not None else PAN_ZOOM
+        for btn, action in self._floating_tool_buttons:
+            on = action == mode  # only PAN_ZOOM/PAINT persist as a "mode"; the
+            # add-point/home actions are one-shot and never show as active
+            self._style_toolbar_button(btn, action.replace("__add_point__", "points")
+                                       .replace("__home__", "target"), on)
+        if self._canvas is not None:
+            self._style_toolbar_button(self._vbar_buttons["cube3d"], "cube3d", self._canvas.mip)
+            self._style_toolbar_button(self._vbar_buttons["grid"], "grid", self._canvas.grid)
+            self._style_toolbar_button(self._vbar_buttons["shuffle"], "shuffle", self._canvas.transposed)
+
+    def _style_toolbar_button(self, btn: QToolButton, icon_name: str, on: bool) -> None:
+        t = self._t
+        if on:
+            btn.setStyleSheet(f"QToolButton{{background:{t['signal_weak']}; border-radius:7px;}}")
+            btn.setIcon(icons.icon(icon_name, t["signal"], 16))
+        else:
+            btn.setStyleSheet(
+                f"QToolButton{{background:transparent; border:1px solid transparent; border-radius:8px;}}"
+                f"QToolButton:hover{{background:{t['surface2']}; border-color:{t['border']};}}")
+            btn.setIcon(icons.icon(icon_name, t["text_muted"], 16))
 
     def _place_overlays(self, vp) -> None:
         legend, tools, vbar, status = vp._overlays
@@ -926,6 +962,7 @@ class WorkspaceScreen(QWidget):
     def _on_floating_tool(self, action: str) -> None:
         if action == "__home__":
             self._canvas.home()
+            self._sync_toolbars()
             return
         if action == "__add_point__":
             points = self._layers.by_kind("points")
@@ -935,9 +972,11 @@ class WorkspaceScreen(QWidget):
                 self._layers.add(PointsLayer(self._layers.unique_name("Prompts")))
             self._canvas.set_mode(PAINT)  # any non-pan_zoom mode routes clicks to the selected layer
             self._rebuild_layer_controls()
+            self._sync_toolbars()
             return
         self._canvas.set_mode(action)
         self._rebuild_layer_controls()
+        self._sync_toolbars()
 
     def _toggle_logs_console(self) -> None:
         if self._on_toggle_logs:
@@ -948,15 +987,18 @@ class WorkspaceScreen(QWidget):
             self._toast("No z-stack loaded", "2D / 3D projection needs a loaded z-stack/time-lapse.")
             return
         self._canvas.toggle_mip()
+        self._sync_toolbars()
 
     def _roll_channel(self) -> None:
         self._canvas.roll_channel()
 
     def _toggle_transpose(self) -> None:
         self._canvas.toggle_transpose()
+        self._sync_toolbars()
 
     def _toggle_grid(self) -> None:
         self._canvas.toggle_grid()
+        self._sync_toolbars()
 
     # ── right: inspector ─────────────────────────────────────────────────────
     def _inspector(self) -> QWidget:

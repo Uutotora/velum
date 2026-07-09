@@ -456,6 +456,67 @@ def test_toggle_grid_and_transpose(app, segment, projects, toasts, tmp_path, sto
     assert ws._canvas.transposed is True
 
 
+# ── toolbar active-state sync ─────────────────────────────────────────────────
+def _is_toolbar_button_on(btn) -> bool:
+    """True if _style_toolbar_button styled this button as "on" (signal_weak
+    background) rather than the default transparent/off look."""
+    return "background:transparent" not in btn.styleSheet()
+
+
+def test_grid_button_highlights_when_grid_is_on(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    grid_btn = ws._vbar_buttons["grid"]
+    assert not _is_toolbar_button_on(grid_btn)
+    ws._toggle_grid()
+    assert _is_toolbar_button_on(grid_btn)
+    ws._toggle_grid()
+    assert not _is_toolbar_button_on(grid_btn)
+
+
+def test_mip_button_highlights_only_for_a_volume(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    cube_btn = ws._vbar_buttons["cube3d"]
+    ws._toggle_mip()  # no volume loaded -> stays off, no crash
+    assert not _is_toolbar_button_on(cube_btn)
+
+    volume = LabelsLayer("Segmentation", np.zeros((3, 20, 20), dtype=np.int32))
+    ws._layers.remove(ws._layers.index_of(ws._layers.find("Segmentation")))
+    ws._layers.add(volume, select=False)
+    ws._toggle_mip()
+    assert ws._canvas.mip is True
+    assert _is_toolbar_button_on(cube_btn)
+
+
+def test_floating_tool_strip_highlights_active_mode(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    pan_btn = ws._floating_tool_buttons[0][0]  # (target, PAN_ZOOM)
+    brush_btn = ws._floating_tool_buttons[1][0]  # (brush, PAINT)
+    assert _is_toolbar_button_on(pan_btn)  # PAN_ZOOM is the default mode
+    assert not _is_toolbar_button_on(brush_btn)
+    ws._set_canvas_mode(PAINT)
+    assert not _is_toolbar_button_on(pan_btn)
+    assert _is_toolbar_button_on(brush_btn)
+
+
+def test_selecting_a_new_image_resets_mip(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=2)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._layers.remove(ws._layers.index_of(ws._layers.find("Segmentation")))
+    ws._layers.add(LabelsLayer("Segmentation", np.zeros((3, 20, 20), dtype=np.int32)), select=False)
+    ws._toggle_mip()
+    assert ws._canvas.mip is True
+    ws._current_image_path = None  # force _select_image to treat it as a real switch
+    ws._select_image(project.image_paths[1])
+    assert ws._canvas.mip is False
+
+
 def test_toggle_logs_console_calls_the_injected_callback(app, segment, projects, toasts):
     calls = []
     ws = _ws(app, segment, projects, toasts, on_toggle_logs=lambda: calls.append(True))
