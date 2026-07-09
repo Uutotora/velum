@@ -19,9 +19,11 @@ import pytest
 pytest.importorskip("PyQt6")
 workspace = pytest.importorskip("studio.workspace")
 
-from PyQt6.QtWidgets import QApplication, QFileDialog
+from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QApplication, QFileDialog, QFrame
 
-from studio import theme
+from studio import demo, theme
 from studio.layer_model import ImageLayer, LabelsLayer, PAINT, PAN_ZOOM, PointsLayer, ShapesLayer
 from studio.project import Project, ProjectSettings, ProjectStore
 from studio.project_controller import ProjectController
@@ -951,3 +953,151 @@ def test_export_csv_without_a_result_toasts(app, segment, projects, toasts, tmp_
     ws._load_project(project)
     ws._export_csv()
     assert toasts and "Nothing to export" in toasts[-1][0]
+
+
+# ── real-click regressions: raw mouseReleaseEvent widgets must not crash ────
+# Found from an actual running session: clicking "preserve labels" / "show
+# selected" raised "TypeError: invalid argument to sipBadCatcherResult()" —
+# a hard process abort (SIGABRT), not a catchable Python exception. Root
+# cause: several rows/swatches override mouseReleaseEvent directly (not a
+# real Qt signal) and, from inside that same call, trigger a container
+# rebuild (_clear_layout -> setParent(None)) that reparents the very widget
+# whose own mouseReleaseEvent is still executing — a PyQt/SIP
+# reentrant-virtual-call hazard. Every prior test called the handler method
+# directly (ws._toggle_layer_bool(...), ws._select_layer(...), etc.) or
+# even called widget.mouseReleaseEvent(event) directly as a plain Python
+# method call — neither actually dispatches through Qt's C++ virtual-call
+# machinery the way a real click does, so neither ever reproduced this.
+# Only routing the event through QApplication.sendEvent() (the same path
+# QWidget::event() takes for a real click) triggers it — confirmed by
+# reproducing the exact SIGABRT against the unfixed code before applying
+# the fix below. Each dispatch is followed by pumping the event loop so a
+# deferred (QTimer.singleShot(0, ...)) handler gets a chance to run.
+def _dispatch_release(widget, pos=(5, 5)):
+    ev = QMouseEvent(QMouseEvent.Type.MouseButtonRelease, QPointF(*pos),
+                     Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton,
+                     Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(widget, ev)
+
+
+def _pump_events(app, n=10):
+    for _ in range(n):
+        app.processEvents()
+
+
+def _find_check_row(ws, name: str) -> QFrame:
+    from PyQt6.QtWidgets import QLabel
+    for lbl in ws._layer_controls_container.findChildren(QLabel):
+        if lbl.text() == name:
+            return lbl.parentWidget()
+    raise AssertionError(f"no checkbox row named {name!r} found")
+
+
+def test_clicking_preserve_labels_checkbox_does_not_crash(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    seg = ws._layers.find("Segmentation")
+    before = seg.preserve_labels
+    row = _find_check_row(ws, "preserve labels")
+    _dispatch_release(row)
+    _pump_events(app)
+    assert seg.preserve_labels is not before
+
+
+def test_clicking_show_selected_checkbox_does_not_crash(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    seg = ws._layers.find("Segmentation")
+    before = seg.show_selected_label
+    row = _find_check_row(ws, "show selected")
+    _dispatch_release(row)
+    _pump_events(app)
+    assert seg.show_selected_label is not before
+
+
+def test_clicking_contiguous_checkbox_does_not_crash(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    seg = ws._layers.find("Segmentation")
+    before = seg.contiguous
+    row = _find_check_row(ws, "contiguous")
+    _dispatch_release(row)
+    _pump_events(app)
+    assert seg.contiguous is not before
+
+
+def test_clicking_a_label_colour_swatch_does_not_crash(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    seg = ws._layers.find("Segmentation")
+    seg.selected_label = 1
+    first_color = demo.LABEL_COLORS[0]
+    sw = next(f for f in ws._layer_controls_container.findChildren(QFrame)
+              if f"background:{first_color}" in f.styleSheet())
+    _dispatch_release(sw)
+    _pump_events(app)
+    assert seg.color_overrides.get(1) is not None
+
+
+def test_clicking_a_layer_row_does_not_crash_and_selects_it(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    gt_idx = ws._layers.index_of(ws._layers.find("Segmentation"))
+    other_idx = 0 if gt_idx != 0 else 1
+    row = ws._layers_list_layout.itemAt(other_idx).widget()
+    _dispatch_release(row)
+    _pump_events(app)
+    assert ws._layers.selected_index == other_idx
+
+
+def test_clicking_an_image_row_does_not_crash_and_switches_image(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=2)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    target_path = project.image_paths[1]
+    row = ws._images_list_layout.itemAt(1).widget()
+    _dispatch_release(row)
+    _pump_events(app)
+    assert ws._current_image_path == target_path
+
+
+# ── regression: floating tool-strip icons must not fall back to "chevron" ───
+def test_floating_tool_strip_shows_real_icons_not_a_fallback_chevron(
+        app, segment, projects, toasts, tmp_path, storage):
+    """_sync_toolbars used to re-derive each button's icon name from its
+    raw mode/action string (e.g. "pan_zoom", "paint") instead of the
+    semantic icon name used at construction ("target", "brush"). Neither
+    is a real key in icons.PATHS, so icons.py's own fallback silently drew
+    the generic "chevron" glyph for both — on every restyle, which fires on
+    nearly every interaction, visibly replacing the real icons almost
+    immediately. Existing coverage only checked the on/off *highlight*
+    style, never which glyph was actually drawn, so this shipped unnoticed
+    until a real screenshot showed two tool buttons as plain chevrons."""
+    from studio import icons
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    t = theme.DARK
+
+    def _img(name, color):
+        return icons.icon(name, color, 16).pixmap(16, 16).toImage()
+
+    pan_btn = ws._floating_tool_buttons[0][0]   # (target, PAN_ZOOM)
+    brush_btn = ws._floating_tool_buttons[1][0]  # (brush, PAINT)
+    assert pan_btn.icon().pixmap(16, 16).toImage() == _img("target", t["signal"])
+    assert brush_btn.icon().pixmap(16, 16).toImage() == _img("brush", t["text_muted"])
+
+    ws._set_canvas_mode(PAINT)  # forces another _sync_toolbars() restyle pass
+    assert pan_btn.icon().pixmap(16, 16).toImage() == _img("target", t["text_muted"])
+    assert brush_btn.icon().pixmap(16, 16).toImage() == _img("brush", t["signal"])

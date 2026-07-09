@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from PyQt6.QtCore import Qt, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout,
@@ -417,7 +417,15 @@ class WorkspaceScreen(QWidget):
         dot.setFixedSize(8, 8)
         dot.setStyleSheet(f"background:{dcol}; border-radius:4px;")
         lay.addWidget(dot)
-        row.mouseReleaseEvent = lambda e, p=path: self._select_image(p)
+        # Deferred, not called straight from this handler: _select_image()
+        # ends up rebuilding _images_list_layout (this very row's parent)
+        # via _refresh_images_pane() — tearing down a widget while its own
+        # mouseReleaseEvent is still on the call stack corrupts PyQt/SIP's
+        # bookkeeping for that virtual call ("TypeError: invalid argument
+        # to sipBadCatcherResult()", a hard process abort in the real app,
+        # not just a caught exception). QTimer.singleShot(0, ...) runs it
+        # on the next event-loop tick, once this call has fully returned.
+        row.mouseReleaseEvent = lambda e, p=path: QTimer.singleShot(0, lambda: self._select_image(p))
         return row
 
     def _thumbnail(self, path: str) -> QPixmap:
@@ -568,7 +576,9 @@ class WorkspaceScreen(QWidget):
         nm.setStyleSheet(f"color:{t['text']}; font-size:12.5px; font-weight:600;")
         lay.addWidget(nm, 1)
         lay.addWidget(label(count, 10.5, t["text_muted"]))
-        row.mouseReleaseEvent = lambda e, idx=i: self._select_layer(idx)
+        # Deferred for the same reason as the image row above: _select_layer
+        # rebuilds _layers_list_layout (this row's own parent) synchronously.
+        row.mouseReleaseEvent = lambda e, idx=i: QTimer.singleShot(0, lambda: self._select_layer(idx))
         return row
 
     def _select_layer(self, idx: int) -> None:
@@ -696,7 +706,11 @@ class WorkspaceScreen(QWidget):
             sw.setCursor(Qt.CursorShape.PointingHandCursor)
             border = f"1px solid rgba(128,128,128,0.3)"
             sw.setStyleSheet(f"background:{col}; border:{border}; border-radius:4px;")
-            sw.mouseReleaseEvent = lambda e, c=col, ly=layer: self._pick_label_color(ly, c)
+            # Deferred for the same reason as the layer/image rows:
+            # _pick_label_color ends in _rebuild_layer_controls(), which
+            # tears down this very swatch's own parent container.
+            sw.mouseReleaseEvent = lambda e, c=col, ly=layer: QTimer.singleShot(
+                0, lambda: self._pick_label_color(ly, c))
             pal.addWidget(sw, i // 9, i % 9)
         v.addLayout(pal)
 
@@ -836,7 +850,17 @@ class WorkspaceScreen(QWidget):
         lay.addWidget(label(name, 12, t["text_subtle"]))
         lay.addStretch(1)
         if on_toggle is not None:
-            row.mouseReleaseEvent = lambda e: (on_toggle(), self._rebuild_layer_controls())
+            # Deferred for the same reason as the layer/image rows and the
+            # colour swatches above: rebuilding _layer_controls_container
+            # (via _rebuild_layer_controls()) while this very row's own
+            # mouseReleaseEvent is still executing crashes PyQt/SIP's
+            # bookkeeping for that virtual call outright (a hard process
+            # abort — "TypeError: invalid argument to sipBadCatcherResult()"
+            # — not a catchable exception). Confirmed against a real running
+            # session: clicking "preserve labels"/"show selected" reproduced
+            # it every time.
+            row.mouseReleaseEvent = lambda e: QTimer.singleShot(
+                0, lambda: (on_toggle(), self._rebuild_layer_controls()))
         return row
 
     def _wrap(self, layout) -> QWidget:
@@ -955,13 +979,13 @@ class WorkspaceScreen(QWidget):
         tl = QVBoxLayout(tools)
         tl.setContentsMargins(5, 5, 5, 5)
         tl.setSpacing(4)
-        self._floating_tool_buttons: list[tuple[QToolButton, str]] = []
+        self._floating_tool_buttons: list[tuple[QToolButton, str, str]] = []
         for icon_name, action in [("target", PAN_ZOOM), ("brush", PAINT),
                                    ("points", "__add_point__"), ("target", "__home__")]:
             b = IconButton(icon_name, t, 30)
             b.clicked.connect(lambda _=False, a=action: self._on_floating_tool(a))
             tl.addWidget(b)
-            self._floating_tool_buttons.append((b, action))
+            self._floating_tool_buttons.append((b, action, icon_name))
         self._vp_tools = tools
 
         vbar = QFrame(vp)
@@ -998,14 +1022,21 @@ class WorkspaceScreen(QWidget):
     def _sync_toolbars(self) -> None:
         """Re-style (never rebuild) the floating tool strip + viewer bar so
         their "on" highlight always matches live Canvas state — mirrors the
-        Labels controls' mode-tool-grid highlight treatment exactly."""
+        Labels controls' mode-tool-grid highlight treatment exactly.
+
+        Uses each button's own stored icon name, never re-derived from its
+        mode/action string: "pan_zoom"/"paint" aren't real icons.PATHS keys
+        (only their semantic names "target"/"brush" are), so a previous
+        version that reconstructed the name from the action here silently
+        redrew the wrong glyph — icons.py falls back to a generic chevron
+        for any unknown name — on every single restyle, i.e. on almost
+        every interaction."""
         t = self._t
         mode = self._canvas.mode if self._canvas is not None else PAN_ZOOM
-        for btn, action in self._floating_tool_buttons:
+        for btn, action, icon_name in self._floating_tool_buttons:
             on = action == mode  # only PAN_ZOOM/PAINT persist as a "mode"; the
             # add-point/home actions are one-shot and never show as active
-            self._style_toolbar_button(btn, action.replace("__add_point__", "points")
-                                       .replace("__home__", "target"), on)
+            self._style_toolbar_button(btn, icon_name, on)
         if self._canvas is not None:
             self._style_toolbar_button(self._vbar_buttons["cube3d"], "cube3d", self._canvas.mip)
             self._style_toolbar_button(self._vbar_buttons["grid"], "grid", self._canvas.grid)
