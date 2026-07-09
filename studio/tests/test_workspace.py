@@ -737,3 +737,217 @@ def test_floating_add_point_selects_or_creates_a_points_layer(app, segment, proj
 
     ws._on_floating_tool(PAN_ZOOM)
     assert ws._canvas.mode == PAN_ZOOM
+
+
+# ── labels-layer settings (contour/dims/checkboxes/colour) ───────────────────
+def test_set_selected_label_updates_layer_and_rebuilds(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    seg = ws._layers.find("Segmentation")
+    ws._set_selected_label(seg, 7)
+    assert seg.selected_label == 7
+
+
+def test_pick_label_color_then_auto_clears_overrides(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    seg = ws._layers.find("Segmentation")
+    seg.selected_label = 3
+    ws._pick_label_color(seg, "#ff8800")
+    assert seg.color_overrides.get(3) == (0xFF, 0x88, 0x00)
+    ws._set_color_mode(seg, "auto")
+    assert seg.color_overrides == {}
+
+
+def test_set_layer_int_attr_updates_contour_and_edit_dims(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    seg = ws._layers.find("Segmentation")
+    ws._set_layer_int_attr(seg, "contour", 5)
+    assert seg.contour == 5
+    ws._set_layer_int_attr(seg, "n_edit_dimensions", 3)
+    assert seg.n_edit_dimensions == 3
+
+
+def test_toggle_layer_bool_flips_each_labels_checkbox(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    seg = ws._layers.find("Segmentation")
+    for attr in ("contiguous", "preserve_labels", "show_selected_label"):
+        before = getattr(seg, attr)
+        ws._toggle_layer_bool(seg, attr)
+        assert getattr(seg, attr) is not before
+
+
+def test_set_brush_size_updates_layer_and_badge(app, segment, projects, toasts, tmp_path, storage):
+    from studio.components import Badge
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    seg = ws._layers.find("Segmentation")
+    badge = Badge("1", theme.DARK)
+    ws._set_brush_size(seg, 0.5, badge)
+    assert seg.brush_size == 50
+    assert badge.text() == "50"
+
+
+# ── image-layer settings (gamma/colormap) ────────────────────────────────────
+def test_set_image_gamma_updates_layer_and_badge(app, segment, projects, toasts, tmp_path, storage):
+    from studio.components import Badge
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    img_layer = ws._layers.find(Path(project.image_paths[0]).stem)
+    badge = Badge("1.00", theme.DARK)
+    ws._set_image_gamma(img_layer, 0.5, badge)
+    assert img_layer.gamma == pytest.approx(1.5)
+    assert badge.text() == "1.50"
+
+
+def test_set_image_colormap_updates_layer(app, segment, projects, toasts, tmp_path, storage):
+    from studio.layer_model import IMAGE_COLORMAPS
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    img_layer = ws._layers.find(Path(project.image_paths[0]).stem)
+    other = next(c for c in IMAGE_COLORMAPS if c != img_layer.colormap)
+    ws._set_image_colormap(img_layer, other)
+    assert img_layer.colormap == other
+
+
+# ── points/shapes settings ────────────────────────────────────────────────────
+def test_set_point_size_and_clear_points(app, segment, projects, toasts, tmp_path, storage):
+    from studio.components import Badge
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._add_points_layer()
+    pts = ws._layers.selected
+    pts.add(5, 5)
+    pts.add(10, 10)
+    badge = Badge("10", theme.DARK)
+    ws._set_point_size(pts, 0.5, badge)
+    assert pts.size == 20
+    assert badge.text() == "20"
+    ws._clear_points(pts)
+    assert pts.points == []
+
+
+def test_set_edge_width_and_clear_shapes(app, segment, projects, toasts, tmp_path, storage):
+    from studio.components import Badge
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._add_shapes_layer()
+    shapes = ws._layers.selected
+    shapes.add("polygon", [(1, 1), (1, 5), (5, 5)])
+    badge = Badge("1.0", theme.DARK)
+    ws._set_edge_width(shapes, 0.5, badge)
+    assert shapes.edge_width == pytest.approx(5.0)
+    assert badge.text() == "5.0"
+    ws._clear_shapes(shapes)
+    assert shapes.shapes == []
+
+
+# ── overlay visibility toggles ────────────────────────────────────────────────
+def test_toggle_show_predictions_hides_segmentation_not_gt(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, with_gt=True)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    gt_path = tmp_path / "img_0_mask.png"
+    ws._load_gt(str(gt_path))
+    ws._toggle_show_predictions(False)
+    assert ws._layers.find("Segmentation").visible is False
+    assert ws._layers.find("Ground truth").visible is True
+    ws._toggle_show_predictions(True)
+    assert ws._layers.find("Segmentation").visible is True
+
+
+def test_toggle_show_gt_without_gt_toasts(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._toggle_show_gt(True)
+    assert toasts and "No ground truth loaded" in toasts[-1][0]
+
+
+def test_toggle_show_gt_with_gt_flips_visibility(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, with_gt=True)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._load_gt(str(tmp_path / "img_0_mask.png"))
+    assert ws._layers.find("Ground truth").visible is True
+    ws._toggle_show_gt(False)
+    assert ws._layers.find("Ground truth").visible is False
+
+
+# ── engine-specific settings (SAM2 / backbone) ────────────────────────────────
+def test_backbone_select_updates_vit_name(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._on_backbone_select("ViT-B")
+    assert project.settings.vit_name == "vit_b"
+
+
+def test_sam2_model_and_tracking_mode_selects(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    project.settings.engine = "sam2"
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._on_sam2_model_select("Small")
+    assert project.settings.sam2_model == "small"
+    ws._on_sam2_tracking_mode(1)
+    assert project.settings.sam2_tracking_mode == "propagate"
+    ws._on_sam2_tracking_mode(0)
+    assert project.settings.sam2_tracking_mode == "independent"
+
+
+def test_generic_set_setting_roundtrips_a_plain_toggle(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    assert project.settings.clahe is False
+    ws._set_setting("clahe", True)
+    assert project.settings.clahe is True
+    assert project.settings.quality_preset == "Balanced"  # plain _set_setting never marks Custom
+
+
+# ── refine / measurements ─────────────────────────────────────────────────────
+def test_refine_button_toasts_honest_coming_soon(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._refine_coming_soon()
+    assert toasts and "coming soon" in toasts[-1][0].lower()
+
+
+def test_show_measurements_without_a_result_toasts(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._show_measurements()
+    assert toasts and "No measurements yet" in toasts[-1][0]
+
+
+def test_show_measurements_after_predict_shows_a_summary(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._start_predict()
+    _pump(app, ws)
+    ws._show_measurements()
+    assert toasts[-1][0] == "Measurements"
+
+
+def test_export_csv_without_a_result_toasts(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._export_csv()
+    assert toasts and "Nothing to export" in toasts[-1][0]

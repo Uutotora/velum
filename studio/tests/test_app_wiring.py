@@ -493,3 +493,67 @@ def test_theme_toggle_rebuilds(app, controller, train_controller):
 
 def test_load_fonts_returns_family(app):
     assert isinstance(app_mod.load_fonts(), str) and app_mod.load_fonts()
+
+
+# ── cross-tab: a Segment-tab run must show up on Dashboard, same session ──────
+def test_predicting_in_workspace_shows_up_on_the_dashboard(
+        app, empty_controller, train_controller, tmp_path, monkeypatch):
+    """End-to-end proof, not just per-controller: run a real segmentation in
+    the Segment tab, switch to Dashboard with no restart, and see it —
+    exactly the "everything ... logs to the dashboard" path a real user
+    session exercises, sharing one ProjectController instance the way
+    StudioWindow actually wires the two screens together."""
+    import time
+
+    import cv2
+    import numpy as np
+
+    from studio.project import ProjectSettings
+    from studio.segment_controller import SegmentController
+
+    def _fake_predict_cached(config, image_rgb):
+        h, w = image_rgb.shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint16)
+        mask[h // 8: h // 2, w // 8: w // 2] = 1
+        mask[h // 2: h - h // 8, w // 2: w - w // 8] = 2
+        return mask
+
+    monkeypatch.setattr("napari_app.inference_cache.predict_cached", _fake_predict_cached)
+    monkeypatch.setattr("napari_app.engines.cellpose_available", lambda: False)
+
+    storage = tmp_path / "storage"
+    (storage / "sam_backbone").mkdir(parents=True)
+    (storage / "sam_backbone" / "sam_vit_h_4b8939.pth").write_bytes(b"fake")
+    (storage / "loras").mkdir(parents=True)
+    lora = storage / "loras" / "nuclei-dapi-r8.pth"
+    lora.write_bytes(b"fake-lora")
+
+    img_path = tmp_path / "img_0.png"
+    rng = np.random.default_rng(0)
+    cv2.imwrite(str(img_path), (rng.random((48, 48, 3)) * 255).astype(np.uint8))
+
+    project = empty_controller.store.create(
+        "Integration Project", "x", image_paths=[str(img_path)],
+        settings=ProjectSettings(engine="cellseg1", model_name=str(lora)))
+
+    segment = SegmentController(storage_dir=storage)
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=empty_controller,
+                                train_controller=train_controller, segment_controller=segment)
+    win._open_project(project.id)
+
+    ws = win._screens["workspace"]
+    ws._start_predict()
+    t0 = time.monotonic()
+    while ws._predicting and time.monotonic() - t0 < 10:
+        app.processEvents()
+        time.sleep(0.01)
+    for _ in range(5):
+        app.processEvents()
+    assert ws._last_result is not None  # the run itself must have actually succeeded
+
+    win.navigate("dashboard")
+    assert win._stack.currentWidget() is win._screens["dashboard"]
+    rows = win._screens["dashboard"]._dashboard.runs_table()
+    row = next((r for r in rows if r.name == "Integration Project"), None)
+    assert row is not None, f"project missing from dashboard runs_table(): {[r.name for r in rows]}"
+    assert row.cells is not None
