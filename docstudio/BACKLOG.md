@@ -96,6 +96,14 @@ When you finish a tab: log it in `CHANGELOG.md`, tick it here, update
   toast, not interactive point-prompt refinement; cross-tab settings sync
   (e.g. selecting a model in Models & Train while the same project's
   Workspace session is already open) needs reopening the project.
+- **Follow-up from real-usage feedback (same day):** a real content-overflow
+  bug (long dynamic text silently blowing out the fixed-width inspector
+  panel), no way to add images to an already-created project, default
+  rendering was fully-solid instead of fill+outline, the 2D/3D toggle
+  no-opped on plain 2-D images, and grid mode ignored the mouse wheel — all
+  fixed; see `CHANGELOG.md`'s same-dated follow-up entries for the detail
+  and what was checked against which reference (the classic app's own
+  `_add_filled_labels`, real napari's viewer-button source) before fixing.
 - **Tasks:** ☑ Canvas widget (image + pan/zoom) · ☑ own layer model ↔ Layers
   panel · ☑ label/shape/point rendering + editing (brush/eraser/fill/polygon/
   point) · ☑ viewer bar (2D↔3D/grid/home) real · ☑ engine/threshold controls →

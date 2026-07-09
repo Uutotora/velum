@@ -5,6 +5,60 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-09 — Follow-up: real-usage feedback on the Segment tab, four fixes
+
+Four issues found from actually running the app (not just offscreen tests),
+each investigated against a real reference before fixing rather than guessed:
+
+- **A real content-overflow bug**: `SelectBox`'s value label and
+  `Accordion`'s title had no width constraint, so a long dynamic string
+  (an engine's full registry label, a LoRA filename, a discovered GT mask's
+  name) forced the fixed-320px inspector panel to 356px — with horizontal
+  scrolling off, the excess was silently, permanently clipped. Root-caused
+  with an offscreen width-audit script (comparing every widget's sizeHint
+  against its allocated width), not guessed at. Fixed with a new
+  `_ElidingLabel` (components.py) that elides instead of forcing its parent
+  wider; StatTile padding tightened too (three tiles' *combined* width was
+  independently over budget). Re-verified: zero overflow at both the
+  default and minimum window sizes.
+- **Breadcrumb didn't navigate.** "Projects / ProjectName" was one static
+  label. Split into two — "Projects" is now a real link back to the
+  Projects tab, matching Label Studio's pattern (only the ancestor segment
+  navigates, not the current page's own name).
+- **No way to add images to an already-created project** — the Images pane
+  only ever had a filter box; a project's image list was set once, at
+  creation, and never revisited. Added a "+" button (multi-select file
+  picker) and drag-and-drop onto the Images pane, both funnelling into one
+  dedup-and-persist path.
+- **Default rendering was fully solid and "too bright"; the 2D/3D toggle
+  did nothing on a plain 2-D image; grid mode ignored the mouse wheel
+  entirely.** All three were checked against a real reference before
+  fixing — `napari_app/widgets/predict_widget.py`'s actual mask-display
+  code and the installed napari package's own viewer-button source —
+  rather than assumed:
+  - Labels now render fill (soft, 0.35 opacity) *and* an outline (crisper,
+    0.7 opacity, 2px) simultaneously by default, matching the classic app's
+    own two-stacked-layers convention (`_add_filled_labels`) in one layer
+    instead of two. Ground truth gets that same convention's *other* half:
+    a fixed uniform colour instead of per-instance random hues.
+  - The 2D/3D toggle no longer refuses on a flat image — confirmed real
+    napari's `ndisplay` toggle has no such guard at all; ours now applies a
+    projective "tilted plane" view (`Canvas._draw_pseudo_3d`, an honest
+    non-GPU substitute, not real volumetric rendering) instead of a silent
+    no-op + toast.
+  - Grid mode's per-tile auto-fit scale is now multiplied by the live zoom
+    level (real napari's grid shares one camera across every tile) instead
+    of being recomputed from scratch every paint regardless of it.
+
+Verified: full studio/tests green throughout (new/updated cases across
+layer_model, canvas, components, and workspace covering every fix above,
+including two direct before/after pixel-diff tests proving the pseudo-3D
+tilt and grid-mode zoom actually change rendered pixels, not just internal
+state) + real offscreen screenshots, cropped and pixel-sampled rather than
+trusted at a glance (a 1px-wide contour measured technically-present but
+visually-too-faint before bumping it to 2px). Not verified: how any of this
+reads on a real, non-offscreen display.
+
 ## 2026-07-09 — Segment (Workspace) tab wired end to end — the flagship backlog item, done
 
 The last unstarted P0 — the whole reason Studio has a "design skeleton"
