@@ -16,6 +16,7 @@ Coordinate convention throughout: ``(row, col)`` in *image* pixel space
 """
 from __future__ import annotations
 
+import math
 from typing import Callable, Optional
 
 import numpy as np
@@ -33,6 +34,8 @@ from studio.layer_model import (
 
 _MIN_ZOOM, _MAX_ZOOM = 0.05, 40.0
 _ZOOM_STEP = 1.15
+_MAX_ROT = 1.4  # radians, ~80° — short of the projection degenerating
+_ROT_SENSITIVITY = 0.01  # radians per pixel dragged
 
 
 class Canvas(QWidget):
@@ -58,16 +61,25 @@ class Canvas(QWidget):
 
         self.mode = PAN_ZOOM
         self.grid = False
-        self.mip = False          # "3D" toggle for a volume: max-intensity projection
+        self.mip = False          # "3D" toggle: a real volume MIPs; a flat image tilts (below)
         self.transposed = False   # view-only row/col swap — never mutates layer data
 
         self._zoom = 1.0
         self._pan = QPointF(0.0, 0.0)
         self._fitted = False
 
+        # Pseudo-3D orbit angles (radians) for a flat image under the "3D"
+        # toggle — a non-zero starting pitch so it reads as tilted the
+        # instant 3D turns on, not flat until you first drag it.
+        self._rot_x = 0.4
+        self._rot_y = 0.0
+
         self._panning = False
         self._pan_anchor: Optional[QPointF] = None
         self._pan_anchor_pan: Optional[QPointF] = None
+        self._rotating = False
+        self._rot_anchor: Optional[QPointF] = None
+        self._rot_anchor_angles: Optional[tuple[float, float]] = None
         self._painting = False
         self._paint_last: Optional[tuple[float, float]] = None
         self._polygon_pts: list[tuple[float, float]] = []
@@ -129,7 +141,10 @@ class Canvas(QWidget):
         return data[z]
 
     def home(self) -> None:
-        """Fit the image to the viewport and centre it."""
+        """Fit the image to the viewport, centre it, and reset the camera —
+        matching real napari's ``reset_view()``, which resets orientation as
+        well as pan/zoom, not just the latter.
+        """
         shape = self._base_shape()
         if shape is None:
             return
@@ -139,6 +154,8 @@ class Canvas(QWidget):
         self._pan = QPointF((self.width() - w * self._zoom) / 2,
                             (self.height() - h * self._zoom) / 2)
         self._fitted = True
+        self._rot_x = 0.4
+        self._rot_y = 0.0
         self._clamp_pan()
         self.update()
 
@@ -299,21 +316,40 @@ class Canvas(QWidget):
         """"3-D" on a flat 2-D image (no z-stack to max-project): real
         napari's ndisplay=3 still changes the camera unconditionally — a
         flat layer renders as a tilted plane viewed at an angle, not
-        nothing. This fakes that same idea with a projective (not merely
-        affine) quad-to-quad mapping: image bottom stays full width, top
-        narrows and lifts, like looking down at a tilted sheet. Real 3-D
-        rendering would need a GPU/OpenGL camera this QPainter canvas
-        doesn't have — this is a deliberately simple, honest substitute
-        that always does *something* visible, never a silent no-op.
+        nothing. This fakes that same idea with a real (if simplified)
+        rotate-then-perspective-project of the image rectangle's corners
+        around ``self._rot_x``/``self._rot_y`` — genuinely interactive via
+        :meth:`mousePressEvent`/:meth:`mouseMoveEvent` drag-to-orbit, not a
+        fixed trapezoid. Real 3-D rendering would need a GPU/OpenGL camera
+        this QPainter canvas doesn't have — this is a deliberately simple,
+        honest substitute that always does *something* visible, never a
+        silent no-op, and responds to input the way an orbit camera would.
         """
         w, h = image.width(), image.height()
+        if w <= 0 or h <= 0:
+            p.drawImage(0, 0, image)
+            return
+        # Kept well above any reachable |z2| (bounded by ~max(w,h)/2, since
+        # |sin|<=1) so focal+z2 never approaches 0 and the quad never flips
+        # inside out across the whole rotation range.
+        focal = max(w + h, 200.0)
+        cos_rx, sin_rx = math.cos(self._rot_x), math.sin(self._rot_x)
+        cos_ry, sin_ry = math.cos(self._rot_y), math.sin(self._rot_y)
+
+        def project(x: float, y: float) -> QPointF:
+            cx, cy = x - w / 2, y - h / 2
+            # Yaw (around the vertical axis) then pitch (around the
+            # horizontal axis) of the point, in camera space with z=0 at
+            # the image plane; then a perspective divide by depth.
+            x1 = cx * cos_ry
+            z1 = cx * sin_ry
+            y2 = cy * cos_rx + z1 * sin_rx
+            z2 = cy * sin_rx - z1 * cos_rx
+            scale = focal / max(focal + z2, 1e-3)
+            return QPointF(x1 * scale + w / 2, y2 * scale + h / 2)
+
         src = QPolygonF(QRectF(0, 0, w, h))
-        inset = w * 0.16
-        lift = h * 0.16
-        dst = QPolygonF([
-            QPointF(inset, lift), QPointF(w - inset, lift),
-            QPointF(w, h), QPointF(0, h),
-        ])
+        dst = QPolygonF([project(0, 0), project(w, 0), project(w, h), project(0, h)])
         transform = QTransform()
         if QTransform.quadToQuad(src, dst, transform):
             p.save()
@@ -321,7 +357,7 @@ class Canvas(QWidget):
             p.drawImage(0, 0, image)
             p.restore()
         else:
-            p.drawImage(0, 0, image)  # degenerate geometry (e.g. 0-size) — draw flat rather than nothing
+            p.drawImage(0, 0, image)  # degenerate/self-intersecting quad at an extreme angle — draw flat rather than nothing
 
     def _paint_grid(self, p: QPainter, image: QImage) -> None:
         """Grid mode: one tile per visible layer, each rendered alone — a
@@ -445,6 +481,16 @@ class Canvas(QWidget):
     def mousePressEvent(self, e: QMouseEvent) -> None:
         self.setFocus(Qt.FocusReason.MouseFocusReason)
         pos = e.position()
+        if e.button() != Qt.MouseButton.MiddleButton and self.mip and self.layers.n_planes <= 1 \
+                and (self.mode == PAN_ZOOM or self.mode == TRANSFORM):
+            # "3-D" on a flat image: the drag that would otherwise pan now
+            # orbits the pseudo-3-D tilt instead — matching real napari's
+            # left-drag-to-rotate camera in a 3-D view. Middle-button still
+            # always pans (below), same as it does in 2-D.
+            self._rotating = True
+            self._rot_anchor = pos
+            self._rot_anchor_angles = (self._rot_x, self._rot_y)
+            return
         if e.button() == Qt.MouseButton.MiddleButton or self.mode == PAN_ZOOM or self.mode == TRANSFORM:
             self._panning = True
             self._pan_anchor = pos
@@ -538,6 +584,15 @@ class Canvas(QWidget):
 
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
         pos = e.position()
+
+        if self._rotating and self._rot_anchor is not None and self._rot_anchor_angles is not None:
+            delta = pos - self._rot_anchor
+            rx0, ry0 = self._rot_anchor_angles
+            self._rot_x = max(-_MAX_ROT, min(_MAX_ROT, rx0 + delta.y() * _ROT_SENSITIVITY))
+            self._rot_y = max(-_MAX_ROT, min(_MAX_ROT, ry0 + delta.x() * _ROT_SENSITIVITY))
+            self.update()
+            return
+
         col, row = self.widget_to_image(pos)
         self._hover_img = (row, col)
 
@@ -572,6 +627,10 @@ class Canvas(QWidget):
             self.update()  # keep the brush-size cursor preview live
 
     def mouseReleaseEvent(self, e: QMouseEvent) -> None:
+        if self._rotating:
+            self._rotating = False
+            self._rot_anchor = None
+            self._rot_anchor_angles = None
         if self._panning and e.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton):
             self._panning = False
             self._pan_anchor = None

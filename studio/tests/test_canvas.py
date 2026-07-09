@@ -386,6 +386,96 @@ def test_pseudo_3d_tilt_visibly_changes_a_flat_image(app):
     assert before != after
 
 
+def test_dragging_in_3d_mode_rotates_instead_of_panning(app):
+    """Left-drag on a flat image with the "3D" toggle on orbits the tilt
+    (real napari's 3-D view rotates on left-drag) rather than panning."""
+    c, *_ = _make_canvas(app, h=40, w=40)
+    c.mip = True
+    start_pan = QPointF(c._pan)
+    _press(c, QPoint(20, 20))
+    assert c._rotating is True
+    assert c._panning is False
+    _move(c, QPoint(20, 50))
+    assert c._rot_x == pytest.approx(0.7)   # 0.4 default + 30px * 0.01 sensitivity
+    assert c._rot_y == pytest.approx(0.0)
+    assert c._pan == start_pan               # a rotate-drag must never also pan
+    _release(c, QPoint(20, 50))
+    assert c._rotating is False
+
+
+def test_horizontal_drag_in_3d_mode_changes_yaw(app):
+    c, *_ = _make_canvas(app, h=40, w=40)
+    c.mip = True
+    _press(c, QPoint(20, 20))
+    _move(c, QPoint(60, 20))
+    assert c._rot_y == pytest.approx(0.4)    # 40px * 0.01 sensitivity
+    assert c._rot_x == pytest.approx(0.4)    # unchanged from the default pitch
+
+
+def test_rotation_drag_clamps_to_max_rot(app):
+    c, *_ = _make_canvas(app, h=40, w=40)
+    c.mip = True
+    _press(c, QPoint(0, 0))
+    _move(c, QPoint(0, 100_000))
+    assert c._rot_x == pytest.approx(canvas_mod._MAX_ROT)
+    _move(c, QPoint(0, -100_000))
+    assert c._rot_x == pytest.approx(-canvas_mod._MAX_ROT)
+
+
+def test_rotation_drag_actually_changes_rendered_pixels(app):
+    layers = LayerList()
+    img = np.zeros((40, 40, 3), dtype=np.uint8)
+    img[10:30, 10:30] = [200, 60, 60]
+    layers.add(ImageLayer("img", img))
+    c = Canvas(theme.DARK, layers)
+    c.resize(60, 60)
+    c.home()
+    c.mip = True
+    c.update()
+    app.processEvents()
+    before = c.grab().toImage()
+    _press(c, QPoint(30, 30))
+    _move(c, QPoint(30, 55))
+    c.update()
+    app.processEvents()
+    after = c.grab().toImage()
+    assert before != after
+
+
+def test_home_resets_rotation_to_the_default_tilt(app):
+    c, *_ = _make_canvas(app, h=40, w=40)
+    c.mip = True
+    c._rot_x = 1.2
+    c._rot_y = -0.9
+    c.home()
+    assert c._rot_x == pytest.approx(0.4)
+    assert c._rot_y == pytest.approx(0.0)
+
+
+def test_middle_button_still_pans_in_3d_mode(app):
+    c, *_ = _make_canvas(app, h=40, w=40)
+    c.mip = True
+    start_pan = QPointF(c._pan)
+    start_rot = (c._rot_x, c._rot_y)
+    _press(c, QPoint(10, 10), button=Qt.MouseButton.MiddleButton)
+    assert c._panning is True
+    assert c._rotating is False
+    _move(c, QPoint(30, 30), buttons=Qt.MouseButton.MiddleButton)
+    assert c._pan != start_pan
+    assert (c._rot_x, c._rot_y) == start_rot
+
+
+def test_drag_in_2d_mode_still_pans_not_rotates(app):
+    c, *_ = _make_canvas(app, h=40, w=40)
+    assert c.mip is False
+    start_rot = (c._rot_x, c._rot_y)
+    _press(c, QPoint(10, 10))
+    assert c._panning is True
+    assert c._rotating is False
+    _move(c, QPoint(30, 30))
+    assert (c._rot_x, c._rot_y) == start_rot
+
+
 def test_roll_channel_cycles_visibility_across_image_layers(app):
     layers = LayerList()
     a = ImageLayer("DAPI", np.zeros((5, 5, 3), dtype=np.uint8))
