@@ -59,7 +59,8 @@ class ModelsScreen(QWidget):
         self._image_path: Optional[Path] = None
         self._mask_path: Optional[Path] = None
         backbones = self._train.available_backbones()
-        self._vit_name = backbones[0][0] if backbones else "vit_h"
+        self._vit_name: Optional[str] = backbones[0][0] if backbones else None
+        self._backbone_path: Optional[Path] = None
         self._lora_rank = tc.DEFAULT_RANK
         self._epochs = tc.DEFAULT_EPOCHS
 
@@ -158,17 +159,28 @@ class ModelsScreen(QWidget):
         n = tc.count_cells_in_mask(self._mask_path)
         return f"{self._image_path.name} · {n} cells" if n is not None else self._image_path.name
 
+    def _backbone_field_text(self) -> str:
+        if self._backbone_path is not None:
+            return self._backbone_path.name
+        if self._vit_name is not None:
+            return tc.BACKBONE_LABELS[self._vit_name]
+        return "Not found"
+
+    def _has_backbone(self) -> bool:
+        return self._backbone_path is not None or self._vit_name is not None
+
     def _status_text(self) -> str:
         if self._image_path is not None and self._mask_path is None:
             return ("No mask found for this image — annotate it in the classic app "
                     "(napari) first, then pick it here.")
-        if not self._train.available_backbones():
-            return "No SAM backbone found — run setup_napari.sh to download one."
+        if not self._has_backbone():
+            return ("No SAM backbone auto-detected — click SAM backbone to browse for a "
+                    "checkpoint, or run setup_napari.sh to download one.")
         return ""
 
     def _can_start(self) -> bool:
         return (self._image_path is not None and self._mask_path is not None
-                and bool(self._train.available_backbones()) and not self._train.is_training())
+                and self._has_backbone() and not self._train.is_training())
 
     def _train_card(self) -> QFrame:
         t = self._t
@@ -191,10 +203,11 @@ class ModelsScreen(QWidget):
         image_box = SelectBox(self._image_field_text(), t, lead_icon="image", on_click=self._pick_image)
         backbones = self._train.available_backbones()
         if backbones:
-            backbone_box = SelectBox(tc.BACKBONE_LABELS[self._vit_name], t,
-                                      options=[lbl for _, lbl in backbones], on_select=self._set_backbone)
+            options = [lbl for _, lbl in backbones] + ["Browse…"]
+            backbone_box = SelectBox(self._backbone_field_text(), t,
+                                      options=options, on_select=self._on_backbone_menu_choice)
         else:
-            backbone_box = SelectBox("Not found", t)
+            backbone_box = SelectBox(self._backbone_field_text(), t, on_click=self._pick_backbone_file)
         rank_box = SelectBox(self._lora_rank, t, options=tc.RANK_OPTIONS, on_select=self._set_rank)
         epochs_box = SelectBox(self._epochs, t, options=tc.EPOCH_OPTIONS, on_select=self._set_epochs)
         fields = [("Annotated image", image_box), ("SAM backbone", backbone_box),
@@ -235,9 +248,23 @@ class ModelsScreen(QWidget):
         self._mask_path = self._train.find_mask_for_image(self._image_path)
         self.refresh()
 
-    def _set_backbone(self, chosen_label: str) -> None:
+    def _on_backbone_menu_choice(self, choice: str) -> None:
+        if choice == "Browse…":
+            self._pick_backbone_file()
+            return
         inverse = {v: k for k, v in tc.BACKBONE_LABELS.items()}
-        self._vit_name = inverse.get(chosen_label, self._vit_name)
+        self._vit_name = inverse.get(choice, self._vit_name)
+        self._backbone_path = None
+        self.refresh()
+
+    def _pick_backbone_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a SAM backbone checkpoint", "",
+            "PyTorch (*.pth);;All files (*)", options=_DLG)
+        if not path:
+            return
+        self._backbone_path = Path(path)
+        self._vit_name = tc.guess_vit_name(self._backbone_path)
         self.refresh()
 
     def _set_rank(self, value: str) -> None:
@@ -252,7 +279,8 @@ class ModelsScreen(QWidget):
         try:
             config = self._train.build_config(
                 image_path=self._image_path, mask_path=self._mask_path,
-                vit_name=self._vit_name, lora_rank=int(self._lora_rank), epochs=int(self._epochs))
+                vit_name=self._vit_name, backbone_path=self._backbone_path,
+                lora_rank=int(self._lora_rank), epochs=int(self._epochs))
         except ValueError as e:
             self._toast("Can't start training", str(e))
             return

@@ -135,6 +135,21 @@ def available_backbones(sam_backbone_dir: Path) -> list[tuple[str, str]]:
     return out
 
 
+def guess_vit_name(path: str | Path) -> str:
+    """Best-effort SAM architecture guess from a manually-picked checkpoint's
+    filename (``sam_vit_l_...`` -> ``vit_l``), defaulting to the flagship
+    ``vit_h`` when the name gives no hint — mirrors the classic Train tab's
+    manual "SAM backbone" browse field, which doesn't cross-validate the
+    picked file against the architecture either; it's the same trust-the-
+    user contract, just inferred from one field instead of two."""
+    name = Path(path).name.lower()
+    if "vit_l" in name or "vit-l" in name:
+        return "vit_l"
+    if "vit_b" in name or "vit-b" in name:
+        return "vit_b"
+    return "vit_h"
+
+
 def duration_str(seconds: float) -> str:
     """``"8m 12s"`` style duration, matching the mockup's run rows."""
     seconds = max(0, int(seconds))
@@ -331,8 +346,15 @@ class TrainController:
         return path
 
     def build_config(self, *, image_path: str | Path, mask_path: str | Path,
-                      vit_name: str, lora_rank: int, epochs: int) -> dict:
+                      vit_name: Optional[str], lora_rank: int, epochs: int,
+                      backbone_path: Optional[str | Path] = None) -> dict:
         """Build a full training config from Studio's 4-field form.
+
+        ``backbone_path``, when given, is used directly instead of resolving
+        ``vit_name`` against ``sam_backbone_dir`` — the manual "browse for a
+        checkpoint" fallback for when nothing was auto-detected there (or the
+        user wants a different one); ``vit_name`` is then only a label
+        (best-effort-guessed from the filename if not given either).
 
         Raises ``ValueError`` on anything not ready to train (mirrors
         ``PredictController.build_config``'s contract). Copies the chosen
@@ -348,7 +370,16 @@ class TrainController:
             raise ValueError(f"Image not found: {image_path}")
         if not mask_path.exists():
             raise ValueError(f"Mask not found: {mask_path}")
-        sam_path = self.resolve_backbone(vit_name)
+
+        if backbone_path is not None:
+            sam_path = Path(backbone_path)
+            if not sam_path.exists():
+                raise ValueError(f"SAM backbone not found: {sam_path}")
+            vit_name = vit_name or guess_vit_name(sam_path)
+        elif vit_name is not None:
+            sam_path = self.resolve_backbone(vit_name)
+        else:
+            raise ValueError("No SAM backbone selected")
         image_dir, mask_dir = self._prepare_run_data(image_path, mask_path)
 
         resize = 512

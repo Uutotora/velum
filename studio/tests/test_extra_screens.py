@@ -213,12 +213,57 @@ def test_models_screen_backbone_rank_epoch_selection_updates_state(parent, train
     _add_backbone(train_ctrl, "vit_h")
     _add_backbone(train_ctrl, "vit_l")
     scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
-    scr._set_backbone("ViT-L")
+    scr._on_backbone_menu_choice("ViT-L")
     assert scr._vit_name == "vit_l"
+    assert scr._backbone_path is None
     scr._set_rank("32")
     assert scr._lora_rank == "32"
     scr._set_epochs("500")
     assert scr._epochs == "500"
+
+
+def test_models_screen_backbone_browse_used_when_none_auto_detected(parent, train_ctrl, project_ctrl, on_toast, tmp_path, monkeypatch):
+    scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
+    assert scr._has_backbone() is False
+    assert scr._backbone_field_text() == "Not found"
+
+    custom = tmp_path / "my_custom_sam_vit_l_weights.pth"
+    custom.write_bytes(b"fake")
+    monkeypatch.setattr(es.QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(custom), "")))
+    scr._pick_backbone_file()
+    assert scr._backbone_path == custom
+    assert scr._vit_name == "vit_l"  # guessed from the filename
+    assert scr._has_backbone() is True
+    assert scr._backbone_field_text() == custom.name
+
+
+def test_models_screen_backbone_menu_browse_option_opens_file_picker(
+        parent, train_ctrl, project_ctrl, on_toast, tmp_path, monkeypatch):
+    _add_backbone(train_ctrl, "vit_h")
+    scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
+    custom = tmp_path / "other.pth"
+    custom.write_bytes(b"fake")
+    monkeypatch.setattr(es.QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(custom), "")))
+    scr._on_backbone_menu_choice("Browse…")
+    assert scr._backbone_path == custom
+
+
+def test_models_screen_start_training_with_manual_backbone_passes_it_through(
+        parent, train_ctrl, project_ctrl, on_toast, toasts, tmp_path, monkeypatch):
+    image, mask = _annotated_pair(tmp_path)
+    custom = tmp_path / "custom_backbone.pth"
+    custom.write_bytes(b"fake")
+    scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
+    scr._image_path, scr._mask_path = image, mask
+    scr._backbone_path = custom
+    scr._vit_name = None
+
+    calls = []
+    monkeypatch.setattr(train_ctrl, "start_training", lambda config, **kw: calls.append(config))
+    scr._start_training()
+    assert len(calls) == 1
+    assert calls[0]["model_path"] == str(custom)
+    assert calls[0]["vit_name"] == "vit_h"  # guessed default, no hint in this filename
 
 
 def test_models_screen_on_live_tick_stops_timer_when_idle(parent, train_ctrl, project_ctrl, on_toast):

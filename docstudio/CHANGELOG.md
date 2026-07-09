@@ -5,6 +5,42 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-09 — Follow-up: SAM backbone had no manual fallback when nothing was auto-detected
+
+Reported right after the tabs above shipped: "SAM backbone" showed "Not
+found" and did nothing when clicked, while "Annotated image" opened a real
+file picker — inconsistent, and a dead end for exactly the environment this
+was tested in (no SAM weights downloaded at all, so `available_backbones()`
+correctly returns empty). The classic Train tab has always had an escape
+hatch for this via its separate, always-editable `sam_path` field; Studio's
+single "SAM backbone" field didn't carry that over — clicking only ever
+opened a menu of *auto-detected* files, with nothing to click when there
+were none.
+
+Fixed: the field is now clickable either way. With ≥1 backbone found, its
+menu gained a trailing "Browse…" entry; with none found, clicking opens a
+file picker directly instead of a menu. `TrainController.build_config()`
+gained an optional `backbone_path` that's used as-is instead of resolving
+`vit_name` against `sam_backbone_dir` — `vit_name` becomes just a label,
+best-effort-guessed from the picked file's name (`guess_vit_name()`,
+defaulting to `vit_h` with no hint in the name) if not given, the same
+trust-the-user contract the classic widget's separate, never-cross-
+validated `sam_path`/`vit_name` pair already has. `_status_text()`'s hint
+now says so explicitly ("click SAM backbone to browse for a checkpoint, or
+run setup_napari.sh to download one") instead of only mentioning the setup
+script.
+
+**Verified:** new pure-logic tests (`guess_vit_name` parametrized over real
+SAM filenames + an ambiguous one; `build_config` with `backbone_path` used
+directly, with an explicit `vit_name` override winning over the guess, and
+raising when the manual path doesn't exist) and new Qt-wiring tests
+(browsing when nothing is auto-detected; the menu's "Browse…" entry;
+`_start_training` passing the manual path through) — 700 total in
+`studio/tests` + the repo suite, still green. Offscreen before/after
+screenshots of the exact reported scenario (empty `sam_backbone_dir`):
+"Not found" + non-interactive before, a real file picker click updating the
+field to the chosen file's name and clearing the warning after.
+
 ## 2026-07-09 — Models & Train and Dashboard tabs wired end to end (P1 done)
 
 Both `docstudio/BACKLOG.md` P1 items in one pass — real one-shot LoRA

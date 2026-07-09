@@ -18,6 +18,7 @@ from studio.train_controller import (
     count_cells_in_mask,
     duration_str,
     find_mask_for_image,
+    guess_vit_name,
     list_recent_runs,
     list_trained_models,
 )
@@ -144,6 +145,18 @@ def test_resolve_backbone_returns_path_when_present(ctrl, storage):
     assert path == storage / "sam_backbone" / "sam_vit_h_4b8939.pth"
 
 
+# ── guess_vit_name ───────────────────────────────────────────────────────────
+@pytest.mark.parametrize("name,expected", [
+    ("sam_vit_h_4b8939.pth", "vit_h"),
+    ("sam_vit_l_0b3195.pth", "vit_l"),
+    ("sam_vit_b_01ec64.pth", "vit_b"),
+    ("my-custom-vit-l-weights.pth", "vit_l"),
+    ("totally_unrelated_name.pth", "vit_h"),  # no hint -> flagship default
+])
+def test_guess_vit_name(name, expected, tmp_path):
+    assert guess_vit_name(tmp_path / name) == expected
+
+
 # ── build_config ─────────────────────────────────────────────────────────────
 @pytest.fixture
 def annotated_image(tmp_path):
@@ -182,6 +195,45 @@ def test_build_config_raises_cleanly_when_nothing_picked_yet(ctrl):
     uncaught TypeError from Path(None) — the caller only catches ValueError."""
     with pytest.raises(ValueError, match="No annotated image"):
         ctrl.build_config(image_path=None, mask_path=None, vit_name="vit_h", lora_rank=8, epochs=100)
+
+
+def test_build_config_raises_when_no_backbone_selected_at_all(ctrl, annotated_image):
+    """Regression test for the reported bug: with nothing auto-detected in
+    sam_backbone_dir and no manual backbone_path given either, this must
+    fail with a clear message -- not silently resolve to some default."""
+    image, mask = annotated_image
+    with pytest.raises(ValueError, match="No SAM backbone selected"):
+        ctrl.build_config(image_path=image, mask_path=mask, vit_name=None,
+                          lora_rank=8, epochs=100)
+
+
+def test_build_config_manual_backbone_path_used_directly(ctrl, annotated_image, tmp_path):
+    """The browse-for-a-checkpoint fallback: no vit_name, an explicit
+    backbone_path instead -- used as-is, with the architecture guessed from
+    its filename."""
+    image, mask = annotated_image
+    custom = tmp_path / "my_sam_vit_l_backbone.pth"
+    custom.write_bytes(b"fake-weights")
+    config = ctrl.build_config(image_path=image, mask_path=mask, vit_name=None,
+                               backbone_path=custom, lora_rank=8, epochs=100)
+    assert config["model_path"] == str(custom)
+    assert config["vit_name"] == "vit_l"
+
+
+def test_build_config_manual_backbone_path_respects_explicit_vit_name(ctrl, annotated_image, tmp_path):
+    image, mask = annotated_image
+    custom = tmp_path / "ambiguous_name.pth"
+    custom.write_bytes(b"fake-weights")
+    config = ctrl.build_config(image_path=image, mask_path=mask, vit_name="vit_b",
+                               backbone_path=custom, lora_rank=8, epochs=100)
+    assert config["vit_name"] == "vit_b"  # explicit override wins over the filename guess
+
+
+def test_build_config_manual_backbone_path_raises_when_missing(ctrl, annotated_image, tmp_path):
+    image, mask = annotated_image
+    with pytest.raises(ValueError, match="backbone not found"):
+        ctrl.build_config(image_path=image, mask_path=mask, vit_name=None,
+                          backbone_path=tmp_path / "nope.pth", lora_rank=8, epochs=100)
 
 
 def test_build_config_copies_into_an_isolated_run_dir_without_touching_originals(ctrl, storage, annotated_image):
