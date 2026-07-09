@@ -5,6 +5,58 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-10 — Fix a real crash: clicking several Segment-tab controls could abort the app
+
+Found from an actual running session, not a test: clicking "preserve
+labels" or "show selected" in the Labels layer panel raised `TypeError:
+invalid argument to sipBadCatcherResult()` — and reproducing it directly
+confirmed this is a hard process abort (SIGABRT), not a catchable Python
+exception.
+
+- **Root cause:** several rows/swatches (checkbox rows, the label
+  colour-palette swatches, layer rows, image rows) override
+  `mouseReleaseEvent` directly instead of using a real Qt signal, and from
+  inside that same call, trigger a container rebuild
+  (`_clear_layout`/`setParent(None)`) that reparents the very widget whose
+  own `mouseReleaseEvent` is still executing on the call stack — a
+  PyQt/SIP reentrant-virtual-call hazard. Every existing test called the
+  handler method directly (`ws._toggle_layer_bool(...)`, etc.) or even
+  called `widget.mouseReleaseEvent(event)` as a plain Python method call —
+  neither actually dispatches through Qt's C++ virtual-call machinery the
+  way a real click does, so none of them ever caught this; only routing a
+  `QMouseEvent` through `QApplication.sendEvent()` (the same path a real
+  click takes) reproduces it, which is how this was confirmed before
+  fixing and is now regression-tested.
+- **Fix:** defer each of the four affected handlers via
+  `QTimer.singleShot(0, ...)`, so the destructive rebuild runs on the next
+  event-loop tick, after the widget's own `mouseReleaseEvent` call has
+  fully returned — an existing, already-used pattern in this codebase
+  (`extra_screens.py`), not a new idiom. Affects: the Labels checkboxes
+  (contiguous/preserve labels/show selected), the colour-palette swatches,
+  layer-list row selection, and image-list row selection — the last two
+  weren't reported yet but shared the exact same hazard and would have
+  crashed just as reliably the first time either was clicked.
+- **Also fixed, found while investigating (reported in the same message,
+  with a screenshot):** the floating tool strip's pan/zoom and brush
+  icons had silently become generic chevrons. `_sync_toolbars()` was
+  re-deriving each icon's name from its raw mode string ("pan_zoom",
+  "paint") instead of the semantic icon name used at construction
+  ("target", "brush"); neither raw string is a real key in `icons.PATHS`,
+  so `icons.py`'s own unknown-name fallback silently substituted a
+  generic chevron glyph — on every restyle, which fires on almost every
+  interaction. Fixed by storing each button's real icon name alongside
+  its action and always styling from that, never re-deriving it.
+
+Verified: full `studio/tests` green, 453 cases (7 new — one per crash site
+plus one proving the icon fix, using `QApplication.sendEvent()` to
+faithfully reproduce the crash before fixing, confirmed by first
+reproducing the exact SIGABRT standalone against the unfixed code); a
+fresh offscreen screenshot of the floating tool strip confirms the
+pan/zoom and brush icons now render their real, distinct glyphs instead
+of chevrons.
+
+---
+
 ## 2026-07-09 — Segment tab: persistence, pan bounds, real 3-D rotation, verification pass
 
 A `/goal`-driven round: work until the Segment tab genuinely satisfies "3-D
