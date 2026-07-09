@@ -3,8 +3,16 @@
 # pyproject.toml is the source of truth (permissive lower bounds). This file
 # pins the exact known-good versions for a reproducible install:
 #
-#     pip install -e .            # dev install, resolves latest allowed
-#     pip install -r requirements.txt -e . --no-deps   # exact repro
+#     pip install -e .                          # dev install, resolves latest allowed
+#     pip install -r requirements.txt && pip install -e . --no-deps   # exact repro
+#
+# Two commands, not one: `pip install -r requirements.txt -e . --no-deps` looks
+# equivalent but isn't — a single invocation applies --no-deps globally, so it
+# skips the transitive dependencies of every package in requirements.txt too
+# (napari fails to import: "No module named 'lazy_loader'", missing vispy/
+# qtpy/superqt/app-model/... as well). The two-command form resolves+installs
+# requirements.txt's pins (with their real transitive deps) first, then
+# registers the local package without re-resolving anything.
 #
 # Regenerate after a deliberate upgrade with:
 #     pip freeze | grep -iE '^(torch|torchvision|napari|...)=='

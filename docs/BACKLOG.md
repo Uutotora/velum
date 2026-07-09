@@ -172,6 +172,39 @@ for a credible product · P1 differentiation · P2 later.
 
 ## P1 — differentiation
 
+### [ ] Flaky segfault in the full local `pytest` run on Linux (GPU present)  · M
+- **Goal:** the full `pytest` run (`tests/` + `studio/tests/`) exits 0 every
+  time on a Linux box with the full runtime dependency set installed (torch +
+  PyQt6 + napari together), not just when each test file runs alone.
+- **Why:** on a real Linux dev box with an NVIDIA GPU (confirmed: GTX 1070,
+  compute capability 6.1, driver 580.173, CUDA 13 wheel), a full `pytest` run
+  segfaults (`SIGSEGV`, exit 139) ~44% of the time (7/16 runs observed).
+  Every individual test file passes 100% of the time in isolation — this is
+  an order/accumulation-dependent native crash, not a logic bug. A
+  `faulthandler`-enabled run pinned one occurrence to
+  `pyqtgraph.graphicsItems.PlotItem.PlotItem.__init__` (via
+  `AssistantWidget.__init__`, reached from `tests/
+  test_assistant_widget_wiring.py`'s `widget` fixture) — plausibly this
+  GPU's CUDA-13-driver/compute-6.1 mismatch (see `device_utils.py`'s own
+  docstring, confirmed on this exact machine) leaking into Qt/OpenGL widget
+  construction after torch has already touched `torch.cuda` earlier in the
+  same process. **Invisible to CI**: the `test` dependency-group never
+  installs PyQt6 + torch together, so every `*_wiring.py` test just
+  `importorskip`s there instead of building real widgets — CI has never
+  actually exercised this combination, so it can't have caught it.
+- **Acceptance:** full `pytest` run is reliably exit-0 on a Linux box with a
+  CUDA-capable-but-kernel-incompatible GPU across e.g. 20 consecutive runs;
+  or, if this is an upstream pyqtgraph/Qt/NVIDIA-driver bug outside this
+  repo's control, a documented workaround (e.g. force software OpenGL for
+  pyqtgraph plots, or avoid touching `torch.cuda` before Qt widget
+  construction in the same process) that makes local Linux runs reliable.
+- **Touch:** likely `napari_app/widgets/assistant_widget.py` (PlotWidget
+  construction) and/or `device_utils.py`; needs a `gdb`/core-dump follow-up
+  to see the native frame — `faulthandler` only shows the Python side.
+- **Verify:** repeat `python -m pytest tests/ -q` many times (loop it) and
+  confirm 0 crashes; re-run with `-X faulthandler` if it still reproduces to
+  get an updated trace.
+
 ### CellSeg1 Studio — standalone desktop app  · XL (epic, multi-PR)
 The headline UX bet: stop being "a napari plugin in a dock" and become a
 self-contained product that owns its window (Home · Projects · Workspace),
