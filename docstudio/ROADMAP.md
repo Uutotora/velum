@@ -3,20 +3,23 @@
 Phases from design skeleton to shippable product. Each phase closes when its
 `BACKLOG.md` items are done and logged in `CHANGELOG.md`.
 
-### Phase 0 — Design skeleton ✅ (current)
+### Phase 0 — Design skeleton ✅
 Native, static, logic-free reproduction of the mockup. Frameless rounded
 window, all screens + overlays, design tokens + UI kit. Launches on PyQt6
-alone. **This is where we are.**
+alone.
 
-### Phase 1 — A usable shell
-Projects become real (data model + store), the new-project flow works, and the
-**Segment** workspace is wired: embedded napari canvas, the custom Layers panel
-driving `viewer.layers`, real predict + Results. After Phase 1 you can create a
-project, load images, segment, and read results — end to end, in the new UI.
+### Phase 1 — A usable shell ✅ (2026-07-09)
+Projects are real (data model + store), the new-project flow works, and the
+**Segment** workspace is wired: **our own** canvas (explicitly not embedded
+napari — see `ARCHITECTURE.md`), our own evented `LayerList` driving the
+Layers panel, real predict + Results reusing the classic app's ML core. You
+can create a project, load images, segment, and read results — end to end,
+in the new UI.
 
-### Phase 2 — Differentiation
-Models & Train, Assistant (diagnostics), Dashboard (Aim), Logs, and the ⌘K
-command palette all wired. The features that make Studio more than a viewer.
+### Phase 2 — Differentiation (current)
+Models & Train and Dashboard are wired (2026-07-09). Still open: Assistant
+(diagnostics), Logs, and the ⌘K command palette. The features that make
+Studio more than a viewer.
 
 ### Phase 3 — Polish & platform
 Live theme repaint + persistence, Guide/onboarding, Settings, native rounded

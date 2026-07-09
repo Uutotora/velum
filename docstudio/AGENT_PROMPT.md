@@ -14,10 +14,14 @@ root `AGENTS.md`.
 
 ## Where things stand
 
-Studio is currently a **pure design skeleton**: every mockup screen reproduced
-in native PyQt6 (`studio/`), looking right, with **no logic** — no
-napari, no torch, no model or file IO. It launches with `bash run_studio.sh`.
-The classic app (`napari_app/main.py`, `cellseg1`) is separate and untouched.
+Studio is past the design-skeleton phase. As of 2026-07-09, Home, Projects,
+Models & Train, Dashboard, and **Segment** (the flagship — own canvas, own
+layer model, real predict/GT/batch/benchmark) are all wired to real data and
+logic — see `ROADMAP.md` (Phase 0 + 1 done, Phase 2 in progress) and
+`BACKLOG.md` for exactly what's real vs. still static. Still unwired: the
+Assistant drawer, Logs console, and ⌘K command palette. It launches with
+`bash run_studio.sh`. The classic app (`napari_app/main.py`, `cellseg1`) is
+separate and untouched.
 
 ## Your job
 

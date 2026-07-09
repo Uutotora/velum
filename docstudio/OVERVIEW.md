@@ -21,25 +21,37 @@ settings, our own tools — and reuse the classic app's proven **functionality**
 (the ML core: engines, predict, train, morphometry) by wrapping it under the
 new design, so we don't rewrite the hard parts from scratch.
 
-## The current phase: **design skeleton**
+## The current phase: **Phase 2 — Differentiation** (see `ROADMAP.md`)
 
-Right now this branch is deliberately **all design, no logic**:
+Studio started as a pure design skeleton (Phase 0: every mockup screen
+reproduced in native PyQt6, no logic, `demo.py` static content everywhere)
+and was then wired tab by tab. As of 2026-07-09, Phase 0 and Phase 1 are both
+**done**:
 
-- Every mockup screen is reproduced in **native PyQt6** — Home, Projects, the
-  Segment workspace (our **own** layers panel · canvas · inspector), Models &
-  Train, Dashboard — plus the overlays (Assistant drawer, Logs console, ⌘K
-  command palette, toast).
-- It renders **static demo content** (`studio/demo.py`) and gives
-  only light visual feedback. There is **no** napari, torch, model inference,
-  file IO, or project persistence. `import napari` / `import torch` never runs.
-- The window is **frameless with rounded corners** and our own dark title bar
-  (own traffic lights, native move/resize), so it reads as a product, not a
-  Qt window.
+- **Home, Projects, Models & Train, Dashboard, and Segment are all real** —
+  backed by real controllers (`project_controller.py`, `train_controller.py`,
+  `dashboard_controller.py`, `segment_controller.py`) and real persisted data
+  (`studio/project.py`'s `ProjectStore`), not `demo.py` reads. Real project
+  IO, real one-shot LoRA training, real predict (reusing the classic app's ML
+  core), real experiment tracking. `import torch`/the ML core *do* run now —
+  always lazily, only inside the controller method that needs them, never at
+  a shared module's top level (see "Ground rules" below).
+- **Segment is our own canvas + layer model** (`studio/canvas.py` +
+  `studio/layer_model.py`) — still explicitly **not** embedded napari; see
+  `ARCHITECTURE.md`'s "Segment tab specifically".
+- Still static/unwired: the Assistant drawer, Logs console, and ⌘K command
+  palette (Phase 2's remaining items) — check `BACKLOG.md` before assuming
+  otherwise, and update it (+ this file) the moment that changes.
+- The window is still **frameless with rounded corners** and our own dark
+  title bar (own traffic lights, native move/resize), so it reads as a
+  product, not a Qt window — that part of the original design skeleton work
+  never changed.
 
-Why strip the logic? The half-wired earlier version mixed the new shell with
-the raw legacy `PredictWidget`, which felt like "napari with a skin". Resetting
-to a pure, faithful design skeleton gives a clean, consistent target to build
-against — then each tab is wired properly, in isolation, with its own plan.
+Why did it start as a skeleton? The half-wired earlier version mixed the new
+shell with the raw legacy `PredictWidget`, which felt like "napari with a
+skin". Resetting to a pure, faithful design skeleton first gave a clean,
+consistent target to build against — then each tab was wired properly, in
+isolation, with its own plan, per `BACKLOG.md`.
 
 ## Ground rules
 

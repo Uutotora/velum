@@ -58,24 +58,52 @@ When you finish a tab: log it in `CHANGELOG.md`, tick it here, update
 - **Tasks:** ☑ modal/stepper UI (reuse atoms) · ☑ file/drag import picker ·
   ☑ persist + open · ☑ tests.
 
-### Segment (Workspace) tab · L  ← the flagship
+### Segment (Workspace) tab · L · ✅ done (2026-07-09) ← the flagship
 - **Goal:** the real segmentation surface on **our own canvas** — NOT embedded
   napari. Own viewer + layer model + tools; reuse only the ML logic.
-- **Work:** build a `Canvas` widget (QGraphicsView / QPainter; GPU later) that
-  renders image + label/shape/point layers with pan/zoom, replacing
-  `NucleiView`; build our own evented **layer model** the existing custom
-  Layers panel drives (visibility, opacity, new labels/shapes/points, delete,
-  grid, 2D↔3D — real effects); wire Segment settings + Run to a predict
-  controller that **reuses the ML core** (`napari_app/core/predict_controller.py`,
-  `engines*`, `analysis.py`), imported lazily; populate Results (stats,
-  calibration, save/export/refine/measurements, colour-by heatmap, GT & eval,
-  batch, benchmark); toast on completion.
-- **Tasks:** ☐ Canvas widget (image + pan/zoom) · ☐ own layer model ↔ Layers
-  panel · ☐ label/shape/point rendering + editing (brush/eraser/fill/polygon/
-  point) · ☐ viewer bar (2D↔3D/grid/home) real · ☐ engine/threshold controls →
-  config · ☐ Run + progress + results (reuse predict core) · ☐ GT overlay +
-  eval metrics · ☐ colour-by heatmap · ☐ batch + benchmark · ☐ tests
-  (controller pure + canvas/wiring).
+- **Work:** `studio/layer_model.py` (new) — our own evented layer model
+  (Layer/ImageLayer/LabelsLayer/PointsLayer/ShapesLayer/LayerList), Labels
+  properties/defaults verified 1:1 against the installed napari source
+  (opacity 0.7, brush_size 10, contiguous True, n_edit_dimensions 2, the
+  PAN_ZOOM/TRANSFORM/PAINT/ERASE/FILL/PICK/POLYGON mode set). `studio/
+  canvas.py` (new) — a plain QWidget/QPainter viewport (image+labels
+  compositing with contrast/gamma/colormap/contour/opacity/blending all
+  real) with pan/zoom/home, paint/erase/fill/pick/polygon editing, Points/
+  Shapes click-to-add/draw, grid mode (one tile per visible layer), a 2D/3D
+  toggle (max-intensity projection across a loaded z-stack — not GPU
+  volumetric rendering, noted as the simplification it is), channel-roll and
+  a non-destructive view-only transpose. `studio/segment_controller.py`
+  (new) — maps `ProjectSettings` to `PredictController`'s params/config and
+  reuses `run_prediction_async`/`run_batch_async`/`run_benchmark_async`
+  unmodified, plus `analysis`/`benchmark`/`cohort` wrappers; `record_run()`
+  is the Dashboard-visibility hook (mutates `project.stats`, caller saves).
+  `studio/workspace.py` rewired end to end onto all of the above — Images
+  pane (real paths + real thumbnails), Layers pane + per-kind controls,
+  Segment settings (engine/model/preset/thresholds/image/overlays/per-engine
+  accordion), Run (real progress + elapsed-time status/toast), Results
+  (stats, editable pixel calibration, save/export/measurements, colour-by,
+  GT & evaluation, batch, benchmark) — plus toolbar active-state sync for
+  the viewer bar and floating tool strip. `components.py`'s `Slider`/
+  `Stepper` gained real interactivity (were presentational-only) since the
+  whole pane needed them to work. `DashboardController.runs_table()`
+  loosened so a plain segmented-but-unbenchmarked project shows up too
+  (F1 "—"), not just a GT-scored one.
+- **Known, deliberate gaps** (called out rather than faked): TRANSFORM mode
+  is aliased to pan/zoom (no real affine transform UI); z-stack/time-lapse
+  *predict* isn't wired (a project's images are individual files — the
+  canvas can *display* an already-loaded volume via MIP, nothing triggers
+  `_predict_volume` on one yet); "Refine…" is an explicit "coming soon"
+  toast, not interactive point-prompt refinement; cross-tab settings sync
+  (e.g. selecting a model in Models & Train while the same project's
+  Workspace session is already open) needs reopening the project.
+- **Tasks:** ☑ Canvas widget (image + pan/zoom) · ☑ own layer model ↔ Layers
+  panel · ☑ label/shape/point rendering + editing (brush/eraser/fill/polygon/
+  point) · ☑ viewer bar (2D↔3D/grid/home) real · ☑ engine/threshold controls →
+  config · ☑ Run + progress + results (reuse predict core) · ☑ GT overlay +
+  eval metrics · ☑ colour-by heatmap · ☑ batch + benchmark · ☑ tests
+  (controller pure + canvas/wiring — 135 new cases across 5 new test files
+  plus updates to 2 existing ones, offscreen, real StudioWindow smoke-tested
+  with a real image through the exact production predict chain).
 
 ---
 

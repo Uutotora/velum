@@ -5,6 +5,111 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-09 — Segment (Workspace) tab wired end to end — the flagship backlog item, done
+
+The last unstarted P0 — the whole reason Studio has a "design skeleton"
+phase distinct from a finished product. Segment goes from `NucleiView` +
+static `demo.*` reads to a real segmentation surface, on **our own** canvas
+(explicitly not embedded napari, per `ARCHITECTURE.md`), reusing only the
+classic app's proven ML core underneath — matching the mockup's exact look
+throughout (no restyle, behaviour added under the existing design).
+
+**New modules:**
+- `studio/layer_model.py` — our own evented layer list (Layer/ImageLayer/
+  LabelsLayer/PointsLayer/ShapesLayer/LayerList), plain-callback events (no
+  Qt/psygnal) so it stays in the light CI test group. `LabelsLayer`'s
+  properties and defaults were checked 1:1 against the installed
+  `napari.layers.Labels` source per the product owner's "identical settings,
+  it's open source, take it from there" instruction: opacity 0.7, blending
+  translucent, brush_size 10, contiguous True, preserve_labels False,
+  n_edit_dimensions 2, contour 0, selected_label 1, and the PAN_ZOOM/
+  TRANSFORM/PAINT/ERASE/FILL/PICK/POLYGON mode set. Paint/erase/fill/pick/
+  polygon operate directly on the backing numpy mask; a golden-angle hue
+  rotation gives well-separated, deterministic per-instance colours without
+  a hash table (plus a colour-override path for "colour cells by
+  measurement"). A bug this module's own tests caught before it shipped:
+  `n_planes` was counting an RGB *image* layer's channel axis as a z-axis.
+- `studio/canvas.py` — a plain `QWidget`/`QPainter` viewport: numpy
+  compositing (contrast/gamma/single-hue colormap tint for images;
+  per-instance colour + opacity + contour for labels; translucent/additive/
+  opaque blending) cached and redrawn by `QPainter` under a pan/zoom
+  transform, so pan/zoom never re-runs the numpy math. Real mouse-driven
+  editing (brush-stroke interpolation so a fast drag doesn't leave gaps;
+  Points add/remove; Shapes' own click-vertices/double-click-closes
+  polygon flow). Grid mode tiles one cell per visible layer (the useful
+  reading of napari's grid mode when there's always exactly one image);
+  the 2D/3D toggle is a max-intensity projection across a loaded z-stack,
+  *not* GPU volumetric rendering — a real, working, but deliberately
+  simpler substitute, described as such rather than overclaimed.
+- `studio/segment_controller.py` — maps `ProjectSettings` to
+  `PredictController`'s params/config shape and calls
+  `run_prediction_async`/`run_batch_async`/`run_benchmark_async`
+  **unmodified** (the "reuse the logic" principle, literally): every test
+  that exercises a predict run monkeypatches
+  `napari_app.inference_cache.predict_cached` (the one seam every engine
+  path reaches for "cellseg1") so the real call chain runs at real cv2/
+  numpy speed with no GPU/SAM weights/torch actually loading. `record_run()`
+  mutates `project.stats` (n_cells/last_f1/progress) without saving — same
+  convention as `TrainController.select_model_for_project`, which leaves
+  `ProjectStore.save` to the caller — and is what makes Segment-tab activity
+  show up in the Dashboard.
+- `components.py`'s `Slider`/`Stepper` — were purely presentational in the
+  design skeleton (no mouse handling, no working +/- buttons at all); now
+  real value + `changed` signal, same exact visual, since the Segment
+  pane's thresholds/opacity/brush-size/contour controls needed them to work.
+
+**`studio/workspace.py` rewired throughout:** Images pane (real
+`project.image_paths`, real cv2 thumbnails falling back to the procedural
+nuclei art on an unreadable file); Layers pane (add points/shapes/labels,
+delete, select, eye-toggle, all backed by the new layer model) with
+per-kind controls (Labels gets the full napari-faithful block; Image gets
+contrast/gamma/colormap; Points/Shapes get a smaller real set); Segment
+settings (engine/model/quality-preset/thresholds/image settings/overlay
+toggles/a per-engine "Engine settings" accordion); Run (real progress,
+elapsed-time status pill + toast, synchronous config-error toasts before
+any thread starts vs. async `[ERROR]` log lines for a failure *during* the
+run — matching the established convention exactly); Results (stats,
+editable pixel calibration that recomputes on change, Save masks/Export
+CSV/Measurements — "Refine…" is an explicit "coming soon" toast, not faked
+— colour-by heatmap, Ground truth & evaluation, Batch prediction, Benchmark
+engines vs GT); the viewer bar and floating tool strip now both call real
+`Canvas` methods *and* re-style themselves to reflect live state (grid/MIP/
+transpose on, or the active edit mode) rather than just acting on clicks
+with no visual feedback. `DashboardController.runs_table()` was loosened so
+a plain segmented-but-unbenchmarked project shows up too (F1 "—"), not
+invisible until someone runs a GT benchmark — the actual "segmentation
+activity shows up in the Dashboard" requirement.
+
+**Known, deliberate gaps**, called out rather than papered over: TRANSFORM
+mode aliases to pan/zoom (no real affine-transform UI); z-stack/time-lapse
+*prediction* isn't wired (the canvas can display an already-loaded volume
+via MIP; nothing yet builds one from a project's flat image-file list and
+calls `_predict_volume` on it); a cross-tab settings change to an
+already-open project's Workspace session (e.g. picking a model in Models &
+Train) needs reopening the project to pick up, rather than live-syncing.
+
+**Verified:** 135 new test cases across `studio/tests/test_layer_model.py`,
+`test_canvas.py`, `test_segment_controller.py`, `test_components.py`,
+`test_workspace.py`, plus updates to `test_dashboard_controller.py` and
+`test_app_wiring.py` — full `studio/tests` suite green offscreen (300+
+tests, ~47s), and confirmed the same tests pass in a from-scratch venv with
+only the declared `test` dependency-group installed (no torch/napari/
+PyQt6/cellpose). Beyond unit tests: built a real `StudioWindow` offscreen
+with real controllers, created a real project with real image files on
+disk, ran a full predict through the exact production call chain end to
+end, evaluated it against a real ground-truth file, and screenshotted the
+result in both themes — confirmed by direct pixel sampling in one case
+rather than trusting the image by eye (a paint-timing artifact on the very
+first screenshot attempt needed more `processEvents()` pumping before it
+was trustworthy, not an actual bug — the exact lesson from this file's own
+2026-07-08 entries, still holding). Also caught and fixed a real test-
+isolation bug along the way: cellpose is genuinely installed in the
+environment these tests ran in, so the benchmark tests were silently
+running real (slow, intermittently timing-out) Cellpose inference instead
+of the intended fake seam, until explicitly monkeypatched unavailable.
+**Not verified:** real on-screen (non-offscreen) interaction, real model/GPU
+inference, a real SAM2 or Aim install, multi-monitor/HiDPI rendering.
+
 ## 2026-07-09 — Follow-up: SAM backbone had no manual fallback when nothing was auto-detected
 
 Reported right after the tabs above shipped: "SAM backbone" showed "Not

@@ -24,10 +24,29 @@ new_project_dialog.py  NewProjectDialog — the "+ New Project" modal (scrim +
                   centred panel, same construction as overlays.CommandPalette):
                   name+description → import (drag-drop or a file picker) →
                   engine, writing through ProjectStore.create() on finish.
-workspace.py      WorkspaceScreen — the signature Segment screen
-                  (Images|Layers panel · canvas · Segment|Results inspector).
-                  Still static except the top-bar breadcrumb/engine chip,
-                  which reflect the real active project (set_active_project).
+layer_model.py    Our own evented layer model (Layer/ImageLayer/LabelsLayer/
+                  PointsLayer/ShapesLayer/LayerList) — napari-Labels-faithful
+                  properties/defaults, plain-callback events (no Qt/psygnal),
+                  Qt-free so it stays in the light CI test group.
+canvas.py         Canvas(QWidget) — the Segment workspace's own image
+                  viewport (NOT embedded napari): numpy compositing of a
+                  LayerList (image contrast/gamma/colormap, labels colour/
+                  opacity/contour, translucent/additive/opaque blending)
+                  under a QPainter pan/zoom transform; paint/erase/fill/
+                  pick/polygon editing; Points/Shapes click-to-add/draw;
+                  grid mode, a 2D/3D (max-intensity-projection) toggle,
+                  channel-roll, view-only transpose.
+segment_controller.py  SegmentController (Qt-free): maps ProjectSettings to
+                  napari_app.core.predict_controller's params/config and
+                  reuses PredictController.run_prediction_async/
+                  run_batch_async/run_benchmark_async unmodified, plus
+                  analysis/benchmark/cohort wrappers. record_run() mutates
+                  project.stats (caller saves) — the Dashboard-visibility hook.
+workspace.py      WorkspaceScreen — the signature Segment screen (Images|
+                  Layers panel · canvas · Segment|Results inspector). Real:
+                  bound to segment_controller + project_controller — Images/
+                  Layers/layer-controls/Segment-settings/Run/Results (incl.
+                  GT & evaluation/batch/benchmark) all live, not demo.
 extra_screens.py  ModelsScreen (train), DashboardScreen (charts + runs table).
 overlays.py       AssistantDrawer, LogsConsole, CommandPalette, Toast (now has
                   a real announce() used by project creation, not just static).
@@ -97,20 +116,27 @@ toolbar was redrawn from scratch). We reuse the *interaction patterns*
 the **segmentation logic** (engines, predict, morphometry) — we do not
 reimplement the ML, and we do not reimplement the UI napari-style either.
 
-Plan (see BACKLOG for the task list):
+**Done (2026-07-09)** — see `BACKLOG.md`'s Segment tab entry and this same
+date's `CHANGELOG.md` entry for the full detail:
 
-- Build a `Canvas` widget (start on `QGraphicsView`/`QGraphicsScene` or a
-  custom `QWidget` + `QPainter`; a GPU `QOpenGLWidget` path later) that renders
-  the image + label/shape/point layers with pan/zoom — replacing the
-  `NucleiView` stand-in. Own the viewer bar (2D↔3D, grid, home) + tool strip.
-- Give it our **own layer model** (an evented list of image/labels/shapes/points
-  layers) that the existing custom Layers panel drives — visibility, opacity,
-  new-layer, delete, colours. Interaction model *inspired by* napari; code ours.
-- Wire Segment settings + Run to a predict controller that **reuses the ML
-  core** — `napari_app/core/predict_controller.py`, `napari_app/engines*`,
-  morphometry in `napari_app/analysis.py` — imported lazily. Results (stats,
-  calibration, save/export, colour-by heatmap, GT & eval, batch, benchmark)
-  and the toast render into the existing widgets.
+- `Canvas` (`studio/canvas.py`) is a plain `QWidget` + `QPainter` (not
+  `QGraphicsView`/GPU — that door is still open if performance ever demands
+  it) that composites image + labels/shapes/points layers with pan/zoom,
+  replacing the `NucleiView` stand-in. Owns the viewer bar (2D↔3D as a
+  max-intensity projection, grid as one tile per visible layer, home) + the
+  floating tool strip, both now re-styling themselves to match live state.
+- `studio/layer_model.py` is our **own layer model** (an evented
+  `LayerList` of image/labels/shapes/points layers) that the Layers panel
+  drives — visibility, opacity, new-layer, delete, colours, plus real
+  paint/erase/fill/pick/polygon editing on `LabelsLayer`. Interaction model
+  *faithful to* napari's `Labels` layer (verified against its installed
+  source); code entirely ours.
+- Segment settings + Run are wired to `SegmentController`
+  (`studio/segment_controller.py`), which **reuses the ML core** —
+  `napari_app/core/predict_controller.py`, `napari_app/engines*`,
+  morphometry in `napari_app/analysis.py` — imported lazily, unmodified.
+  Results (stats, calibration, save/export, colour-by heatmap, GT & eval,
+  batch, benchmark) and the toast render into the existing widgets.
 
 The principle for every tab: **own the UI, the icons, the canvas, the settings;
 reuse the logic.** We wrap the classic app's proven functionality under the new
