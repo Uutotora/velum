@@ -54,16 +54,27 @@ def test_image_layer_flat_data_gets_nonzero_range():
 # ── LabelsLayer defaults (must match napari.layers.Labels exactly) ───────────
 def test_labels_layer_defaults_match_napari():
     layer = LabelsLayer("Segmentation", np.zeros((10, 10), dtype=np.int32))
-    assert layer.opacity == 0.7
+    assert layer.opacity == 0.7           # matches napari's own Labels default
     assert layer.blending == "translucent"
     assert layer.brush_size == 10
     assert layer.contiguous is True
     assert layer.preserve_labels is False
     assert layer.show_selected_label is False
     assert layer.n_edit_dimensions == 2
-    assert layer.contour == 0
     assert layer.selected_label == 1
     assert layer.mode == "pan_zoom"
+
+
+def test_labels_layer_defaults_match_classic_app_fill_plus_outline():
+    """Real napari's own contour is fill-XOR-outline (0 or an int, never
+    both); the classic app's predict_widget.py works around that by adding
+    the same mask as two stacked layers (fill_opacity=0.35, outline
+    opacity=0.7, outline.contour=1) to get "fill + border" in one look.
+    Our own canvas renders both from a single LabelsLayer instead — these
+    are the values that reproduce that exact look by default."""
+    layer = LabelsLayer("Segmentation", np.zeros((10, 10), dtype=np.int32))
+    assert layer.contour == 2  # thicker than napari_app's 1px — see the field's own comment
+    assert layer.fill_opacity == 0.35
 
 
 def test_labels_layer_paint_stamps_a_circle():
@@ -187,6 +198,17 @@ def test_labels_layer_shuffle_colors_changes_seed_and_clears_overrides():
     layer.shuffle_colors()
     assert layer.color_seed != seed_before
     assert layer.color_overrides == {}
+
+
+def test_labels_layer_set_uniform_color_covers_every_present_id():
+    data = np.zeros((10, 10), dtype=np.int32)
+    data[0, 0] = 3
+    data[5, 5] = 9
+    layer = LabelsLayer("Ground truth", data)
+    layer.set_uniform_color((0, 255, 90))
+    assert layer.get_color(3) == (0, 255, 90)
+    assert layer.get_color(9) == (0, 255, 90)
+    assert layer.get_color(0) == (0, 0, 0)  # background is never overridden
 
 
 def test_labels_layer_to_summary_reports_max_label():

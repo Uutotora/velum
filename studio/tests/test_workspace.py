@@ -151,6 +151,22 @@ def test_load_project_auto_discovers_ground_truth(app, segment, projects, toasts
     assert gt.visible is False  # auto-discovered GT starts hidden
 
 
+def test_ground_truth_layers_get_the_fixed_gt_colour_not_random_hues(
+        app, segment, projects, toasts, tmp_path, storage):
+    """Matches the classic app's own GT convention: a fixed colour (not
+    per-instance random), so GT and predictions read as distinct roles."""
+    from studio.workspace import _GT_COLOR
+
+    project = _make_project(tmp_path, projects, storage, n_images=1, with_gt=True)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    gt = ws._layers.find("Ground truth")
+    assert gt.opacity == 0.9
+    ids = [i for i in set(gt.data.ravel().tolist()) if i > 0]
+    assert ids  # the fixture's GT mask actually has labelled cells
+    assert all(gt.get_color(i) == _GT_COLOR for i in ids)
+
+
 def test_refresh_reloads_only_on_project_switch(app, segment, projects, toasts, tmp_path, storage):
     p1 = _make_project(tmp_path, projects, storage, n_images=1)
     p2_dir = tmp_path / "p2"
@@ -513,13 +529,16 @@ def test_start_benchmark_scores_engines(app, segment, projects, toasts, tmp_path
 
 
 # ── viewer bar actions ─────────────────────────────────────────────────────────
-def test_toggle_mip_without_volume_toasts(app, segment, projects, toasts, tmp_path, storage):
+def test_toggle_mip_works_without_a_volume_like_real_napari(app, segment, projects, toasts, tmp_path, storage):
+    """Real napari's ndisplay toggle has no dimensionality guard — it must
+    not silently refuse (or toast an excuse) on a plain 2-D image; the
+    Canvas gets the pseudo-3D tilt instead of a real MIP projection, but the
+    *toggle itself* always works."""
     project = _make_project(tmp_path, projects, storage)
     ws = _ws(app, segment, projects, toasts)
     ws._load_project(project)
     ws._toggle_mip()
-    assert toasts and "No z-stack loaded" in toasts[-1][0]
-    assert ws._canvas.mip is False
+    assert ws._canvas.mip is True
 
 
 def test_roll_channel_with_one_channel_toasts_instead_of_silent_noop(
@@ -560,12 +579,17 @@ def test_grid_button_highlights_when_grid_is_on(app, segment, projects, toasts, 
     assert not _is_toolbar_button_on(grid_btn)
 
 
-def test_mip_button_highlights_only_for_a_volume(app, segment, projects, toasts, tmp_path, storage):
+def test_mip_button_highlights_with_or_without_a_volume(app, segment, projects, toasts, tmp_path, storage):
+    """Matches real napari's own ndisplay toggle: works — and so highlights
+    — regardless of whether the loaded data has a volume to project."""
     project = _make_project(tmp_path, projects, storage)
     ws = _ws(app, segment, projects, toasts)
     ws._load_project(project)
     cube_btn = ws._vbar_buttons["cube3d"]
-    ws._toggle_mip()  # no volume loaded -> stays off, no crash
+    ws._toggle_mip()  # no volume loaded -> still toggles (pseudo-3D tilt), still highlights
+    assert ws._canvas.mip is True
+    assert _is_toolbar_button_on(cube_btn)
+    ws._toggle_mip()
     assert not _is_toolbar_button_on(cube_btn)
 
     volume = LabelsLayer("Segmentation", np.zeros((3, 20, 20), dtype=np.int32))

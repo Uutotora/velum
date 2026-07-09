@@ -21,7 +21,8 @@ from typing import Callable, Optional
 import numpy as np
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import (
-    QColor, QCursor, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent,
+    QColor, QCursor, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPolygonF,
+    QTransform, QWheelEvent,
 )
 from PyQt6.QtWidgets import QWidget
 
@@ -155,12 +156,17 @@ class Canvas(QWidget):
         self.update()
 
     def toggle_mip(self) -> bool:
-        """Flips 2-D-slice vs max-intensity-projection display for a loaded
-        volume. Returns the new state; a no-op (returns current state
-        unchanged) when there's nothing to project — a single 2-D image has
-        no "3-D" to show, so the caller can leave the toolbar button inert."""
-        if self.layers.n_planes <= 1:
-            return self.mip
+        """Toggle the "2D/3D" view state — unconditionally, matching real
+        napari's own ``ndisplay`` toggle exactly: it is a camera/view-mode
+        switch with no dimensionality guard at all (confirmed against the
+        installed napari source — ``ViewerModel.dims.ndisplay`` just flips
+        2<->3; a flat 2-D layer still renders, tilted, in the resulting 3-D
+        camera). A loaded volume (``n_planes>1``) projects via max-intensity
+        (``_plane_of``); a single 2-D image instead gets a perspective tilt
+        in ``_draw_pseudo_3d`` — "3-D" always does *something* visible,
+        never a silent no-op on flat data the way an earlier version of
+        this method did.
+        """
         self.mip = not self.mip
         self._composite_dirty = True
         self.update()
@@ -255,10 +261,41 @@ class Canvas(QWidget):
         p.save()
         p.translate(self._pan)
         p.scale(self._zoom, self._zoom)
-        p.drawImage(0, 0, image)
+        if self.mip and self.layers.n_planes <= 1:
+            self._draw_pseudo_3d(p, image)
+        else:
+            p.drawImage(0, 0, image)
         self._draw_vectors(p)
         self._draw_cursor(p)
         p.restore()
+
+    def _draw_pseudo_3d(self, p: QPainter, image: QImage) -> None:
+        """"3-D" on a flat 2-D image (no z-stack to max-project): real
+        napari's ndisplay=3 still changes the camera unconditionally — a
+        flat layer renders as a tilted plane viewed at an angle, not
+        nothing. This fakes that same idea with a projective (not merely
+        affine) quad-to-quad mapping: image bottom stays full width, top
+        narrows and lifts, like looking down at a tilted sheet. Real 3-D
+        rendering would need a GPU/OpenGL camera this QPainter canvas
+        doesn't have — this is a deliberately simple, honest substitute
+        that always does *something* visible, never a silent no-op.
+        """
+        w, h = image.width(), image.height()
+        src = QPolygonF(QRectF(0, 0, w, h))
+        inset = w * 0.16
+        lift = h * 0.16
+        dst = QPolygonF([
+            QPointF(inset, lift), QPointF(w - inset, lift),
+            QPointF(w, h), QPointF(0, h),
+        ])
+        transform = QTransform()
+        if QTransform.quadToQuad(src, dst, transform):
+            p.save()
+            p.setTransform(transform, True)
+            p.drawImage(0, 0, image)
+            p.restore()
+        else:
+            p.drawImage(0, 0, image)  # degenerate geometry (e.g. 0-size) — draw flat rather than nothing
 
     def _paint_grid(self, p: QPainter, image: QImage) -> None:
         """Grid mode: one tile per visible layer, each rendered alone — a
@@ -266,7 +303,16 @@ class Canvas(QWidget):
         *images*; here there is always exactly one image, so tiling by
         *layer* is the useful analogue — e.g. Segmentation next to Ground
         truth). Falls back to the normal overlay when there's only one
-        visible layer (nothing to compare side by side)."""
+        visible layer (nothing to compare side by side).
+
+        Each tile's own auto-fit scale is multiplied by ``self._zoom``, so
+        the mouse wheel still zooms while grid mode is on (previously a
+        no-op — the wheel silently did nothing, which read as "grid mode
+        doesn't work"). Panning independently per tile isn't supported (pan
+        is calibrated for one full-canvas image, not a grid of small tiles);
+        each tile still zooms from its own centre. A tile is clipped to its
+        own cell so zooming in doesn't bleed into its neighbours.
+        """
         visible = [l for l in self.layers if l.visible and l.kind in ("image", "labels")]
         if len(visible) <= 1:
             self._paint_overlay(p, image)
@@ -292,8 +338,10 @@ class Canvas(QWidget):
             qimg = QImage(arr.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
             r, c = i // cols, i % cols
             cell = QRectF(c * cw + 2, r * ch + 2, cw - 4, ch - 4)
-            scale = min(cell.width() / w, cell.height() / h)
+            fit_scale = min(cell.width() / w, cell.height() / h)
+            scale = max(0.01, fit_scale * self._zoom)
             p.save()
+            p.setClipRect(cell)
             p.translate(cell.x() + (cell.width() - w * scale) / 2,
                        cell.y() + (cell.height() - h * scale) / 2)
             p.scale(scale, scale)
@@ -555,7 +603,17 @@ def _render_image(layer: ImageLayer, plane: np.ndarray) -> tuple[np.ndarray, np.
 
 
 def _render_labels(layer: LabelsLayer, plane: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """(rgb float32 0..255, alpha float32 0..1) for one LabelsLayer plane."""
+    """(rgb float32 0..255, alpha float32 0..1) for one LabelsLayer plane.
+
+    A filled interior at ``layer.fill_opacity`` (soft, default 0.35) with a
+    crisper outline band at ``layer.opacity`` (default 0.7) drawn on top
+    when ``contour>0`` — one per-pixel alpha mask reproducing the classic
+    app's "fill + border, one colour" convention
+    (``predict_widget.py``'s ``_add_filled_labels``, which gets there via
+    two *stacked* layers since real napari's own ``contour`` is a fill-XOR-
+    outline toggle, not additive, in a single layer). ``contour=0`` still
+    means "fill only, no outline band" — a real, selectable state.
+    """
     h, w = plane.shape
     ids = np.unique(plane)
     lut = np.zeros((int(ids.max()) + 1 if ids.size else 1, 3), dtype=np.float32)
@@ -564,13 +622,14 @@ def _render_labels(layer: LabelsLayer, plane: np.ndarray) -> tuple[np.ndarray, n
             lut[i] = layer.get_color(int(i))
     rgb = lut[np.clip(plane, 0, lut.shape[0] - 1)]
 
-    visible_mask = plane > 0
+    label_mask = plane > 0
     if layer.show_selected_label:
-        visible_mask = visible_mask & (plane == layer.selected_label)
-    if layer.contour > 0:
-        visible_mask = visible_mask & _contour_mask(plane, layer.contour)
+        label_mask = label_mask & (plane == layer.selected_label)
 
-    alpha = np.where(visible_mask, layer.opacity, 0.0).astype(np.float32)
+    alpha = np.where(label_mask, layer.fill_opacity, 0.0).astype(np.float32)
+    if layer.contour > 0:
+        outline_mask = label_mask & _contour_mask(plane, layer.contour)
+        alpha = np.where(outline_mask, layer.opacity, alpha)
     return rgb, alpha
 
 

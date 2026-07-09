@@ -136,7 +136,22 @@ class LabelsLayer(Layer):
         self.preserve_labels = False
         self.show_selected_label = False
         self.n_edit_dimensions = 2
-        self.contour = 0
+        # contour>0 draws an outline (at `opacity`, the crisper of the two)
+        # ON TOP OF a translucent fill (at `fill_opacity`) rather than
+        # replacing it — real napari's own Labels layer can't do this in one
+        # layer (contour is a filled-XOR-outline toggle there), so the
+        # classic app's predict_widget.py adds the *same* mask as two
+        # stacked layers to get "fill + border" — see _add_filled_labels and
+        # its 0.35/0.7 defaults, matched here as fill_opacity/opacity so our
+        # single layer reproduces that exact look without the two-layer
+        # trick. contour=0 still means "fill only, no outline" — a real,
+        # selectable state, not removed. 2px (not napari_app's 1px): ours is
+        # a per-pixel boundary mask, not a GPU-rendered line, and a 1px-wide
+        # mask is easy to lose entirely once the canvas is zoomed out below
+        # 1:1 — confirmed by direct pixel sampling of a real render, not
+        # just by eye (see the studio-subproject memory on why that matters).
+        self.contour = 2
+        self.fill_opacity = 0.35
         self.mode = PAN_ZOOM
         self.color_seed = 0.0
         # Per-id colour override — how "colour cells by <measurement>" recolours
@@ -172,6 +187,15 @@ class LabelsLayer(Layer):
 
     def clear_color_overrides(self) -> None:
         self.color_overrides = {}
+
+    def set_uniform_color(self, rgb: tuple[int, int, int]) -> None:
+        """Colour every id currently in ``data`` the same flat colour —
+        matches the classic app's ground-truth convention (a fixed colour,
+        not per-instance random hues, since GT and prediction are meant to
+        read as visually distinct roles rather than compete for the same
+        rainbow)."""
+        ids = np.unique(self.data)
+        self.color_overrides = {int(i): rgb for i in ids if i > 0}
 
     # ── editing ──────────────────────────────────────────────────────────────
     def _edit_planes(self, z: Optional[int]) -> list[np.ndarray]:

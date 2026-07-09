@@ -67,6 +67,11 @@ _COLOR_BY_KEYS = {"Area (heatmap)": "area", "Diameter (heatmap)": "diameter",
                   "Solidity (heatmap)": "solidity", "Mean intensity (heatmap)": "mean_intensity"}
 _DLG = QFileDialog.Option.DontUseNativeDialog
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".npy")
+# Ground truth's fixed colour — matches the classic app's own GT convention
+# (predict_widget.py's solid_rgba=(0.0, 1.0, 0.35, 1.0)): a uniform green,
+# not per-instance random hues, so GT and predictions read as visually
+# distinct roles instead of competing for the same rainbow.
+_GT_COLOR = (0, 255, 89)
 
 
 def _scroll(inner: QWidget) -> QScrollArea:
@@ -449,6 +454,8 @@ class WorkspaceScreen(QWidget):
                 gt = self._segment.load_gt_mask(gt_path, img.shape[:2])
                 gt_layer = LabelsLayer("Ground truth", gt)
                 gt_layer.visible = False
+                gt_layer.opacity = 0.9
+                gt_layer.set_uniform_color(_GT_COLOR)
                 self._layers.add(gt_layer, select=False)
             except Exception:
                 pass
@@ -1053,9 +1060,10 @@ class WorkspaceScreen(QWidget):
             self._on_toggle_logs()
 
     def _toggle_mip(self) -> None:
-        if self._canvas.layers.n_planes <= 1:
-            self._toast("No z-stack loaded", "2D / 3D projection needs a loaded z-stack/time-lapse.")
-            return
+        """Matches real napari's own ndisplay toggle: no dimensionality
+        guard, always does something (a real max-intensity projection for a
+        loaded z-stack; a perspective tilt — Canvas._draw_pseudo_3d — for a
+        plain 2-D image, since this canvas has no GPU 3-D camera)."""
         self._canvas.toggle_mip()
         self._sync_toolbars()
 
@@ -1606,7 +1614,10 @@ class WorkspaceScreen(QWidget):
         existing = self._layers.find("Ground truth")
         if existing is not None:
             self._layers.remove(self._layers.index_of(existing))
-        self._layers.add(LabelsLayer("Ground truth", gt), select=False)
+        gt_layer = LabelsLayer("Ground truth", gt)
+        gt_layer.opacity = 0.9
+        gt_layer.set_uniform_color(_GT_COLOR)
+        self._layers.add(gt_layer, select=False)
         if self._last_result is not None:
             self._evaluate_gt()
         self._rebuild_results_pane()

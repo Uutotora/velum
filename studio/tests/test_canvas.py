@@ -290,9 +290,17 @@ def test_wheel_zooms_in_and_out(app):
     assert c._zoom < z1
 
 
-def test_toggle_mip_is_a_noop_for_a_single_plane(app):
+def test_toggle_mip_works_even_on_a_single_plane(app):
+    """Real napari's ndisplay toggle has no dimensionality guard at all —
+    it works unconditionally, even on flat 2-D data (confirmed against the
+    installed napari source). A single-plane image gets the pseudo-3D tilt
+    (_draw_pseudo_3d) rather than a real MIP projection, but the *toggle
+    itself* must never silently refuse, unlike an earlier version of this
+    method."""
     c, *_ = _make_canvas(app)
     assert c.layers.n_planes == 1
+    assert c.toggle_mip() is True
+    assert c.mip is True
     assert c.toggle_mip() is False
     assert c.mip is False
 
@@ -304,6 +312,22 @@ def test_toggle_mip_flips_for_a_volume(app):
     assert layers.n_planes == 3
     assert c.toggle_mip() is True
     assert c.mip is True
+
+
+def test_pseudo_3d_tilt_visibly_changes_a_flat_image(app):
+    layers = LayerList()
+    img = np.zeros((40, 40, 3), dtype=np.uint8)
+    img[10:30, 10:30] = [200, 60, 60]
+    layers.add(ImageLayer("img", img))
+    c = Canvas(theme.DARK, layers)
+    c.resize(60, 60)
+    c.home()
+    before = c.grab().toImage()
+    assert c.toggle_mip() is True
+    c.update()
+    app.processEvents()
+    after = c.grab().toImage()
+    assert before != after
 
 
 def test_roll_channel_cycles_visibility_across_image_layers(app):
@@ -346,6 +370,41 @@ def test_step_z_noop_in_mip_mode(app):
     c.mip = True
     c.step_z(2)
     assert layers.current_z == 0
+
+
+# ── grid mode ────────────────────────────────────────────────────────────────
+def test_grid_mode_falls_back_to_overlay_with_one_visible_layer(app):
+    c, layers, *_ = _make_canvas(app, with_labels=False)
+    c.grid = True
+    c.update()
+    app.processEvents()
+    # must not raise, and must render something (the single-layer fallback path)
+    assert c._composited_image() is not None
+
+
+def test_grid_mode_responds_to_zoom(app):
+    """Grid mode used to always auto-fit each tile from scratch, silently
+    ignoring self._zoom — the mouse wheel did nothing visible while grid
+    mode was on. Real napari's own grid mode shares one camera across every
+    tile (confirmed against its source), so zoom must actually change what
+    grid mode renders."""
+    layers = LayerList()
+    img = np.zeros((40, 40, 3), dtype=np.uint8)
+    img[10:30, 10:30] = [200, 60, 60]
+    layers.add(ImageLayer("img", img))
+    labels = np.zeros((40, 40), dtype=np.int32)
+    labels[10:30, 10:30] = 1
+    layers.add(LabelsLayer("Segmentation", labels))
+    c = Canvas(theme.DARK, layers)
+    c.resize(120, 120)
+    c.grid = True
+    c.home()
+    before = c.grab().toImage()
+    c._zoom = 3.0
+    c.update()
+    app.processEvents()
+    after = c.grab().toImage()
+    assert before != after
 
 
 # ── pure pixel-compositing functions (no Qt/widget needed) ──────────────────
@@ -393,6 +452,30 @@ def test_render_labels_alpha_zero_at_background():
     rgb, alpha = _render_labels(layer, layer.data)
     assert alpha[0, 0] == 0.0
     assert alpha[0, 1] == pytest.approx(layer.opacity)
+
+
+def test_render_labels_default_combines_fill_and_outline():
+    """The classic app's "fill + border, one colour" convention
+    (predict_widget.py's _add_filled_labels: fill_opacity=0.35,
+    outline opacity=0.7), reproduced as one per-pixel alpha mask instead of
+    that module's two stacked layers."""
+    data = np.zeros((10, 10), dtype=np.int32)
+    data[2:8, 2:8] = 5
+    layer = LabelsLayer("L", data)  # defaults: contour=1, fill_opacity=0.35, opacity=0.7
+    _rgb, alpha = _render_labels(layer, data)
+    assert alpha[4, 4] == pytest.approx(layer.fill_opacity)  # interior
+    assert alpha[2, 4] == pytest.approx(layer.opacity)       # boundary row of the block
+    assert alpha[0, 0] == 0.0                                # background
+
+
+def test_render_labels_contour_zero_is_fill_only_everywhere():
+    data = np.zeros((10, 10), dtype=np.int32)
+    data[2:8, 2:8] = 5
+    layer = LabelsLayer("L", data)
+    layer.contour = 0
+    _rgb, alpha = _render_labels(layer, data)
+    assert alpha[4, 4] == pytest.approx(layer.fill_opacity)
+    assert alpha[2, 4] == pytest.approx(layer.fill_opacity)  # no outline band now
 
 
 def test_render_labels_show_selected_label_hides_others():
