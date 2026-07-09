@@ -773,7 +773,3 @@ class ProjectsScreen(QWidget):
         lay.addStretch(1)
         row.mouseReleaseEvent = lambda e: self._new_project()
         return row
-
-
-from studio.workspace import WorkspaceScreen  # noqa: E402
-from studio.extra_screens import ModelsScreen, DashboardScreen  # noqa: E402

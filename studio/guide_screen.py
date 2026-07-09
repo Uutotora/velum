@@ -26,7 +26,7 @@ from studio import icons
 from studio import theme
 from studio import guide_content
 from studio import project_controller
-from studio.components import Accordion, GroupLabel, PillButton, hline, label
+from studio.components import Accordion, GroupLabel, PillButton, bare_widget as _bare, hline, label
 from studio.screens import page_header, scroll
 
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
@@ -35,26 +35,6 @@ _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 def _inline(text: str) -> str:
     """Render the tiny ``**bold**`` markup guide_content articles use."""
     return _BOLD_RE.sub(r"<b>\1</b>", text)
-
-
-def _bare(layout=None) -> QWidget:
-    """A plain ``QWidget``, explicitly transparent, for grouping a layout.
-
-    A bare ``QWidget()`` with no stylesheet of its own still inherits the
-    app-wide ``QWidget { background: <bg> } `` rule (``theme.build_qss``)
-    and paints an *opaque* bg-coloured rectangle wherever it sits —
-    invisible when it's directly on the page canvas, but a stray dark
-    patch cut into any lighter card it's nested inside (confirmed by a
-    pixel-level render test — this is exactly what produced the banded
-    rows in the engine-comparison table and the two-tone shortcut rows).
-    Every plain grouping widget in this module goes through this instead
-    of a raw ``QWidget()`` so the mistake can't recur silently.
-    """
-    w = QWidget()
-    w.setStyleSheet("background: transparent;")
-    if layout is not None:
-        w.setLayout(layout)
-    return w
 
 
 def _prose_label(text: str, size: float, color: str, weight: int = 400) -> QLabel:

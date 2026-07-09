@@ -24,6 +24,7 @@ from studio import theme
 from studio import project_controller
 from studio.project import ProjectStore
 from studio.project_controller import ProjectController
+from studio.train_controller import TrainController
 
 
 @pytest.fixture
@@ -41,6 +42,12 @@ def controller(tmp_path):
 def empty_controller(tmp_path):
     """A controller with no sample seeding, for empty-state assertions."""
     return ProjectController(ProjectStore(tmp_path), seed_if_empty=False)
+
+
+@pytest.fixture
+def train_controller(tmp_path):
+    """A tmp_path-backed TrainController — never the real data_store."""
+    return TrainController(storage_dir=tmp_path / "train_storage")
 
 
 # ── UI kit ───────────────────────────────────────────────────────────────────
@@ -156,7 +163,7 @@ def test_nucleiview_geometry_can_be_synced_to_a_raw_parent(app):
 
 
 # ── screens ──────────────────────────────────────────────────────────────────
-def test_all_screens_construct(app, controller):
+def test_all_screens_construct(app, controller, train_controller):
     from studio.screens import HomeScreen, ProjectsScreen
     from studio.workspace import WorkspaceScreen
     from studio.extra_screens import ModelsScreen, DashboardScreen
@@ -164,8 +171,8 @@ def test_all_screens_construct(app, controller):
     assert HomeScreen(t, controller, lambda k: None, lambda i: None, lambda: None) is not None
     assert ProjectsScreen(t, controller, lambda k: None, lambda i: None, lambda: None) is not None
     assert WorkspaceScreen(t) is not None
-    assert ModelsScreen(t) is not None
-    assert DashboardScreen(t) is not None
+    assert ModelsScreen(t, train_controller, controller, lambda title, sub: None) is not None
+    assert DashboardScreen(t, train_controller, controller, lambda title, sub: None) is not None
 
 
 def test_home_screen_lists_recent_real_projects(app, controller):
@@ -343,43 +350,49 @@ def test_projects_screen_new_project_cta_and_ghosts_open_dialog(app, controller)
 
 
 # ── window ───────────────────────────────────────────────────────────────────
-def test_window_is_frameless_with_titlebar_and_grips(app, controller):
+def test_window_is_frameless_with_titlebar_and_grips(app, controller, train_controller):
     from studio import window_chrome
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller)
     assert win.windowFlags() & Qt.WindowType.FramelessWindowHint
     assert len(win.findChildren(window_chrome.TitleBar)) == 1
     assert len(win._grips) == 4
 
 
-def test_window_constructs_without_napari_or_store(app, controller):
+def test_window_constructs_without_napari_or_store(app, controller, train_controller):
     # If this imported napari/torch, the light CI job would fail — it must not.
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller)
     assert win._stack.count() == len(app_mod._STACK_KEYS)
 
 
-def test_navigation_switches_stack_screens(app, controller):
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+def test_navigation_switches_stack_screens(app, controller, train_controller):
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller)
     win.navigate("dashboard")
     assert win._stack.currentWidget() is win._screens["dashboard"]
     win.navigate("workspace")
     assert win._stack.currentWidget() is win._screens["workspace"]
 
 
-def test_sidebars_guide_and_docs_row_opens_the_guide_screen(app, controller):
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+def test_sidebars_guide_and_docs_row_opens_the_guide_screen(app, controller, train_controller):
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller)
     win._sidebar.open_guide.emit()
     assert win._stack.currentWidget() is win._screens["guide"]
 
 
-def test_navigate_guide_colon_id_deep_links_into_a_specific_article(app, controller):
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+def test_navigate_guide_colon_id_deep_links_into_a_specific_article(app, controller, train_controller):
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller)
     win.navigate("guide:engines")
     assert win._stack.currentWidget() is win._screens["guide"]
     assert win._screens["guide"]._current_id == "engines"
 
 
-def test_opening_a_project_sets_active_and_updates_workspace(app, controller):
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+def test_opening_a_project_sets_active_and_updates_workspace(app, controller, train_controller):
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller)
     project = controller.list_projects()[0]
     win._open_project(project.id)
     assert win._stack.currentWidget() is win._screens["workspace"]
@@ -387,8 +400,9 @@ def test_opening_a_project_sets_active_and_updates_workspace(app, controller):
     assert project.name in win._screens["workspace"]._crumb.text()
 
 
-def test_active_project_survives_theme_toggle(app, controller):
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+def test_active_project_survives_theme_toggle(app, controller, train_controller):
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller)
     project = controller.list_projects()[0]
     win._open_project(project.id)
     win.toggle_theme()
@@ -399,9 +413,10 @@ def test_active_project_survives_theme_toggle(app, controller):
 # (Home/Projects are built once and kept alive across navigation -- the stack
 # just swaps pages -- so without an explicit refresh, a project created via
 # the New Project dialog wouldn't appear until the whole app was restarted.)
-def test_navigate_refreshes_home_and_projects_screens(app, empty_controller):
+def test_navigate_refreshes_home_and_projects_screens(app, empty_controller, train_controller):
     from PyQt6.QtWidgets import QFrame
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=empty_controller)
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=empty_controller,
+                                train_controller=train_controller)
 
     def rrows():
         return [f for f in win._screens["home"].findChildren(QFrame) if f.objectName() == "RRow"]
@@ -419,11 +434,12 @@ def test_navigate_refreshes_home_and_projects_screens(app, empty_controller):
     assert len(pcards()) == 1
 
 
-def test_creating_a_project_via_dialog_shows_up_immediately(app, empty_controller):
+def test_creating_a_project_via_dialog_shows_up_immediately(app, empty_controller, train_controller):
     """End-to-end regression for the exact bug reported: create -> navigate
     away and back -> the new project is there without restarting the app."""
     from PyQt6.QtWidgets import QFrame
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=empty_controller)
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=empty_controller,
+                                train_controller=train_controller)
 
     dlg = win._new_project_dialog
     dlg.open()
@@ -441,9 +457,10 @@ def test_creating_a_project_via_dialog_shows_up_immediately(app, empty_controlle
     assert len(project_cards) == 1
 
 
-def test_assistant_and_logs_toggle_as_overlays(app, controller):
+def test_assistant_and_logs_toggle_as_overlays(app, controller, train_controller):
     # isHidden() is the explicit flag; isVisible() needs the top-level shown.
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller)
     assert win._assistant.isHidden()
     win.navigate("assistant")
     assert not win._assistant.isHidden()
@@ -453,17 +470,19 @@ def test_assistant_and_logs_toggle_as_overlays(app, controller):
     assert not win._logs.isHidden()
 
 
-def test_command_palette_opens_and_escape_closes(app, controller):
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+def test_command_palette_opens_and_escape_closes(app, controller, train_controller):
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller)
     win._toggle_palette()
     assert not win._palette.isHidden()
     win._close_overlays()
     assert win._palette.isHidden()
 
 
-def test_theme_toggle_rebuilds(app, controller):
+def test_theme_toggle_rebuilds(app, controller, train_controller):
     from studio import window_chrome
-    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller)
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller)
     win.toggle_theme()
     assert win._theme_name == "light"
     assert win._stack.count() == len(app_mod._STACK_KEYS)

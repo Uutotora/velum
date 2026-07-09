@@ -81,13 +81,19 @@ When you finish a tab: log it in `CHANGELOG.md`, tick it here, update
 
 ## P1 — differentiation
 
-### Models & Train tab · M
+### Models & Train tab · M · ✅ done (2026-07-09)
 - **Goal:** real one-shot LoRA training + model management.
-- **Work:** wire the train form to `napari_app/core/train_model.py` /
-  `train_state_manager`; live run list + progress; model list from disk;
-  import/select a model for the workspace.
-- **Tasks:** ☐ train form → training entry · ☐ progress/run state · ☐ model
-  registry list · ☐ select-into-workspace · ☐ tests.
+- **Work:** `studio/train_controller.py` — wires the train form to
+  `napari_app/core/train_model.py` / `train_state_manager` (background
+  thread, live progress via a guarded cross-thread signal); trained-models
+  list + recent-runs history from real on-disk JSON (`loras/*.json`
+  sidecars, `training_history.json`); "select into workspace" writes the
+  chosen model into the active project's settings; "Import model" copies an
+  external checkpoint in. Each run trains on an isolated, copied-in
+  image+mask pair rather than the classic app's shared, accumulating
+  folders — see `CHANGELOG.md` for why.
+- **Tasks:** ☑ train form → training entry · ☑ progress/run state · ☑ model
+  registry list · ☑ select-into-workspace · ☑ tests.
 
 ### Assistant tab · M
 - **Goal:** the diagnostic Assistant as a real chat.
@@ -96,12 +102,15 @@ When you finish a tab: log it in `CHANGELOG.md`, tick it here, update
 - **Tasks:** ☐ advisor bridge · ☐ streaming replies · ☐ apply-suggestion
   actions · ☐ tests.
 
-### Dashboard tab · M
+### Dashboard tab · M · ✅ done (2026-07-09)
 - **Goal:** real experiment tracking.
-- **Work:** replace static charts with the Aim integration
-  (`napari_app/core/experiment_tracking.py`) — embedded view or live data;
-  runs table from real runs.
-- **Tasks:** ☐ data source · ☐ charts from real metrics · ☐ runs table · ☐ open-in-Aim.
+- **Work:** `studio/dashboard_controller.py` — the loss chart, F1-across-runs
+  chart and Runs table now read real on-disk data (training history +
+  checkpoint sidecars + benchmarked project stats), *not* Aim's storage
+  directly (`Repo.get_run()`/`query_runs()` proved unreliable outside
+  Aim's own server — see `CHANGELOG.md`); "Open in Aim" still opens the
+  real Aim server in the system browser.
+- **Tasks:** ☑ data source · ☑ charts from real metrics · ☑ runs table · ☑ open-in-Aim.
 
 ### Logs tab · S
 - **Goal:** real app log stream in the console (reuse `widgets/log_window.py`

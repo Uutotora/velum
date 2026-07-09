@@ -18,9 +18,9 @@ from typing import Callable, Optional
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QToolButton,
-    QPushButton, QSizePolicy, QGraphicsDropShadowEffect,
+    QPushButton, QSizePolicy, QGraphicsDropShadowEffect, QMenu,
 )
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QAction
 
 from studio import icons
 from studio import theme
@@ -32,6 +32,26 @@ def hline(t: dict) -> QFrame:
     f.setFixedHeight(1)
     f.setStyleSheet(f"background:{t['border']}; border:none;")
     return f
+
+
+def bare_widget(layout=None) -> QWidget:
+    """A plain ``QWidget``, explicitly transparent, for grouping a layout.
+
+    A bare ``QWidget()`` with no stylesheet of its own still inherits the
+    app-wide ``QWidget { background: <bg> }`` rule (``theme.build_qss``) and
+    paints an *opaque* bg-coloured rectangle wherever it sits — invisible
+    when it's directly on the page canvas, but a stray dark patch cut into
+    any lighter card it's nested inside (confirmed by a pixel-level render
+    test — this is what produced the banded rows in the Guide screen's
+    engine-comparison table and shortcut list). Every plain grouping widget
+    should go through this instead of a raw ``QWidget()`` so the mistake
+    can't recur silently.
+    """
+    w = QWidget()
+    w.setStyleSheet("background: transparent;")
+    if layout is not None:
+        w.setLayout(layout)
+    return w
 
 
 def soft_shadow(w: QWidget, blur: int = 16, alpha: int = 26, dy: int = 3) -> None:
@@ -145,11 +165,28 @@ class IconButton(QToolButton):
 
 
 class SelectBox(QFrame):
-    """A non-interactive combo-box look-alike (value + chevron)."""
+    """A combo-box look-alike (value + chevron).
+
+    Non-interactive by default (the original design-skeleton behaviour, still
+    used as-is by not-yet-wired screens). Pass ``options`` + ``on_select`` to
+    make it a real, working control: clicking pops up a ``QMenu`` of
+    ``options`` beneath the box; choosing one updates the displayed text and
+    calls ``on_select(choice)``. Pass ``on_click`` instead (e.g. to open a
+    file picker, when the value isn't a small fixed choice set) for a plain
+    click action with no menu. Either way it's the same visual, now backed by
+    a real value, so a tab can be wired without inventing a new widget.
+    """
 
     def __init__(self, text: str, t: dict, lead_icon: Optional[str] = None,
-                 lead_color: Optional[str] = None):
+                 lead_color: Optional[str] = None,
+                 options: Optional[list[str]] = None,
+                 on_select: Optional[Callable[[str], None]] = None,
+                 on_click: Optional[Callable[[], None]] = None):
         super().__init__()
+        self._t = t
+        self._options = options
+        self._on_select = on_select
+        self._on_click = on_click
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
             f"QFrame{{background:{t['inset']}; border:1px solid {t['border']};"
@@ -161,13 +198,48 @@ class SelectBox(QFrame):
             ic = QLabel()
             ic.setPixmap(icons.pixmap(lead_icon, lead_color or t["primary"], 14))
             row.addWidget(ic)
-        val = QLabel(text)
-        val.setStyleSheet(f"color:{t['text']}; font-size:12.5px; font-weight:600;")
-        row.addWidget(val)
+        self._val = QLabel(text)
+        self._val.setStyleSheet(f"color:{t['text']}; font-size:12.5px; font-weight:600;")
+        row.addWidget(self._val)
         row.addStretch(1)
         chev = QLabel()
         chev.setPixmap(icons.pixmap("chevron_down", t["text_muted"], 13))
         row.addWidget(chev)
+        if (options and on_select) or on_click:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def text(self) -> str:
+        return self._val.text()
+
+    def set_text(self, text: str) -> None:
+        self._val.setText(text)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            if self._options and self._on_select:
+                self._open_menu()
+            elif self._on_click:
+                self._on_click()
+        super().mouseReleaseEvent(e)
+
+    def _open_menu(self) -> None:
+        t = self._t
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            f"QMenu{{background:{t['surface']}; border:1px solid {t['border_strong']};"
+            f"border-radius:8px; padding:4px;}}"
+            f"QMenu::item{{color:{t['text']}; padding:6px 14px; border-radius:6px;}}"
+            f"QMenu::item:selected{{background:{t['surface2']};}}")
+        for choice in self._options:
+            action = QAction(choice, menu)
+            action.triggered.connect(lambda _=False, c=choice: self._choose(c))
+            menu.addAction(action)
+        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
+
+    def _choose(self, choice: str) -> None:
+        self.set_text(choice)
+        if self._on_select:
+            self._on_select(choice)
 
 
 class Toggle(QFrame):

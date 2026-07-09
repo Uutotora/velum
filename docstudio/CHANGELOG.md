@@ -5,6 +5,97 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-09 — Models & Train and Dashboard tabs wired end to end (P1 done)
+
+Both `docstudio/BACKLOG.md` P1 items in one pass — real one-shot LoRA
+training and real experiment tracking, reusing the classic app's proven
+pipeline exactly as `ARCHITECTURE.md` prescribes, with no change to the
+mockup's look.
+
+**Models & Train** (`studio/train_controller.py`, new): the 4-field train
+card (Annotated image · SAM backbone · LoRA rank · Epochs) is now real.
+`SelectBox` (`components.py`) gained an optional click-to-choose mode —
+`options`/`on_select` pops a `QMenu` and updates its own text, `on_click`
+opens a file picker instead — so all four fields work without inventing a
+new widget or restyling. Picking an image looks for a same-stem mask (next
+to the image, a sibling `masks/` folder, or the classic app's shared
+`train_masks/`) and shows its real cell count; missing a mask disables Start
+with an inline explanation. Start Training spawns
+`napari_app.core.train_model.train_model` on a background thread (the exact
+function the classic Train tab already calls), reporting live progress into
+the "Recent training runs" aside via a guarded cross-thread signal (see
+below). "Trained models" and "Recent training runs" both read real on-disk
+state — `loras/*.json` sidecars and `training_history.json` — so a model
+trained via the classic app already shows up here too. Clicking a trained
+model writes it into the active project's settings (the "select into
+workspace" hook the Segment tab will read once it's wired). "Import model"
+copies an external checkpoint (+ sidecar) into the shared `loras/` folder.
+
+One deliberate design choice worth recording: each training run's chosen
+image+mask is copied into an **isolated** `studio_train_runs/<run_id>/`
+folder rather than the classic app's shared, accumulating `train_images/`/
+`train_masks/`. The mockup's UI only ever shows *one* image — training on
+the shared folder would silently include every image ever picked in past
+sessions too, which the UI never says and the user never agreed to. The
+checkpoint output and the sidecar/history bookkeeping still land in the
+same shared `loras/` folder either app uses.
+
+**Dashboard** (`studio/dashboard_controller.py`, new): the training-loss
+line chart, the F1-across-runs bar chart, and the Runs table are now real,
+sourced from the same on-disk JSON (training history + per-checkpoint
+sidecars + benchmarked project stats), not by querying Aim's storage
+directly. That was tried first and abandoned after empirical testing:
+`aim.Repo.get_run()` returns `None` for every hash and `Repo(...).
+query_runs("")` raises `NotImplementedError` outside of Aim's own `aim up`
+server process — confirmed against both a fresh throwaway repo *and* this
+repo's real, 484-run `data_store/aim_repo`, so it isn't a fixture-data
+fluke. "Open in Aim" still shells out to that real server
+(`experiment_tracking.ensure_dashboard_running()`) and opens it in the
+system browser — Studio's own charts stay fed by the robust, no-extra-
+process path instead of trying to parse Aim's internals. Empty states (no
+training yet, nothing benchmarked yet) render a plain "No runs yet" message
+rather than crashing — the original static chart widgets call `min()`/
+`max()` on their data and would otherwise throw on an empty list.
+
+Also fixed in passing: a latent circular-import hazard in `screens.py`,
+which imported `WorkspaceScreen`/`ModelsScreen`/`DashboardScreen` at its own
+bottom purely for side effects — nothing in the file used them, and every
+real caller already imports them directly from `workspace`/`extra_screens`.
+It only "worked" by accident of import order (`app.py` always imports
+`screens` first); importing `extra_screens` before `screens` anywhere — as
+the new tests here do — hit `ImportError: cannot import name 'ModelsScreen'
+from partially initialized module`. Deleted the two dead lines. Also
+promoted `guide_screen.py`'s private `_bare()` helper (a plain `QWidget`
+with an explicit `background: transparent`, working around the app-wide
+QSS's `QWidget{background:<bg>}` rule painting an opaque patch inside a
+lighter card — see the 2026-07-08 entries below) to a public
+`components.bare_widget()`, since the Dashboard runs table needed the exact
+same fix for its own per-row wrapper (`rowwrap = QFrame(); rowwrap.
+setLayout(...)`, no stylesheet of its own) — a third file that would have
+shipped the same latent bug otherwise.
+
+Cross-thread safety: a training thread's completion callback can outlive
+the `ModelsScreen` instance it targets (a theme toggle tears down and
+rebuilds every screen). Guarded both signal emits with `except RuntimeError:
+pass`, the same pattern `motion.py`'s hover closures already use for the
+equivalent hazard, and added a regression test that force-deletes the
+widget with `sip.delete()` and confirms the guarded emit doesn't raise —
+mirroring how that hazard was originally caught.
+
+**Verified:** `pytest studio/tests -q` (243 tests, incl. two new pure-logic
+suites — `test_train_controller.py`, `test_dashboard_controller.py` — and a
+new Qt-wiring suite, `test_extra_screens.py`); the full repo suite (688
+tests) in the real env; the AGENTS.md throwaway-venv light-group check
+(python3.10, since no bare python3.11/3.12 was available locally — the one
+pre-existing failure, `tests/test_packaging.py`, is a documented py3.11+-only
+file unrelated to this change); real offscreen screenshots of both tabs, in
+both themes, in both empty (fresh install) and populated states — no
+banded rows, no dark-canvas patches, correct real data throughout.
+**Not verified:** the real GUI's live look/animation, and real torch
+training (every test monkeypatches `TrainController.start_training` rather
+than spawning actual model training — `train_model()` itself is exercised
+by the classic app's own suite, not re-tested here).
+
 ## 2026-07-09 — A third rendering bug in the same family: bare QWidget() wrappers
 
 Third round of direct user feedback, pointing at two specific remaining

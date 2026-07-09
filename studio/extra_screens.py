@@ -1,44 +1,177 @@
-"""CellSeg1 Studio — Models & Train and Dashboard screens (static skeleton)."""
+"""CellSeg1 Studio — Models & Train and Dashboard screens.
+
+Models & Train is real (bound to ``studio.train_controller.TrainController`` —
+one-shot LoRA training on a background thread, a real trained-models list and
+recent-runs history from disk). Dashboard is real (bound to
+``studio.dashboard_controller.DashboardController``). See ``docstudio/
+BACKLOG.md`` / ``CHANGELOG.md`` for how each was wired.
+"""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+import webbrowser
+from pathlib import Path
+from typing import Callable, Optional
+
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QPolygonF, QPainterPath
 from PyQt6.QtCore import QPointF, QRectF
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea,
+    QFileDialog,
 )
 
 from studio import icons
-from studio import theme, demo
+from studio import theme
 from studio.components import (
     Chip, Badge, PillButton, SelectBox, GroupLabel, hline, soft_shadow, label,
 )
 from studio.screens import page_header, scroll
+from studio import train_controller as tc
+from studio.train_controller import TrainController, TrainedModel
+from studio.project_controller import ProjectController
+from studio.dashboard_controller import DashboardController
+from studio.components import bare_widget
+
+_DLG = QFileDialog.Option.DontUseNativeDialog
 
 
 # ── Models & Train ───────────────────────────────────────────────────────────
 class ModelsScreen(QWidget):
-    def __init__(self, t: dict):
+    """Real one-shot LoRA training + model management, bound to a
+    ``TrainController`` (``studio/train_controller.py``). Reuses the exact
+    training pipeline the classic app's Train tab already uses
+    (``napari_app.core.train_model``), imported lazily inside the controller
+    — this module itself never imports torch.
+    """
+
+    _log_signal = pyqtSignal(str)
+    _finish_signal = pyqtSignal()
+
+    def __init__(self, t: dict, train_controller: TrainController,
+                 project_controller: ProjectController,
+                 on_toast: Callable[[str, str], None]):
         super().__init__()
         self._t = t
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-        outer.addWidget(page_header("Models & Train", "4 trained adapters · one-shot LoRA fine-tuning",
-                                    t, PillButton("Import model", t, "ghost", "download")))
-        body = QWidget()
+        self._train = train_controller
+        self._projects = project_controller
+        self._toast = on_toast
+
+        self._image_path: Optional[Path] = None
+        self._mask_path: Optional[Path] = None
+        backbones = self._train.available_backbones()
+        self._vit_name = backbones[0][0] if backbones else "vit_h"
+        self._lora_rank = tc.DEFAULT_RANK
+        self._epochs = tc.DEFAULT_EPOCHS
+
+        self._outer = QVBoxLayout(self)
+        self._outer.setContentsMargins(0, 0, 0, 0)
+        self._outer.setSpacing(0)
+
+        self._live_timer = QTimer(self)
+        self._live_timer.setInterval(1000)
+        self._live_timer.timeout.connect(self._on_live_tick)
+        self._log_signal.connect(self._on_log)
+        self._finish_signal.connect(self._on_training_finished)
+
+        self.refresh()
+
+    # ── (re)build ────────────────────────────────────────────────────────────
+    def refresh(self) -> None:
+        """Rebuild from the controllers' current state — disk (trained
+        models, run history) and any live training progress. Called on tab
+        navigation (``app.py``'s ``navigate()``) and after every action here.
+
+        Preserves scroll position across the rebuild: the live-progress
+        timer calls this every second while training, and without this a
+        user scrolled down to watch the trained-models list would get
+        yanked back to the top each tick.
+        """
+        scroll_pos = self._scroll_pos()
+        while self._outer.count():
+            item = self._outer.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+
+        t = self._t
+        models = self._train.list_trained_models()
+        n = len(models)
+        import_btn = PillButton("Import model", t, "ghost", "download")
+        import_btn.clicked.connect(self._import_model)
+        self._outer.addWidget(page_header(
+            "Models & Train",
+            f"{n} trained adapter{'s' if n != 1 else ''} · one-shot LoRA fine-tuning",
+            t, import_btn))
+
+        body = bare_widget()
         row = QHBoxLayout(body)
         row.setContentsMargins(34, 4, 34, 40)
         row.setSpacing(24)
-        row.addLayout(self._left(), 1)
+        row.addLayout(self._left(models), 1)
         row.addLayout(self._aside(), 0)
-        outer.addWidget(scroll(body))
+        scroll_area = scroll(body)
+        self._outer.addWidget(scroll_area)
+        if scroll_pos is not None:
+            QTimer.singleShot(0, lambda v=scroll_pos: scroll_area.verticalScrollBar().setValue(v))
 
-    def _left(self) -> QVBoxLayout:
+        if self._train.is_training():
+            self._live_timer.start()
+
+    def _scroll_pos(self) -> Optional[int]:
+        for i in range(self._outer.count()):
+            w = self._outer.itemAt(i).widget()
+            if isinstance(w, QScrollArea):
+                return w.verticalScrollBar().value()
+        return None
+
+    def _on_live_tick(self) -> None:
+        if not self._train.is_training():
+            self._live_timer.stop()
+            return
+        self.refresh()
+
+    # ── left: train form + trained models ───────────────────────────────────
+    def _left(self, models: list[TrainedModel]) -> QVBoxLayout:
         t = self._t
         col = QVBoxLayout()
         col.setSpacing(24)
+        col.addWidget(self._train_card())
 
+        col.addWidget(label("Trained models", 15, t["text"], 600))
+        if models:
+            for m in models:
+                col.addWidget(self._model_row(m))
+        else:
+            cap = label("No trained models yet — train one above, or import an existing checkpoint.",
+                        12.5, t["text_muted"])
+            cap.setWordWrap(True)
+            col.addWidget(cap)
+        col.addStretch(1)
+        return col
+
+    def _image_field_text(self) -> str:
+        if self._image_path is None:
+            return "Choose image…"
+        if self._mask_path is None:
+            return self._image_path.name
+        n = tc.count_cells_in_mask(self._mask_path)
+        return f"{self._image_path.name} · {n} cells" if n is not None else self._image_path.name
+
+    def _status_text(self) -> str:
+        if self._image_path is not None and self._mask_path is None:
+            return ("No mask found for this image — annotate it in the classic app "
+                    "(napari) first, then pick it here.")
+        if not self._train.available_backbones():
+            return "No SAM backbone found — run setup_napari.sh to download one."
+        return ""
+
+    def _can_start(self) -> bool:
+        return (self._image_path is not None and self._mask_path is not None
+                and bool(self._train.available_backbones()) and not self._train.is_training())
+
+    def _train_card(self) -> QFrame:
+        t = self._t
         card = QFrame()
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         card.setStyleSheet(f"background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;")
@@ -52,28 +185,125 @@ class ModelsScreen(QWidget):
         cap.setWordWrap(True)
         cv.addWidget(cap)
         cv.addSpacing(14)
+
         form = QGridLayout()
         form.setSpacing(14)
-        fields = [("Annotated image", "img_001.tif · 247 cells"), ("SAM backbone", "ViT-H"),
-                  ("LoRA rank", "8"), ("Epochs", "100")]
-        for i, (name, val) in enumerate(fields):
+        image_box = SelectBox(self._image_field_text(), t, lead_icon="image", on_click=self._pick_image)
+        backbones = self._train.available_backbones()
+        if backbones:
+            backbone_box = SelectBox(tc.BACKBONE_LABELS[self._vit_name], t,
+                                      options=[lbl for _, lbl in backbones], on_select=self._set_backbone)
+        else:
+            backbone_box = SelectBox("Not found", t)
+        rank_box = SelectBox(self._lora_rank, t, options=tc.RANK_OPTIONS, on_select=self._set_rank)
+        epochs_box = SelectBox(self._epochs, t, options=tc.EPOCH_OPTIONS, on_select=self._set_epochs)
+        fields = [("Annotated image", image_box), ("SAM backbone", backbone_box),
+                  ("LoRA rank", rank_box), ("Epochs", epochs_box)]
+        for i, (fname, control) in enumerate(fields):
             fc = QVBoxLayout()
             fc.setSpacing(7)
-            fc.addWidget(GroupLabel(name, t))
-            fc.addWidget(SelectBox(val, t))
+            fc.addWidget(GroupLabel(fname, t))
+            fc.addWidget(control)
             form.addLayout(fc, i // 2, i % 2)
         cv.addLayout(form)
+
+        status = self._status_text()
+        if status:
+            cv.addSpacing(4)
+            st_lbl = label(status, 11.5, t["warning"])
+            st_lbl.setWordWrap(True)
+            cv.addWidget(st_lbl)
+
         cv.addSpacing(16)
-        cv.addWidget(PillButton("Start training", t, "primary", "run"), alignment=Qt.AlignmentFlag.AlignLeft)
-        col.addWidget(card)
+        if self._train.is_training():
+            btn = PillButton("Stop training", t, "danger")
+            btn.clicked.connect(self._stop_training)
+        else:
+            btn = PillButton("Start training", t, "primary", "run")
+            btn.setEnabled(self._can_start())
+            btn.clicked.connect(self._start_training)
+        cv.addWidget(btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        return card
 
-        col.addWidget(label("Trained models", 15, t["text"], 600))
-        for name, meta, f1 in demo.MODELS:
-            col.addWidget(self._model_row(name, meta, f1))
-        col.addStretch(1)
-        return col
+    def _pick_image(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose an annotated image", "",
+            "Images (*.png *.tif *.tiff *.jpg *.jpeg *.bmp *.npy);;All files (*)", options=_DLG)
+        if not path:
+            return
+        self._image_path = Path(path)
+        self._mask_path = self._train.find_mask_for_image(self._image_path)
+        self.refresh()
 
-    def _model_row(self, name: str, meta: str, f1: str) -> QFrame:
+    def _set_backbone(self, chosen_label: str) -> None:
+        inverse = {v: k for k, v in tc.BACKBONE_LABELS.items()}
+        self._vit_name = inverse.get(chosen_label, self._vit_name)
+        self.refresh()
+
+    def _set_rank(self, value: str) -> None:
+        self._lora_rank = value
+        self.refresh()
+
+    def _set_epochs(self, value: str) -> None:
+        self._epochs = value
+        self.refresh()
+
+    def _start_training(self) -> None:
+        try:
+            config = self._train.build_config(
+                image_path=self._image_path, mask_path=self._mask_path,
+                vit_name=self._vit_name, lora_rank=int(self._lora_rank), epochs=int(self._epochs))
+        except ValueError as e:
+            self._toast("Can't start training", str(e))
+            return
+        self._train.start_training(config, on_log=self._safe_emit_log, on_finish=self._safe_emit_finish)
+        self._toast("Training started", Path(config["result_pth_path"]).stem)
+        self.refresh()
+
+    def _stop_training(self) -> None:
+        self._train.stop_training()
+        self.refresh()
+
+    def _safe_emit_log(self, msg: str) -> None:
+        # The training thread outlives this screen across a theme toggle
+        # (which tears the old screen down and builds a fresh one) — guard
+        # the cross-thread signal emit the same way motion.py guards a
+        # stale hover callback touching a deleted widget.
+        try:
+            self._log_signal.emit(msg)
+        except RuntimeError:
+            pass
+
+    def _safe_emit_finish(self) -> None:
+        try:
+            self._finish_signal.emit()
+        except RuntimeError:
+            pass
+
+    def _on_log(self, msg: str) -> None:
+        if msg.startswith("[ERROR]"):
+            self._toast("Training failed", msg[len("[ERROR] "):])
+
+    def _on_training_finished(self) -> None:
+        models = self._train.list_trained_models()
+        if models:
+            self._toast("Training complete", models[0].name)
+        self.refresh()
+
+    def _import_model(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import a trained checkpoint", "", "PyTorch (*.pth);;All files (*)", options=_DLG)
+        if not path:
+            return
+        try:
+            dst = self._train.import_model(path)
+        except ValueError as e:
+            self._toast("Import failed", str(e))
+            return
+        self._toast("Model imported", dst.stem)
+        self.refresh()
+
+    def _model_row(self, model: TrainedModel) -> QFrame:
         t = self._t
         row = QFrame()
         row.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -92,19 +322,31 @@ class ModelsScreen(QWidget):
         lay.addWidget(badge)
         col = QVBoxLayout()
         col.setSpacing(2)
-        col.addWidget(label(name, 13.5, t["text"], 600))
-        col.addWidget(label(meta, 11.5, t["text_muted"]))
+        col.addWidget(label(model.name, 13.5, t["text"], 600))
+        col.addWidget(label(model.meta, 11.5, t["text_muted"]))
         lay.addLayout(col, 1)
         f1col = QVBoxLayout()
         f1col.setSpacing(1)
-        v = QLabel(f1)
-        v.setStyleSheet(f"color:{t['success']}; font-family:{theme.MONO}; font-size:14px; font-weight:600;")
+        v = QLabel(model.f1 if model.f1 is not None else "—")
+        f1_color = t["success"] if model.f1 is not None else t["text_muted"]
+        v.setStyleSheet(f"color:{f1_color}; font-family:{theme.MONO}; font-size:14px; font-weight:600;")
         v.setAlignment(Qt.AlignmentFlag.AlignRight)
         f1col.addWidget(v)
         f1col.addWidget(label("F1", 10, t["text_muted"], 600, 0.5), alignment=Qt.AlignmentFlag.AlignRight)
         lay.addLayout(f1col)
+        row.mouseReleaseEvent = lambda e, m=model: self._select_model(m)
         return row
 
+    def _select_model(self, model: TrainedModel) -> None:
+        project = self._projects.get_active()
+        if project is None:
+            self._toast("No active project", "Open or create a project first, then select a model.")
+            return
+        self._train.select_model_for_project(model, project)
+        self._projects.store.save(project)
+        self._toast("Model selected", f"“{model.name}” → {project.name}")
+
+    # ── aside: recent runs ───────────────────────────────────────────────────
     def _aside(self) -> QVBoxLayout:
         t = self._t
         col = QVBoxLayout()
@@ -118,18 +360,26 @@ class ModelsScreen(QWidget):
         cv.setContentsMargins(16, 16, 16, 16)
         cv.setSpacing(10)
         cv.addWidget(label("Recent training runs", 13.5, t["text"], 600))
-        for name, meta, state in demo.TRAIN_RUNS:
+
+        runs = list(self._train.list_recent_runs())
+        live = self._train.current_run()
+        if live is not None:
+            runs.insert(0, live)
+        if not runs:
+            cap = label("No runs yet.", 12, t["text_muted"])
+            cv.addWidget(cap)
+        for run in runs:
             r = QHBoxLayout()
             r.setSpacing(10)
             dot = QLabel()
             dot.setFixedSize(8, 8)
-            dcol = t["signal"] if state == "run" else t["success"]
+            dcol = t["signal"] if run.state == "run" else t["success"]
             dot.setStyleSheet(f"background:{dcol}; border-radius:4px;")
             r.addWidget(dot)
             c = QVBoxLayout()
             c.setSpacing(1)
-            c.addWidget(label(name, 12.5, t["text"], 600))
-            c.addWidget(label(meta, 11, t["text_muted"]))
+            c.addWidget(label(run.name, 12.5, t["text"], 600))
+            c.addWidget(label(run.meta, 11, t["text_muted"]))
             r.addLayout(c, 1)
             cv.addLayout(r)
         col.addWidget(card)
@@ -222,28 +472,82 @@ class _BarChart(QWidget):
 
 
 class DashboardScreen(QWidget):
-    def __init__(self, t: dict):
+    """Real experiment tracking, bound to a ``DashboardController``
+    (``studio/dashboard_controller.py``) — the training-loss chart, the
+    F1-across-runs chart, and the runs table all read real on-disk data
+    (training history, per-checkpoint sidecars, benchmarked project stats).
+    "Open in Aim" launches the real Aim dashboard server in the system
+    browser (see the controller module docstring for why Studio's own charts
+    don't query Aim's storage directly).
+    """
+
+    def __init__(self, t: dict, train_controller: TrainController,
+                 project_controller: ProjectController,
+                 on_toast: Callable[[str, str], None]):
         super().__init__()
         self._t = t
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-        outer.addWidget(page_header("Dashboard", "Experiment tracking · embedded Aim",
-                                    t, PillButton("Open in Aim", t, "ghost", "settings")))
-        body = QWidget()
+        self._dashboard = DashboardController(train_controller, project_controller)
+        self._toast = on_toast
+        self._outer = QVBoxLayout(self)
+        self._outer.setContentsMargins(0, 0, 0, 0)
+        self._outer.setSpacing(0)
+        self.refresh()
+
+    def refresh(self) -> None:
+        """Rebuild from the controller's current state — called on tab
+        navigation (``app.py``'s ``navigate()``), so switching here after
+        training or benchmarking elsewhere always shows fresh data."""
+        while self._outer.count():
+            item = self._outer.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+
+        t = self._t
+        open_btn = PillButton("Open in Aim", t, "ghost", "settings")
+        open_btn.clicked.connect(self._open_in_aim)
+        self._outer.addWidget(page_header("Dashboard", "Experiment tracking · embedded Aim", t, open_btn))
+
+        body = bare_widget()
         v = QVBoxLayout(body)
         v.setContentsMargins(34, 4, 34, 40)
         v.setSpacing(16)
         charts = QHBoxLayout()
         charts.setSpacing(16)
-        charts.addWidget(self._chart_card("Training loss", "nuclei-dapi-r8 · 100 epochs",
-                                          _LineChart(demo.LOSS_CURVE, t["primary"], t)))
-        charts.addWidget(self._chart_card("F1 across runs", "held-out validation",
-                                          _BarChart(demo.F1_BARS, t["signal"], t)))
+        losses, loss_caption = self._dashboard.loss_curve()
+        charts.addWidget(self._chart_card(
+            "Training loss", loss_caption or "No training runs yet",
+            self._chart_or_empty(_LineChart, losses, t["primary"], "No runs yet")))
+        bars = self._dashboard.f1_bars()
+        charts.addWidget(self._chart_card(
+            "F1 across runs", "held-out validation" if bars else "No benchmarked runs yet",
+            self._chart_or_empty(_BarChart, bars, t["signal"], "No runs yet")))
         v.addLayout(charts)
         v.addWidget(self._runs_table())
         v.addStretch(1)
-        outer.addWidget(scroll(body))
+        self._outer.addWidget(scroll(body))
+
+    def _chart_or_empty(self, cls, data: list[float], color: str, empty_msg: str) -> QWidget:
+        if not data:
+            w = QWidget()
+            w.setMinimumHeight(120)
+            lay = QVBoxLayout(w)
+            lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl = label(empty_msg, 12, self._t["text_muted"])
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lay.addWidget(lbl)
+            return w
+        return cls(data, color, self._t)
+
+    def _open_in_aim(self) -> None:
+        try:
+            url = self._dashboard.open_in_aim()
+        except RuntimeError as e:
+            self._toast("Aim isn't installed", str(e))
+            return
+        webbrowser.open(url)
+        self._toast("Opening Aim", url)
 
     def _chart_card(self, title: str, cap: str, chart: QWidget) -> QFrame:
         t = self._t
@@ -270,7 +574,8 @@ class DashboardScreen(QWidget):
         v.setContentsMargins(18, 16, 18, 8)
         v.setSpacing(2)
         v.addWidget(label("Runs", 13.5, t["text"], 600))
-        v.addWidget(label("6 tracked runs", 11.5, t["text_muted"]))
+        runs = self._dashboard.runs_table()
+        v.addWidget(label(f"{len(runs)} tracked run{'s' if len(runs) != 1 else ''}", 11.5, t["text_muted"]))
         v.addSpacing(8)
         header = ["Run", "Engine", "F1", "Cells", "Duration", "When"]
         hrow = QHBoxLayout()
@@ -279,10 +584,16 @@ class DashboardScreen(QWidget):
             hrow.addWidget(l, 2 if i == 0 else 1)
         v.addLayout(hrow)
         v.addWidget(hline(t))
-        for name, eng, f1, cells, dur, when, ok in demo.DASH_RUNS:
+        if not runs:
+            cap = label("No runs yet — train a model or benchmark a project to see them here.",
+                        12, t["text_muted"])
+            cap.setWordWrap(True)
+            v.addWidget(cap)
+        for run in runs:
             r = QHBoxLayout()
-            cells_map = [(name, "mono"), (eng, ""), (f1, "ok" if ok else "mono"),
-                         (cells, "mono"), (dur, "mono"), (when, "")]
+            cells_map = [(run.name, "mono"), (run.engine_label, ""),
+                         (run.f1 or "—", "ok" if run.ok else "mono"),
+                         (run.cells or "—", "mono"), (run.duration or "—", "mono"), (run.when, "")]
             for i, (val, style) in enumerate(cells_map):
                 if style == "mono":
                     col = t["text_subtle"]
@@ -296,7 +607,7 @@ class DashboardScreen(QWidget):
                 l = QLabel(val)
                 l.setStyleSheet(f"color:{col}; font-size:12.5px; {fam}")
                 r.addWidget(l, 2 if i == 0 else 1)
-            rowwrap = QFrame()
+            rowwrap = bare_widget()
             rowwrap.setLayout(r)
             r.setContentsMargins(0, 8, 0, 8)
             v.addWidget(rowwrap)

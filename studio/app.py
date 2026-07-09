@@ -2,10 +2,13 @@
 
 This app is a faithful, native-Qt reproduction of the north-star mockup, with
 functionality wired back tab by tab (see ``docstudio/`` — OVERVIEW,
-ARCHITECTURE, BACKLOG, AGENT_PROMPT). The Home/Projects tabs are backed by a
-real ``ProjectController`` (``studio/project_controller.py``); the rest still
-render static ``demo`` content pending their own tab. No napari, no torch —
-those are reused lazily, only inside the tab that needs them.
+ARCHITECTURE, BACKLOG, AGENT_PROMPT). Home/Projects are backed by a real
+``ProjectController``; Models & Train and Dashboard are backed by a real
+``TrainController``/``DashboardController`` (one-shot LoRA training, a real
+trained-models list, real experiment history). Segment (the workspace canvas)
+still renders static ``demo`` content pending its own tab — the flagship item
+left in ``docstudio/BACKLOG.md``. No napari, no torch — those are reused
+lazily, only inside the tab that needs them.
 
 ``StudioWindow`` owns a frameless, rounded window with our own dark title bar,
 a navigation sidebar, a stack of screens (Home · Projects · Segment · Models &
@@ -37,6 +40,7 @@ from PyQt6.QtWidgets import (
 from studio import theme
 from studio.components import Sidebar
 from studio.project_controller import ProjectController
+from studio.train_controller import TrainController
 from studio.new_project_dialog import NewProjectDialog
 from studio.screens import HomeScreen, ProjectsScreen
 from studio.workspace import WorkspaceScreen
@@ -81,10 +85,12 @@ class StudioWindow(QMainWindow):
     """Frameless rounded window: title bar + sidebar + screen stack + overlays."""
 
     def __init__(self, theme_name: str = "dark",
-                 project_controller: Optional[ProjectController] = None):
+                 project_controller: Optional[ProjectController] = None,
+                 train_controller: Optional[TrainController] = None):
         super().__init__()
         self._theme_name = theme_name
         self._projects = project_controller or ProjectController()
+        self._train = train_controller or TrainController()
         self._screens: dict[str, QWidget] = {}
         self.setWindowTitle("CellSeg1 Studio")
         self.resize(1320, 860)
@@ -130,6 +136,8 @@ class StudioWindow(QMainWindow):
 
         self._new_project_dialog = NewProjectDialog(
             self, t, self._projects.store, on_created=self._on_project_created)
+        # built before _screens: Models & Train / Dashboard announce through it
+        self._toast = Toast(self, t)
 
         self._stack = QStackedWidget()
         self._screens = {
@@ -138,8 +146,8 @@ class StudioWindow(QMainWindow):
             "projects": ProjectsScreen(t, self._projects, self.navigate, self._open_project,
                                       self._new_project_dialog.open),
             "workspace": WorkspaceScreen(t),
-            "train": ModelsScreen(t),
-            "dashboard": DashboardScreen(t),
+            "train": ModelsScreen(t, self._train, self._projects, self._toast.announce),
+            "dashboard": DashboardScreen(t, self._train, self._projects, self._toast.announce),
             "guide": GuideScreen(t, self._projects, self.navigate, self._open_project,
                                  self._new_project_dialog.open),
         }
@@ -154,7 +162,6 @@ class StudioWindow(QMainWindow):
         self._assistant = AssistantDrawer(self, t)
         self._logs = LogsConsole(self, t)
         self._palette = CommandPalette(self, t)
-        self._toast = Toast(self, t)
         self._overlays = [self._assistant, self._logs, self._palette, self._toast,
                            self._new_project_dialog]
 

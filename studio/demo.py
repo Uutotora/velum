@@ -90,29 +90,6 @@ RESULTS = {
 COLOR_BY = ["Instance ID (default)", "Area (heatmap)", "Diameter (heatmap)",
             "Solidity (heatmap)", "Mean intensity (heatmap)"]
 
-# Models & Train
-MODELS = [
-    ("nuclei-dapi-r8", "ViT-H · rank 8 · 128 images · fluorescence", "0.94"),
-    ("tissue-he-r16", "ViT-H · rank 16 · 342 images · H&E", "0.89"),
-    ("phantom-qc-r8", "ViT-L · rank 8 · 12 images · synthetic", "0.98"),
-]
-TRAIN_RUNS = [
-    ("nuclei-dapi-r8", "epoch 74/100 · loss 0.19", "run"),
-    ("tissue-he-r16", "done · 8m 12s", "done"),
-    ("phantom-qc-r8", "done · 3m 41s", "done"),
-]
-
-# Dashboard
-LOSS_CURVE = [0.92, 0.71, 0.55, 0.44, 0.37, 0.31, 0.27, 0.24, 0.22, 0.205, 0.195, 0.188]
-F1_BARS = [0.71, 0.80, 0.86, 0.90, 0.91, 0.94]
-DASH_RUNS = [
-    ("nuclei-dapi-r8", "CellSeg1 · LoRA", "0.94", "31.4k", "6m 02s", "2h ago", True),
-    ("tissue-he-r16", "CellSeg1 · LoRA", "0.89", "188k", "8m 12s", "yesterday", True),
-    ("bbbc039-bench", "CellSeg1 · LoRA", "0.91", "52k", "5m 44s", "3d ago", True),
-    ("organoid-cp", "Cellpose-SAM", "0.83", "14.2k", "2m 08s", "last week", False),
-    ("mitosis-sam2", "SAM 2", "0.90", "9.7k", "11m 30s", "last week", True),
-]
-
 # Assistant chat (role, text, [apply chips])
 CHAT = [
     ("user", "Some nuclei in the centre are merged into one mask — how do I split them?", []),
