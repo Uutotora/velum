@@ -281,7 +281,14 @@ class Toggle(QFrame):
 
 
 class Slider(QFrame):
-    """A static track with a fill + knob at ``value`` (0..1). Presentational."""
+    """A draggable value slider (0..1): a track with a fill + knob at
+    ``value``. Click or drag anywhere on it to set the value — emits
+    ``changed(float)``. ``set_value(v)`` updates the visual without
+    emitting, for a caller applying an external change (e.g. a quality
+    preset) without re-triggering its own handler.
+    """
+
+    changed = pyqtSignal(float)
 
     def __init__(self, t: dict, value: float = 0.5, color: Optional[str] = None):
         super().__init__()
@@ -290,6 +297,7 @@ class Slider(QFrame):
         self._color = color or t["primary"]
         self.setFixedHeight(14)
         self.setMinimumWidth(80)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._track = QFrame(self)
         self._fill = QFrame(self)
         self._knob = QFrame(self)
@@ -298,43 +306,103 @@ class Slider(QFrame):
         self._knob.setStyleSheet(
             f"background:#ffffff; border:2px solid {self._color}; border-radius:7px;")
 
-    def resizeEvent(self, e):
+    def value(self) -> float:
+        return self._v
+
+    def set_value(self, v: float, emit: bool = False) -> None:
+        self._v = max(0.0, min(1.0, v))
+        self._reposition()
+        if emit:
+            self.changed.emit(self._v)
+
+    def _reposition(self) -> None:
         w, h = self.width(), self.height()
         self._track.setGeometry(0, h // 2 - 2, w, 4)
         fw = int(w * self._v)
         self._fill.setGeometry(0, h // 2 - 2, fw, 4)
         self._knob.setGeometry(max(0, min(w - 14, fw - 7)), h // 2 - 7, 14, 14)
+
+    def resizeEvent(self, e):
+        self._reposition()
         super().resizeEvent(e)
+
+    def _set_from_x(self, x: float) -> None:
+        self.set_value(x / max(1, self.width()), emit=True)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._set_from_x(e.position().x())
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if e.buttons() & Qt.MouseButton.LeftButton:
+            self._set_from_x(e.position().x())
+        super().mouseMoveEvent(e)
 
 
 class Stepper(QFrame):
-    """− value + control (presentational; buttons don't change the value)."""
+    """− value + control: click −/+ to nudge a numeric value; emits
+    ``changed(float)``. ``decimals=0`` (default) displays/steps whole
+    numbers; ``suffix`` appends a display-only unit (e.g. ``" px"``).
+    """
 
-    def __init__(self, value: str, t: dict):
+    changed = pyqtSignal(float)
+
+    def __init__(self, value: float, t: dict, *, step: float = 1, minimum: float = 0,
+                maximum: float = 1_000_000, decimals: int = 0, suffix: str = ""):
         super().__init__()
+        self._value = float(value)
+        self._step = step
+        self._min = minimum
+        self._max = maximum
+        self._decimals = decimals
+        self._suffix = suffix
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
             f"QFrame{{background:{t['inset']}; border:1px solid {t['border']}; border-radius:8px;}}")
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
-        for glyph in ("−", None, "+"):
-            if glyph is None:
-                val = QLabel(value)
-                val.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                val.setMinimumWidth(42)
-                val.setStyleSheet(
-                    f"color:{t['text']}; font-family:{theme.MONO}; font-size:12.5px; font-weight:600;")
-                row.addWidget(val)
-            else:
-                b = QToolButton()
-                b.setText(glyph)
-                b.setCursor(Qt.CursorShape.PointingHandCursor)
-                b.setFixedSize(26, 28)
-                b.setStyleSheet(
-                    f"QToolButton{{background:transparent; border:none; color:{t['text_muted']};"
-                    f"font-size:15px;}} QToolButton:hover{{background:{t['surface2']}; color:{t['text']};}}")
-                row.addWidget(b)
+        self._minus = self._make_button("−", t)
+        self._minus.clicked.connect(lambda: self._nudge(-self._step))
+        row.addWidget(self._minus)
+        self._val_label = QLabel()
+        self._val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._val_label.setMinimumWidth(42)
+        self._val_label.setStyleSheet(
+            f"color:{t['text']}; font-family:{theme.MONO}; font-size:12.5px; font-weight:600;")
+        row.addWidget(self._val_label)
+        self._plus = self._make_button("+", t)
+        self._plus.clicked.connect(lambda: self._nudge(self._step))
+        row.addWidget(self._plus)
+        self._render()
+
+    @staticmethod
+    def _make_button(glyph: str, t: dict) -> QToolButton:
+        b = QToolButton()
+        b.setText(glyph)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setFixedSize(26, 28)
+        b.setStyleSheet(
+            f"QToolButton{{background:transparent; border:none; color:{t['text_muted']};"
+            f"font-size:15px;}} QToolButton:hover{{background:{t['surface2']}; color:{t['text']};}}")
+        return b
+
+    def value(self) -> float:
+        return self._value
+
+    def set_value(self, value: float, emit: bool = False) -> None:
+        self._value = max(self._min, min(self._max, value))
+        self._render()
+        if emit:
+            self.changed.emit(self._value)
+
+    def _nudge(self, delta: float) -> None:
+        self.set_value(self._value + delta, emit=True)
+
+    def _render(self) -> None:
+        text = f"{self._value:.{self._decimals}f}" if self._decimals else f"{int(round(self._value))}"
+        self._val_label.setText(text + self._suffix)
 
 
 class SegControl(QFrame):

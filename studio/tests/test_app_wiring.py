@@ -58,7 +58,7 @@ def test_ui_atoms_construct(app):
     assert components.PillButton("Ghost", t, "ghost").text() == "Ghost"
     assert components.Badge("0.80", t) is not None
     assert components.SelectBox("512 px", t) is not None
-    assert components.Stepper("32", t) is not None
+    assert components.Stepper(32, t) is not None
     assert components.StatTile("25.5", "px", "MEDIAN", t) is not None
 
 
