@@ -66,6 +66,7 @@ COLOR_BY_OPTIONS = ["Instance ID (default)", "Area (heatmap)", "Diameter (heatma
 _COLOR_BY_KEYS = {"Area (heatmap)": "area", "Diameter (heatmap)": "diameter",
                   "Solidity (heatmap)": "solidity", "Mean intensity (heatmap)": "mean_intensity"}
 _DLG = QFileDialog.Option.DontUseNativeDialog
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".npy")
 
 
 def _scroll(inner: QWidget) -> QScrollArea:
@@ -287,17 +288,29 @@ class WorkspaceScreen(QWidget):
         v = QVBoxLayout(w)
         v.setContentsMargins(8, 2, 8, 8)
         v.setSpacing(4)
+        search_row = QHBoxLayout()
+        search_row.setSpacing(6)
         self._image_search = QLineEdit()
         self._image_search.setPlaceholderText("Filter images…")
         self._image_search.addAction(icons.icon("diagnose", t["text_muted"], 14),
                                      QLineEdit.ActionPosition.LeadingPosition)
         self._image_search.textChanged.connect(lambda _=None: self._refresh_images_pane())
-        v.addWidget(self._image_search)
+        search_row.addWidget(self._image_search, 1)
+        search_row.addWidget(IconButton("plus", t, 30, "Add images…", self._add_images))
+        v.addLayout(search_row)
         self._images_list_container = bare_widget()
         self._images_list_layout = QVBoxLayout(self._images_list_container)
         self._images_list_layout.setContentsMargins(0, 4, 0, 0)
         self._images_list_layout.setSpacing(2)
+        drop_hint = label("Drop images here, or click + to add", 10.5, t["text_muted"])
+        drop_hint.setWordWrap(True)
+        drop_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._images_drop_hint = drop_hint
         v.addWidget(_scroll(self._images_list_container), 1)
+        v.addWidget(drop_hint)
+        w.setAcceptDrops(True)
+        w.dragEnterEvent = self._images_drag_enter
+        w.dropEvent = self._images_drop
         return w
 
     def _refresh_images_pane(self) -> None:
@@ -319,6 +332,48 @@ class WorkspaceScreen(QWidget):
         for p in paths:
             layout.addWidget(self._image_row(p))
         layout.addStretch(1)
+
+    def _add_images(self) -> None:
+        if self._project is None:
+            self._toast("No project open", "Open or create a project first.")
+            return
+        filt = "Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.npy);;All files (*)"
+        paths, _ = QFileDialog.getOpenFileNames(self, "Add images to project", "", filt, options=_DLG)
+        if paths:
+            self._add_image_paths(paths)
+
+    def _add_image_paths(self, paths: list[str]) -> None:
+        """Append new image files to the active project — the Images pane's
+        "+"/drag-drop entry point. A project's images were previously only
+        ever set once, at creation, via the New Project dialog; there was no
+        way back into this list afterward."""
+        if self._project is None:
+            return
+        existing = set(self._project.image_paths)
+        new = [p for p in paths if p not in existing and Path(p).suffix.lower() in _IMAGE_EXTS]
+        if not new:
+            self._toast("No new images",
+                       "Those are already in this project, or aren't a supported image format.")
+            return
+        self._project.image_paths.extend(new)
+        self._project.stats.n_images = len(self._project.image_paths)
+        self._projects.store.save(self._project)
+        self._refresh_images_pane()
+        self._toast("Images added",
+                   f"{len(new)} image{'s' if len(new) != 1 else ''} added to “{self._project.name}”")
+        if self._current_image_path is None:
+            self._select_image(self._project.image_paths[0])
+
+    def _images_drag_enter(self, e) -> None:
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+
+    def _images_drop(self, e) -> None:
+        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+        paths = [p for p in paths if Path(p).suffix.lower() in _IMAGE_EXTS]
+        if paths:
+            self._add_image_paths(paths)
+        e.acceptProposedAction()
 
     def _image_row(self, path: str) -> QFrame:
         t = self._t

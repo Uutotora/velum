@@ -182,6 +182,82 @@ def test_select_image_switches_layers(app, segment, projects, toasts, tmp_path, 
     assert ws._last_result is None
 
 
+# ── adding images to an existing project ──────────────────────────────────────
+def test_add_image_paths_appends_and_persists(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    new_img = tmp_path / "extra.png"
+    _write_image(new_img, seed=99)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._add_image_paths([str(new_img)])
+    assert str(new_img) in project.image_paths
+    assert len(project.image_paths) == 2
+    reloaded = projects.store.load(project.id)
+    assert str(new_img) in reloaded.image_paths
+    assert reloaded.stats.n_images == 2
+    assert any("Images added" in t[0] for t in toasts)
+
+
+def test_add_image_paths_dedupes_and_filters_unsupported(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    existing = project.image_paths[0]
+    not_an_image = tmp_path / "notes.txt"
+    not_an_image.write_text("hello")
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._add_image_paths([existing, str(not_an_image)])
+    assert len(project.image_paths) == 1  # nothing new actually added
+    assert any("No new images" in t[0] for t in toasts)
+
+
+def test_add_image_paths_auto_selects_first_image_for_empty_project(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = projects.store.create(
+        "Empty", "", settings=ProjectSettings(
+            engine="cellseg1", model_name=str(storage / "loras" / "nuclei-dapi-r8.pth")))
+    new_img = tmp_path / "first.png"
+    _write_image(new_img)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    assert ws._current_image_path is None
+    ws._add_image_paths([str(new_img)])
+    assert ws._current_image_path == str(new_img)
+
+
+def test_add_images_without_a_project_toasts(app, segment, projects, toasts):
+    ws = _ws(app, segment, projects, toasts)
+    ws._add_images()
+    assert toasts and "No project open" in toasts[-1][0]
+
+
+def test_images_drop_adds_only_local_image_files(app, segment, projects, toasts, tmp_path, storage):
+    from PyQt6.QtCore import QUrl
+
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    new_img = tmp_path / "dropped.png"
+    _write_image(new_img, seed=7)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+
+    class _FakeMime:
+        def hasUrls(self_inner):
+            return True
+
+        def urls(self_inner):
+            return [QUrl.fromLocalFile(str(new_img)), QUrl("https://example.com/not-local")]
+
+    class _FakeDropEvent:
+        def mimeData(self_inner):
+            return _FakeMime()
+
+        def acceptProposedAction(self_inner):
+            pass
+
+    ws._images_drop(_FakeDropEvent())
+    assert str(new_img) in project.image_paths
+    assert len(project.image_paths) == 2
+
+
 # ── layer panel actions ───────────────────────────────────────────────────────
 def test_add_points_and_shapes_layers(app, segment, projects, toasts, tmp_path, storage):
     project = _make_project(tmp_path, projects, storage)
