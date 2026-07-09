@@ -1,0 +1,553 @@
+"""CellSeg1 Studio — the Segment workspace's own image canvas.
+
+Not embedded napari (see ``docstudio/ARCHITECTURE.md``) — a self-contained
+``QWidget`` that renders a :class:`studio.layer_model.LayerList` (image +
+labels + points + shapes) with pan/zoom, and turns mouse input into real
+edits on the selected ``LabelsLayer`` (paint/erase/fill/pick/polygon) exactly
+like napari's own canvas does for a ``Labels`` layer. Compositing is plain
+numpy (contrast/gamma/colormap tint for images; per-instance colour + opacity
++ contour for labels; translucent/additive/opaque blending) into one RGB
+``QImage`` per repaint-worthy change, which ``QPainter`` then scales/pans —
+cheap enough at the image sizes this app works with, and it keeps every pixel
+rule in one auditable place instead of spread across GPU shaders.
+
+Coordinate convention throughout: ``(row, col)`` in *image* pixel space
+(row=y, col=x), matching numpy indexing and napari's own convention.
+"""
+from __future__ import annotations
+
+from typing import Callable, Optional
+
+import numpy as np
+from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtGui import (
+    QColor, QCursor, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent,
+)
+from PyQt6.QtWidgets import QWidget
+
+from studio.layer_model import (
+    ERASE, FILL, ImageLayer, IMAGE_COLORMAPS, LabelsLayer, LayerList, PAINT, PAN_ZOOM,
+    PICK, POLYGON, PointsLayer, ShapesLayer, TRANSFORM,
+)
+
+_MIN_ZOOM, _MAX_ZOOM = 0.05, 40.0
+_ZOOM_STEP = 1.15
+
+
+class Canvas(QWidget):
+    """The viewport: image + layer compositing, pan/zoom, and edit tools.
+
+    ``mode`` is the single source of truth for what a click does (mirrors
+    into the edited ``LabelsLayer.mode`` too, so anything reading the layer
+    directly stays consistent). Edits always target :meth:`edit_target` — the
+    selected layer if it's a ``LabelsLayer``, else the first one in the list,
+    else ``None`` (a no-op with a status hint, rather than silently guessing
+    a target or crashing).
+    """
+
+    def __init__(self, t: dict, layers: LayerList, *,
+                 on_status: Optional[Callable[[str], None]] = None,
+                 on_label_picked: Optional[Callable[[int], None]] = None,
+                 parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._t = t
+        self.layers = layers
+        self._on_status = on_status
+        self._on_label_picked = on_label_picked
+
+        self.mode = PAN_ZOOM
+        self.grid = False
+        self.mip = False          # "3D" toggle for a volume: max-intensity projection
+        self.transposed = False   # view-only row/col swap — never mutates layer data
+
+        self._zoom = 1.0
+        self._pan = QPointF(0.0, 0.0)
+        self._fitted = False
+
+        self._panning = False
+        self._pan_anchor: Optional[QPointF] = None
+        self._pan_anchor_pan: Optional[QPointF] = None
+        self._painting = False
+        self._paint_last: Optional[tuple[float, float]] = None
+        self._polygon_pts: list[tuple[float, float]] = []
+        self._hover_img: Optional[tuple[float, float]] = None
+
+        self._composite_cache: Optional[QImage] = None
+        self._composite_dirty = True
+
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setMinimumSize(200, 160)
+        layers.on_change(self._on_layers_changed)
+
+    # ── layer-model plumbing ─────────────────────────────────────────────────
+    def _on_layers_changed(self) -> None:
+        self._composite_dirty = True
+        self.update()
+
+    def edit_target(self) -> Optional[LabelsLayer]:
+        sel = self.layers.selected
+        if isinstance(sel, LabelsLayer):
+            return sel
+        labels = self.layers.by_kind("labels")
+        return labels[0] if labels else None
+
+    def set_mode(self, mode: str) -> None:
+        self.mode = mode
+        self._polygon_pts = []
+        target = self.edit_target()
+        if target is not None:
+            target.mode = mode
+        cursors = {
+            PAINT: Qt.CursorShape.CrossCursor, ERASE: Qt.CursorShape.CrossCursor,
+            FILL: Qt.CursorShape.PointingHandCursor, PICK: Qt.CursorShape.PointingHandCursor,
+            POLYGON: Qt.CursorShape.CrossCursor,
+        }
+        self.setCursor(cursors.get(mode, Qt.CursorShape.ArrowCursor))
+        self.update()
+
+    # ── image-space geometry ─────────────────────────────────────────────────
+    def _base_shape(self) -> Optional[tuple[int, int]]:
+        """(H, W) of the current plane, from the first image/labels layer."""
+        for layer in self.layers:
+            if layer.kind in ("image", "labels") and layer.data.size:
+                plane = self._plane_of(layer)
+                if self.transposed:
+                    return (plane.shape[1], plane.shape[0])
+                return (plane.shape[0], plane.shape[1])
+        return None
+
+    def _plane_of(self, layer) -> np.ndarray:
+        data = layer.data
+        ndim_2d = 2 if layer.kind == "labels" else 3
+        if data.ndim <= ndim_2d:
+            return data
+        if self.mip:
+            return data.max(axis=0)
+        z = min(self.layers.current_z, data.shape[0] - 1)
+        return data[z]
+
+    def home(self) -> None:
+        """Fit the image to the viewport and centre it."""
+        shape = self._base_shape()
+        if shape is None:
+            return
+        h, w = shape
+        vw, vh = max(1, self.width() - 24), max(1, self.height() - 24)
+        self._zoom = max(_MIN_ZOOM, min(_MAX_ZOOM, min(vw / w, vh / h)))
+        self._pan = QPointF((self.width() - w * self._zoom) / 2,
+                            (self.height() - h * self._zoom) / 2)
+        self._fitted = True
+        self.update()
+
+    def widget_to_image(self, pt: QPointF) -> tuple[float, float]:
+        col = (pt.x() - self._pan.x()) / self._zoom
+        row = (pt.y() - self._pan.y()) / self._zoom
+        return (col, row) if not self.transposed else (row, col)
+
+    def image_to_widget(self, row: float, col: float) -> QPointF:
+        x, y = (row, col) if self.transposed else (col, row)
+        return QPointF(x * self._zoom + self._pan.x(), y * self._zoom + self._pan.y())
+
+    # ── view actions (viewer bar) ────────────────────────────────────────────
+    def toggle_grid(self) -> None:
+        self.grid = not self.grid
+        self.update()
+
+    def toggle_mip(self) -> bool:
+        """Flips 2-D-slice vs max-intensity-projection display for a loaded
+        volume. Returns the new state; a no-op (returns current state
+        unchanged) when there's nothing to project — a single 2-D image has
+        no "3-D" to show, so the caller can leave the toolbar button inert."""
+        if self.layers.n_planes <= 1:
+            return self.mip
+        self.mip = not self.mip
+        self._composite_dirty = True
+        self.update()
+        return self.mip
+
+    def toggle_transpose(self) -> None:
+        self.transposed = not self.transposed
+        self._composite_dirty = True
+        self.update()
+
+    def roll_channel(self) -> None:
+        """"Roll dimensions": cycle which single image-kind layer is visible,
+        the practical equivalent of rolling through an extra axis when that
+        axis is really "one more channel" rather than a literal spatial dim."""
+        images = [l for l in self.layers if l.kind == "image"]
+        if len(images) < 2:
+            return
+        visible = [l for l in images if l.visible]
+        current = visible[0] if visible else images[0]
+        idx = images.index(current)
+        for l in images:
+            l.visible = False
+        images[(idx + 1) % len(images)].visible = True
+        self.layers.notify()
+
+    def step_z(self, delta: int) -> None:
+        if self.layers.n_planes > 1 and not self.mip:
+            self.layers.set_current_z(self.layers.current_z + delta)
+
+    # ── compositing ──────────────────────────────────────────────────────────
+    def _composited_image(self) -> Optional[QImage]:
+        if not self._composite_dirty and self._composite_cache is not None:
+            return self._composite_cache
+        shape = self._base_shape()
+        if shape is None:
+            self._composite_cache = None
+            self._composite_dirty = False
+            return None
+        h, w = shape
+        scope = QColor(self._t.get("scope", "#0a0c10"))
+        canvas = np.empty((h, w, 3), dtype=np.float32)
+        canvas[:] = (scope.red(), scope.green(), scope.blue())
+
+        for layer in self.layers:
+            if not layer.visible or layer.kind not in ("image", "labels"):
+                continue
+            plane = self._plane_of(layer)
+            if self.transposed:
+                plane = plane.T if plane.ndim == 2 else plane.transpose(1, 0, 2)
+            if plane.shape[:2] != (h, w):
+                continue  # a mismatched layer (rare) is skipped, not stretched
+            if layer.kind == "image":
+                rgb, alpha = _render_image(layer, plane)
+            else:
+                rgb, alpha = _render_labels(layer, plane)
+            canvas = _blend(canvas, rgb, alpha, layer.blending)
+
+        arr = np.ascontiguousarray(np.clip(canvas, 0, 255).astype(np.uint8))
+        qimg = QImage(arr.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
+        self._composite_cache = qimg
+        self._composite_dirty = False
+        return qimg
+
+    # ── painting ─────────────────────────────────────────────────────────────
+    def paintEvent(self, e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        t = self._t
+        p.fillRect(self.rect(), QColor(t.get("scope", "#0a0c10")))
+
+        if not self._fitted:
+            self.home()
+
+        image = self._composited_image()
+        if image is None:
+            p.setPen(QColor(t.get("text_muted", "#6c7480")))
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No image loaded")
+            p.end()
+            return
+
+        if self.grid:
+            self._paint_grid(p, image)
+        else:
+            self._paint_overlay(p, image)
+        p.end()
+
+    def _paint_overlay(self, p: QPainter, image: QImage) -> None:
+        p.save()
+        p.translate(self._pan)
+        p.scale(self._zoom, self._zoom)
+        p.drawImage(0, 0, image)
+        self._draw_vectors(p)
+        self._draw_cursor(p)
+        p.restore()
+
+    def _paint_grid(self, p: QPainter, image: QImage) -> None:
+        """Grid mode: one tile per visible layer, each rendered alone — a
+        real, simplified reading of napari's grid mode (which tiles multiple
+        *images*; here there is always exactly one image, so tiling by
+        *layer* is the useful analogue — e.g. Segmentation next to Ground
+        truth). Falls back to the normal overlay when there's only one
+        visible layer (nothing to compare side by side)."""
+        visible = [l for l in self.layers if l.visible and l.kind in ("image", "labels")]
+        if len(visible) <= 1:
+            self._paint_overlay(p, image)
+            return
+        cols = int(np.ceil(np.sqrt(len(visible))))
+        rows = int(np.ceil(len(visible) / cols))
+        cw, ch = self.width() / cols, self.height() / rows
+        shape = self._base_shape()
+        h, w = shape
+        for i, layer in enumerate(visible):
+            plane = self._plane_of(layer)
+            if self.transposed:
+                plane = plane.T if plane.ndim == 2 else plane.transpose(1, 0, 2)
+            if layer.kind == "image":
+                rgb, alpha = _render_image(layer, plane)
+            else:
+                rgb, alpha = _render_labels(layer, plane)
+            scope = QColor(self._t.get("scope", "#0a0c10"))
+            base = np.empty((h, w, 3), dtype=np.float32)
+            base[:] = (scope.red(), scope.green(), scope.blue())
+            tile = _blend(base, rgb, alpha, "translucent")
+            arr = np.ascontiguousarray(np.clip(tile, 0, 255).astype(np.uint8))
+            qimg = QImage(arr.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
+            r, c = i // cols, i % cols
+            cell = QRectF(c * cw + 2, r * ch + 2, cw - 4, ch - 4)
+            scale = min(cell.width() / w, cell.height() / h)
+            p.save()
+            p.translate(cell.x() + (cell.width() - w * scale) / 2,
+                       cell.y() + (cell.height() - h * scale) / 2)
+            p.scale(scale, scale)
+            p.drawImage(0, 0, qimg)
+            p.restore()
+            p.setPen(QColor(self._t.get("text_muted", "#6c7480")))
+            p.drawText(QRectF(cell.x(), cell.y(), cell.width(), 16),
+                      Qt.AlignmentFlag.AlignLeft, f"  {layer.name}")
+
+    def _draw_vectors(self, p: QPainter) -> None:
+        w = 1.0 / max(self._zoom, 0.001)
+        for layer in self.layers:
+            if not layer.visible:
+                continue
+            if isinstance(layer, PointsLayer):
+                p.setBrush(QColor(layer.face_color))
+                p.setPen(QPen(QColor("#ffffff"), w * 0.6))
+                for row, col in layer.points:
+                    x, y = (row, col) if self.transposed else (col, row)
+                    p.drawEllipse(QPointF(x, y), layer.size / 2, layer.size / 2)
+            elif isinstance(layer, ShapesLayer):
+                pen = QPen(QColor(layer.edge_color), max(layer.edge_width * w, w))
+                p.setPen(pen)
+                face = layer.face_color
+                p.setBrush(QColor(0, 0, 0, 0) if face == "transparent" else QColor(face))
+                for shape in layer.shapes:
+                    path = QPainterPath()
+                    pts = shape["points"]
+                    if not pts:
+                        continue
+                    for i, (row, col) in enumerate(pts):
+                        x, y = (row, col) if self.transposed else (col, row)
+                        path.moveTo(x, y) if i == 0 else path.lineTo(x, y)
+                    path.closeSubpath()
+                    p.drawPath(path)
+
+        if self.mode == POLYGON and self._polygon_pts:
+            pen = QPen(QColor(self._t.get("primary", "#4f5bd5")), w * 1.5, Qt.PenStyle.DashLine)
+            p.setPen(pen)
+            p.setBrush(QColor(0, 0, 0, 0))
+            path = QPainterPath()
+            for i, (row, col) in enumerate(self._polygon_pts):
+                x, y = (row, col) if self.transposed else (col, row)
+                path.moveTo(x, y) if i == 0 else path.lineTo(x, y)
+            p.drawPath(path)
+            for row, col in self._polygon_pts:
+                x, y = (row, col) if self.transposed else (col, row)
+                p.drawEllipse(QPointF(x, y), w * 3, w * 3)
+
+    def _draw_cursor(self, p: QPainter) -> None:
+        if self.mode not in (PAINT, ERASE) or self._hover_img is None:
+            return
+        target = self.edit_target()
+        if target is None:
+            return
+        row, col = self._hover_img
+        x, y = (row, col) if self.transposed else (col, row)
+        w = 1.0 / max(self._zoom, 0.001)
+        p.setPen(QPen(QColor("#ffffff"), w))
+        p.setBrush(QColor(0, 0, 0, 0))
+        r = target.brush_size / 2.0
+        p.drawEllipse(QPointF(x, y), r, r)
+
+    # ── mouse / keyboard input ───────────────────────────────────────────────
+    def wheelEvent(self, e: QWheelEvent) -> None:
+        before = self.widget_to_image(e.position())
+        factor = _ZOOM_STEP if e.angleDelta().y() > 0 else 1.0 / _ZOOM_STEP
+        self._zoom = max(_MIN_ZOOM, min(_MAX_ZOOM, self._zoom * factor))
+        after_widget = self.image_to_widget(*before[::-1]) if self.transposed else \
+            self.image_to_widget(before[1], before[0])
+        self._pan += e.position() - after_widget
+        self.update()
+
+    def mousePressEvent(self, e: QMouseEvent) -> None:
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
+        pos = e.position()
+        if e.button() == Qt.MouseButton.MiddleButton or self.mode == PAN_ZOOM or self.mode == TRANSFORM:
+            self._panning = True
+            self._pan_anchor = pos
+            self._pan_anchor_pan = QPointF(self._pan)
+            return
+
+        col, row = self.widget_to_image(pos)
+        target = self.edit_target()
+        z = self.layers.current_z if self.layers.n_planes > 1 else None
+
+        if self.mode == POLYGON and e.button() == Qt.MouseButton.LeftButton:
+            self._polygon_pts.append((row, col))
+            self.update()
+            return
+        if self.mode == POLYGON and e.button() == Qt.MouseButton.RightButton:
+            if self._polygon_pts:
+                self._polygon_pts.pop()
+            self.update()
+            return
+
+        if target is None:
+            self._status(f"({int(col)}, {int(row)}) — select a Labels layer to edit")
+            return
+
+        if self.mode == PAINT:
+            self._painting = True
+            target.paint(row, col, z)
+            self._paint_last = (row, col)
+            self.layers.notify()
+        elif self.mode == ERASE:
+            self._painting = True
+            target.erase(row, col, z)
+            self._paint_last = (row, col)
+            self.layers.notify()
+        elif self.mode == FILL:
+            target.fill(row, col, z)
+            self.layers.notify()
+        elif self.mode == PICK:
+            picked = target.pick(row, col, z)
+            self.layers.notify()
+            if picked is not None and self._on_label_picked:
+                self._on_label_picked(picked)
+
+    def mouseDoubleClickEvent(self, e: QMouseEvent) -> None:
+        if self.mode == POLYGON and len(self._polygon_pts) >= 3:
+            target = self.edit_target()
+            if target is not None:
+                z = self.layers.current_z if self.layers.n_planes > 1 else None
+                target.polygon_fill(self._polygon_pts, z)
+                self.layers.notify()
+            self._polygon_pts = []
+            self.update()
+
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
+        pos = e.position()
+        col, row = self.widget_to_image(pos)
+        self._hover_img = (row, col)
+
+        if self._panning and self._pan_anchor is not None:
+            self._pan = self._pan_anchor_pan + (pos - self._pan_anchor)
+            self.update()
+            return
+
+        if self._painting and self.mode in (PAINT, ERASE):
+            target = self.edit_target()
+            if target is not None:
+                z = self.layers.current_z if self.layers.n_planes > 1 else None
+                for r, c in _interpolate(self._paint_last, (row, col),
+                                         max(2.0, target.brush_size / 3.0)):
+                    (target.paint if self.mode == PAINT else target.erase)(r, c, z)
+                self._paint_last = (row, col)
+                self.layers.notify()
+
+        shape = self._base_shape()
+        label_txt = ""
+        target = self.edit_target()
+        if target is not None and shape is not None:
+            r_i, c_i = int(round(row)), int(round(col))
+            if 0 <= r_i < shape[0] and 0 <= c_i < shape[1]:
+                plane = target.data if target.data.ndim == 2 else \
+                    target.data[min(self.layers.current_z, target.data.shape[0] - 1)]
+                lbl = int(plane[r_i, c_i])
+                label_txt = f"  ·  label {lbl}" if lbl else ""
+        self._status(f"({int(col)}, {int(row)}){label_txt}")
+        if not self._painting:
+            self.update()  # keep the brush-size cursor preview live
+
+    def mouseReleaseEvent(self, e: QMouseEvent) -> None:
+        if self._panning and e.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton):
+            self._panning = False
+            self._pan_anchor = None
+        if self._painting:
+            self._painting = False
+            self._paint_last = None
+
+    def keyPressEvent(self, e) -> None:
+        if e.key() in (Qt.Key.Key_Up, Qt.Key.Key_PageUp):
+            self.step_z(-1)
+        elif e.key() in (Qt.Key.Key_Down, Qt.Key.Key_PageDown):
+            self.step_z(1)
+        else:
+            super().keyPressEvent(e)
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        if not self._fitted:
+            self.home()
+
+    def _status(self, text: str) -> None:
+        if self._on_status:
+            suffix = f"  ·  z {self.layers.current_z + 1}/{self.layers.n_planes}" \
+                if self.layers.n_planes > 1 and not self.mip else ""
+            self._on_status(text + suffix)
+
+
+def _interpolate(a: Optional[tuple[float, float]], b: tuple[float, float],
+                 step: float) -> list[tuple[float, float]]:
+    """Sample points between ``a`` and ``b`` no more than ``step`` apart, so a
+    fast mouse drag still paints a continuous stroke instead of dots."""
+    if a is None:
+        return [b]
+    dist = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
+    n = max(1, int(dist / max(step, 0.5)))
+    return [(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n) for i in range(1, n + 1)]
+
+
+# ── pixel compositing (module functions: easy to unit-test without Qt) ──────
+def _render_image(layer: ImageLayer, plane: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(rgb float32 0..255, alpha float32 0..1) for one ImageLayer plane."""
+    lo, hi = layer.contrast_limits
+    a = plane.astype(np.float32)
+    if a.ndim == 3:
+        a = a[..., :3]
+    rng = (hi - lo) or 1.0
+    norm = np.clip((a - lo) / rng, 0.0, 1.0)
+    if layer.gamma != 1.0:
+        norm = norm ** (1.0 / max(layer.gamma, 1e-3))
+    if norm.ndim == 2:
+        tint = np.array(IMAGE_COLORMAPS.get(layer.colormap, (1.0, 1.0, 1.0)), dtype=np.float32)
+        rgb = norm[..., None] * tint[None, None, :] * 255.0
+    else:
+        rgb = norm * 255.0
+    alpha = np.full(plane.shape[:2], layer.opacity, dtype=np.float32)
+    return rgb, alpha
+
+
+def _render_labels(layer: LabelsLayer, plane: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(rgb float32 0..255, alpha float32 0..1) for one LabelsLayer plane."""
+    h, w = plane.shape
+    ids = np.unique(plane)
+    lut = np.zeros((int(ids.max()) + 1 if ids.size else 1, 3), dtype=np.float32)
+    for i in ids:
+        if i > 0:
+            lut[i] = layer.get_color(int(i))
+    rgb = lut[np.clip(plane, 0, lut.shape[0] - 1)]
+
+    visible_mask = plane > 0
+    if layer.show_selected_label:
+        visible_mask = visible_mask & (plane == layer.selected_label)
+    if layer.contour > 0:
+        visible_mask = visible_mask & _contour_mask(plane, layer.contour)
+
+    alpha = np.where(visible_mask, layer.opacity, 0.0).astype(np.float32)
+    return rgb, alpha
+
+
+def _contour_mask(plane: np.ndarray, thickness: int) -> np.ndarray:
+    boundary = np.zeros(plane.shape, dtype=bool)
+    boundary[:-1, :] |= plane[:-1, :] != plane[1:, :]
+    boundary[1:, :] |= plane[:-1, :] != plane[1:, :]
+    boundary[:, :-1] |= plane[:, :-1] != plane[:, 1:]
+    boundary[:, 1:] |= plane[:, :-1] != plane[:, 1:]
+    if thickness > 1:
+        from scipy import ndimage as ndi
+        boundary = ndi.binary_dilation(boundary, iterations=thickness - 1)
+    return boundary
+
+
+def _blend(canvas: np.ndarray, rgb: np.ndarray, alpha: np.ndarray, mode: str) -> np.ndarray:
+    a = alpha[..., None]
+    if mode == "opaque":
+        return np.where(a > 0, rgb, canvas)
+    if mode == "additive":
+        return np.clip(canvas + rgb * a, 0, 255)
+    return canvas * (1 - a) + rgb * a  # translucent (default)

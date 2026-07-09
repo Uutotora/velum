@@ -444,9 +444,19 @@ class LayerList:
     def n_planes(self) -> int:
         """Frames along the shared z/t axis — 1 unless an image/labels layer
         holds a (Z,H,W[,C]) volume, in which case every layer navigates the
-        same index (matches napari's shared ``dims.current_step``)."""
-        planes = [l.data.shape[0] for l in self._layers
-                  if l.kind in ("image", "labels") and getattr(l.data, "ndim", 2) >= 3]
+        same index (matches napari's shared ``dims.current_step``).
+
+        A trailing dim of 3/4 on an ``image`` layer is RGB(A) channels of a
+        single 2-D plane, not a z-axis — so images need ``ndim >= 4`` to
+        count as a volume, while ``labels`` (never has a channel axis) needs
+        only ``ndim >= 3``. Mirrors ``Canvas._plane_of``'s identical rule.
+        """
+        planes = []
+        for l in self._layers:
+            if l.kind == "labels" and l.data.ndim >= 3:
+                planes.append(l.data.shape[0])
+            elif l.kind == "image" and l.data.ndim >= 4:
+                planes.append(l.data.shape[0])
         return max(planes) if planes else 1
 
     def set_current_z(self, z: int) -> None:
