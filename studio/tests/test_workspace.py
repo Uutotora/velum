@@ -408,6 +408,80 @@ def test_start_predict_runs_and_populates_results(app, segment, projects, toasts
     assert any("Segmentation complete" in t[0] for t in toasts)
 
 
+def test_predict_result_survives_switching_images_and_back(app, segment, projects, toasts, tmp_path, storage):
+    """The core "reopen and see your result" requirement, exercised via an
+    in-session round trip: run predict on image A, switch to B (a fresh,
+    unsegmented image), switch back to A — A's mask and stats must come
+    back exactly, not an empty layer."""
+    project = _make_project(tmp_path, projects, storage, n_images=2)
+    img_a, img_b = project.image_paths
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    assert ws._current_image_path == img_a
+    ws._start_predict()
+    _pump(app, ws)
+    assert ws._layers.find("Segmentation").max_label == 2
+
+    ws._select_image(img_b)
+    assert ws._layers.find("Segmentation").max_label == 0  # a fresh image starts empty
+    assert ws._last_result is None
+
+    ws._select_image(img_a)
+    assert ws._layers.find("Segmentation").max_label == 2
+    assert ws._last_result is not None
+    assert ws._last_result["n_cells"] == 2
+
+
+def test_predict_result_survives_a_full_project_reload(app, segment, projects, toasts, tmp_path, storage):
+    """The literal "close and reopen the project" case: a brand new
+    WorkspaceScreen (as if the app were restarted) must still show the
+    previous session's result for an image that was segmented."""
+    project = _make_project(tmp_path, projects, storage)
+    ws1 = _ws(app, segment, projects, toasts)
+    ws1._load_project(project)
+    ws1._start_predict()
+    _pump(app, ws1)
+    assert ws1._layers.find("Segmentation").max_label == 2
+
+    # a second, independent screen instance re-loading the same project —
+    # nothing shared except what's actually on disk
+    ws2 = _ws(app, segment, projects, [])
+    ws2._load_project(projects.store.load(project.id))
+    seg2 = ws2._layers.find("Segmentation")
+    assert seg2.max_label == 2
+    assert ws2._last_result is not None
+    assert ws2._last_result["n_cells"] == 2
+
+
+def test_images_pane_shows_predicted_status_for_a_saved_but_unselected_image(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=2)
+    img_a, img_b = project.image_paths
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._start_predict()
+    _pump(app, ws)
+    ws._select_image(img_b)  # img_a is no longer the selected image...
+    assert ws._current_image_path != img_a
+    assert segment.has_result_mask(project, img_a) is True  # ...but its result is still on disk
+
+
+def test_reopening_an_image_with_gt_also_shows_evaluation_immediately(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, with_gt=True)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._start_predict()
+    _pump(app, ws)
+    assert ws._gt_metrics is not None
+    first_f1 = ws._gt_metrics["f1"]
+
+    ws2 = _ws(app, segment, projects, [])
+    ws2._load_project(projects.store.load(project.id))
+    assert ws2._gt_metrics is not None
+    assert ws2._gt_metrics["f1"] == first_f1
+
+
 def test_start_predict_bad_config_toasts_synchronously(app, segment, projects, toasts, tmp_path, storage):
     project = _make_project(tmp_path, projects, storage)
     project.settings.model_name = ""  # no LoRA -> build_config raises

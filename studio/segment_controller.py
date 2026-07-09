@@ -17,6 +17,7 @@ themselves; the caller (``studio/workspace.py``) persists, exactly like
 """
 from __future__ import annotations
 
+import hashlib
 import threading
 from pathlib import Path
 from typing import Callable, Optional
@@ -219,6 +220,34 @@ class SegmentController:
         out_path.write_text(analysis.rows_as_csv(result), encoding="utf-8")
         return out_path
 
+    # ── persisted per-(project, image) results ───────────────────────────────
+    # A predict run previously only ever lived in the in-memory LayerList —
+    # navigate away (or close and reopen the project) and it was gone, with
+    # no way to tell an image had already been segmented. These give it a
+    # real home on disk, keyed by project + image so two projects (or two
+    # images with the same filename in different folders) never collide.
+    def mask_path_for_image(self, project: Project, image_path: str | Path) -> Path:
+        key = hashlib.sha1(str(Path(image_path).resolve()).encode("utf-8")).hexdigest()[:20]
+        d = self.project_run_dir(project) / "masks"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / f"{key}.png"
+
+    def save_result_mask(self, project: Project, image_path: str | Path, mask: np.ndarray) -> Path:
+        return self.save_mask(mask, self.mask_path_for_image(project, image_path))
+
+    def load_result_mask(self, project: Project, image_path: str | Path) -> Optional[np.ndarray]:
+        path = self.mask_path_for_image(project, image_path)
+        if not path.exists():
+            return None
+        import cv2
+        m = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+        if m is None:
+            return None
+        return np.ascontiguousarray(m).astype(np.int32)
+
+    def has_result_mask(self, project: Project, image_path: str | Path) -> bool:
+        return self.mask_path_for_image(project, image_path).exists()
+
     # ── ground truth + evaluation ─────────────────────────────────────────────
     @staticmethod
     def find_gt_for_image(image_path: str | Path):
@@ -288,6 +317,19 @@ class SegmentController:
             # caller's job, same convention as everywhere else in this file.
             pop = self.population_stats(records)
             self.record_run(project, n_cells=pop.get("total_cells", 0), progress=100)
+            # PredictController.run_batch_async already wrote each mask to
+            # out_dir/<stem>_mask.png — copy each into the same per-(project,
+            # image) cache a single predict uses, so reopening any of these
+            # images later shows its batch-computed result too, not just a
+            # single Run's.
+            import shutil
+            for img_path in images:
+                src = Path(out_dir_) / f"{img_path.stem}_mask.png"
+                if src.exists():
+                    try:
+                        shutil.copy2(src, self.mask_path_for_image(project, img_path))
+                    except OSError:
+                        pass
             if on_cohort_ready:
                 on_cohort_ready(records, out_dir_)
 

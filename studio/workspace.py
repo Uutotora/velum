@@ -384,7 +384,8 @@ class WorkspaceScreen(QWidget):
         t = self._t
         sel = path == self._current_image_path
         has_gt = self._segment.find_gt_for_image(path) is not None
-        if sel and self._last_result is not None:
+        has_saved_result = self._project is not None and self._segment.has_result_mask(self._project, path)
+        if (sel and self._last_result is not None) or has_saved_result:
             status, dcol = "predicted", t["signal"]
         elif has_gt:
             status, dcol = "annotated", t["success"]
@@ -447,7 +448,19 @@ class WorkspaceScreen(QWidget):
         self._gt_metrics = None
         self._layers.clear()
         self._layers.add(ImageLayer(Path(path).stem or "Image", img), select=False)
-        self._layers.add(LabelsLayer("Segmentation", np.zeros(img.shape[:2], dtype=np.int32)))
+
+        # A previous Run (or batch) on this exact image left a real result on
+        # disk (SegmentController.save_result_mask) — load it back instead of
+        # starting from an empty mask, so "reopen the project" doesn't throw
+        # the work away. A cache from a differently-shaped image (a stale
+        # entry from some past bug, or a manually-edited image file) is
+        # ignored rather than crashing the whole screen on a shape mismatch.
+        saved_mask = self._segment.load_result_mask(self._project, path) if self._project else None
+        if saved_mask is not None and saved_mask.shape != img.shape[:2]:
+            saved_mask = None
+        seg_data = saved_mask if saved_mask is not None else np.zeros(img.shape[:2], dtype=np.int32)
+        self._layers.add(LabelsLayer("Segmentation", seg_data))
+
         gt_path = self._segment.find_gt_for_image(path)
         if gt_path is not None:
             try:
@@ -465,7 +478,13 @@ class WorkspaceScreen(QWidget):
             self._sync_toolbars()
         self._refresh_images_pane()
         self._rebuild_layer_controls()
-        self._rebuild_results_pane()
+
+        if saved_mask is not None:
+            self._recompute_results()  # a previous run's real result — show its stats immediately
+            if self._layers.find("Ground truth") is not None:
+                self._evaluate_gt()
+        else:
+            self._rebuild_results_pane()
 
     # ── Layers pane ──────────────────────────────────────────────────────────
     def _layers_pane(self) -> QWidget:
@@ -1440,6 +1459,11 @@ class WorkspaceScreen(QWidget):
         self._recompute_results()
         if self._project is not None:
             self._segment.record_run(self._project, n_cells=self._last_result.get("n_cells", 0))
+            if self._current_image_path is not None:
+                try:
+                    self._segment.save_result_mask(self._project, self._current_image_path, mask)
+                except OSError as e:
+                    self._toast("Result not saved to disk", str(e))
         if self._layers.find("Ground truth") is not None:
             self._evaluate_gt()
         self._layers.notify()

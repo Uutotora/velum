@@ -266,6 +266,53 @@ def test_save_mask_writes_a_readable_file(tmp_path, ctrl):
     assert reread.max() == 5
 
 
+# ── persisted per-(project, image) results ───────────────────────────────────
+def test_load_result_mask_is_none_before_any_save(ctrl, tmp_path):
+    project = Project(id="p1", name="P1")
+    assert ctrl.has_result_mask(project, tmp_path / "img.png") is False
+    assert ctrl.load_result_mask(project, tmp_path / "img.png") is None
+
+
+def test_save_then_load_result_mask_roundtrips(ctrl, tmp_path):
+    project = Project(id="p1", name="P1")
+    mask = np.zeros((12, 14), dtype=np.int32)
+    mask[2:5, 2:5] = 7
+    ctrl.save_result_mask(project, tmp_path / "img.png", mask)
+    assert ctrl.has_result_mask(project, tmp_path / "img.png") is True
+    reloaded = ctrl.load_result_mask(project, tmp_path / "img.png")
+    assert reloaded is not None
+    assert reloaded.shape == mask.shape
+    assert reloaded.max() == 7
+    assert (reloaded == mask).all()
+
+
+def test_mask_path_differs_by_project_and_by_image(ctrl, tmp_path):
+    p1 = Project(id="p1", name="P1")
+    p2 = Project(id="p2", name="P2")
+    img_a = tmp_path / "a.png"
+    img_b = tmp_path / "b.png"
+    assert ctrl.mask_path_for_image(p1, img_a) != ctrl.mask_path_for_image(p2, img_a)
+    assert ctrl.mask_path_for_image(p1, img_a) != ctrl.mask_path_for_image(p1, img_b)
+    # same project + same image path -> same cache file, deterministically
+    assert ctrl.mask_path_for_image(p1, img_a) == ctrl.mask_path_for_image(p1, img_a)
+
+
+def test_same_filename_different_folders_do_not_collide(ctrl, tmp_path):
+    """Two images that happen to share a filename in different folders must
+    not overwrite each other's cached result."""
+    project = Project(id="p1", name="P1")
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    mask_a = np.full((5, 5), 1, dtype=np.int32)
+    mask_b = np.full((5, 5), 2, dtype=np.int32)
+    ctrl.save_result_mask(project, dir_a / "img.png", mask_a)
+    ctrl.save_result_mask(project, dir_b / "img.png", mask_b)
+    assert ctrl.load_result_mask(project, dir_a / "img.png").max() == 1
+    assert ctrl.load_result_mask(project, dir_b / "img.png").max() == 2
+
+
 def test_export_measurements_csv_has_a_header_row(tmp_path, ctrl):
     mask = np.zeros((10, 10), dtype=np.int32)
     mask[1:3, 1:3] = 1
@@ -310,6 +357,10 @@ def test_run_batch_async_updates_stats_and_writes_cohort_csvs(ctrl, tmp_path, st
     assert project.stats.n_cells == 3 * 2  # two fake blobs per image
     assert project.stats.progress == 100
     assert project.stats.n_images == 3
+    # each batch-computed mask is also reloadable later, same as a single Run
+    for img in imgs:
+        assert ctrl.has_result_mask(project, img)
+        assert ctrl.load_result_mask(project, img).max() == 2
 
 
 def test_run_batch_async_raises_for_an_empty_project(ctrl):
