@@ -281,8 +281,20 @@ class ChangeCard(QFrame):
                 action: str, on_apply: Callable[[dict], None], on_apply_rerun: Callable[[dict], None]):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Qualified by objectName, NOT a bare "QFrame{...}" *type* selector —
+        # QLabel is itself a QFrame subclass (paints border/background/
+        # radius natively), so an unscoped QFrame{...} rule set here also
+        # matches this card's own title/detail QLabels, giving each one its
+        # own small bordered box around just its own text. Exactly the
+        # rendering-bug family docstudio/CHANGELOG.md's 2026-07-08 "Guide &
+        # Docs" entry already root-caused and named ("even a bare type
+        # selector like QFrame{…} cascades") — reproduced here despite that
+        # lesson being on record, caught by an actual offscreen screenshot,
+        # not by any test.
+        self.setObjectName("ChangeCard")
         self.setStyleSheet(
-            f"QFrame {{ background:{t['surface']}; border:1px solid {t['border']}; border-radius:10px; }}")
+            f"QFrame#ChangeCard{{ background:{t['surface']}; border:1px solid {t['border']};"
+            f" border-radius:10px; }}")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(13, 11, 13, 11)
         lay.setSpacing(6)
@@ -420,7 +432,22 @@ class AssistantDrawer(QFrame):
         self._op_status_text = ""
 
         self.setFixedWidth(self.WIDTH)
-        self.setStyleSheet(f"background:{t['surface']}; border-left:1px solid {t['border']};")
+        # Qualified selector, not a bare "background:...;border-left:...;"
+        # rule: an *unqualified* setStyleSheet() on a container cascades to
+        # every descendant that doesn't more specifically override the same
+        # property. QWidget/QLabel have an app-wide type-selector for
+        # `background` (theme.build_qss), so that property is always safely
+        # overridden lower down -- but nothing overrides plain `border` for
+        # a bare QWidget, so the drawer's own border-left was leaking onto
+        # ChatView's inset empty-state widget as a stray vertical line at
+        # its own left edge (confirmed by pixel-sampling: exactly the
+        # border colour, exactly the empty-state's own x-offset and height,
+        # gone the moment this selector was scoped) -- the same rendering-
+        # bug family docstudio/CHANGELOG.md's 2026-07-08 entries already
+        # named twice, just leaking `border` instead of `background`.
+        self.setObjectName("AssistantDrawer")
+        self.setStyleSheet(
+            f"QFrame#AssistantDrawer{{background:{t['surface']}; border-left:1px solid {t['border']};}}")
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)

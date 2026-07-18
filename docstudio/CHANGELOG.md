@@ -5,6 +5,79 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-18 — Follow-up #2: the fill fix wasn't the actual bug, found it for real
+
+The previous entry's `Accordion` `fill` fix was real but wasn't what the
+user was pointing at — a second screenshot, cleaner and uncompressed, still
+showed "borders aren't fully filled" plus "a bunch of extra sticks." Root-
+caused properly this time, by pixel-sampling offscreen instead of
+eyeballing a screenshot, and — critically — after discovering the verification
+method itself was broken.
+
+**The verification bug first, because it cost the most time**: every
+offscreen check this session (including the previous entry's "confirmed
+clean" screenshots) constructed widgets *without* ever calling
+`app.setStyleSheet(theme.build_qss(t))` — the real, global stylesheet
+`studio.app.main()` always applies. Without it, a container's own
+(buggy, unqualified) cascade was the *only* thing giving its children any
+background colour at all, so removing that cascade first made the chat
+area render Qt's raw default grey, not the intended `t['bg']` — a second,
+worse-looking regression that only existed in the test harness, not in the
+fix. `docstudio/CHANGELOG.md`'s 2026-07-08 entry already documented this
+exact hazard for a different screen (a `styled_app` fixture, reset in
+teardown since `QApplication` is a process-wide singleton) — it just hadn't
+been applied to this round's ad hoc verification scripts.
+
+**The two real bugs, found once verification was done properly:**
+
+1. **`AssistantDrawer.setStyleSheet(...)` was an unqualified rule**
+   (`"background:...;border-left:...;"`, no selector) — QWidget has an
+   app-wide type-selector for `background` (theme.build_qss), so that
+   property is always safely overridden lower down, but nothing overrides
+   plain `border` for a bare `QWidget`/`QLabel`. The drawer's own
+   `border-left` leaked onto *every* such descendant that has its own
+   inset x-position: `ChatView`'s empty-state container (the long line)
+   *and*, independently, its title/subtitle `QLabel`s (the two shorter
+   "sticks" next to the text) — one root cause, multiple visible marks,
+   which is why fixing the accordion's fill alone didn't touch it. Fixed
+   by scoping the selector to `QFrame#AssistantDrawer{...}`. Applied the
+   same fix proactively to three more overlays with the identical
+   unqualified-background+border pattern (`LogsConsole`, `Toast`,
+   `CommandPalette`'s panel) rather than waiting to find each by
+   screenshot once those are exercised more.
+2. **`ChangeCard.setStyleSheet(...)` used a bare `QFrame{...}` *type*
+   selector**, not scoped to an object name — `QLabel` is itself a
+   `QFrame` subclass, so the card's own background+border+radius rule
+   *also* matched its own title and detail labels, each repainting its
+   own small bordered box around just its own text. This is the exact
+   rendering-bug family `docstudio/CHANGELOG.md`'s 2026-07-08 "Guide &
+   Docs" entry already named and root-caused once ("even a bare type
+   selector like `QFrame{…}` cascades") — reproduced again in new code
+   despite that lesson being on record, caught only by an actual
+   offscreen screenshot, not by any test passing. Fixed by scoping to
+   `QFrame#ChangeCard{...}`.
+
+Verified properly this time: both new regression tests
+(`studio/tests/test_assistant_panel.py`) confirmed to *fail* against the
+pre-fix code before trusting them (temporarily reverted both fixes, ran the
+tests, watched them fail for the right reason, restored the fixes, watched
+them pass) — the same discipline this file's own 2026-07-08 entries already
+called out as necessary and not automatic. Full `studio/tests` green (550
+tests), full repo `tests/` green, the throwaway python3.10-venv light-group
+check green. Fresh offscreen screenshots in both themes, using the corrected
+methodology (real app-wide QSS applied, real elapsed time for the fade-in to
+settle via `time.sleep`, not just empty `processEvents()` calls) — the empty
+state, Diagnose's `ChangeCard`, and the expanded Model panel all confirmed
+clean: no stray lines, no double-boxed labels, correct `t['bg']` chat
+background (not the accidental leaked colour the earlier, uncorrected-
+methodology screenshots happened to show).
+
+**Not verified:** how this reads on a real, non-offscreen display — asking
+for confirmation after this pass, same as the standing practice for every
+Studio rendering fix in this log.
+
+---
+
 ## 2026-07-18 — Follow-up: real-usage feedback on the Assistant, a design pass
 
 Direct user feedback on a real (non-offscreen) screenshot of the just-shipped

@@ -44,6 +44,19 @@ def parent(app):
 
 
 @pytest.fixture
+def styled_app(app):
+    """The shared QApplication with the real app-wide stylesheet applied —
+    see test_guide_screen.py's identical fixture for why this specific
+    class of rendering bug (an unqualified/bare-type-selector setStyleSheet
+    cascading to descendants) only reproduces with it applied, and why it
+    must be reset afterward (a process-wide QApplication singleton shared
+    with every other test module in the session)."""
+    app.setStyleSheet(theme.build_qss(theme.DARK))
+    yield app
+    app.setStyleSheet("")
+
+
+@pytest.fixture
 def controller(tmp_path):
     return AssistantController(storage_dir=tmp_path / "assistant_storage")
 
@@ -461,6 +474,87 @@ def test_stale_status_result_from_a_since_switched_backend_is_ignored(app, paren
     d._on_status_result("ollama", True, "Connected — 3 models", ["a", "b", "c"])
     assert d._found_models == []
     assert d._status_ok is None
+
+
+# ── rendering regressions ────────────────────────────────────────────────────
+# Both bugs below only reproduce with the *real* app-wide stylesheet applied
+# (styled_app, not the plain app fixture) -- see its docstring. Found from a
+# real (non-offscreen) user screenshot reporting "borders aren't fully
+# filled" plus stray lines; confirmed by pixel-sampling offscreen, not by
+# eye, and confirmed *fixed* the same way (these tests fail against the
+# pre-fix code, not just pass against the fix).
+def test_drawers_own_border_does_not_leak_onto_the_empty_state(styled_app, controller, workspace):
+    """AssistantDrawer.setStyleSheet() used to be an *unqualified* rule
+    ("background:...;border-left:...;" with no selector) -- QWidget has an
+    app-wide type-selector for `background` (always safely overridden), but
+    nothing overrides plain `border` for a bare QWidget, so the drawer's own
+    border-left leaked onto ChatView's inset empty-state widget as a stray
+    1px vertical line at *its own* left edge (the ChatView content margin)
+    -- not the drawer's real left edge (x=0, where a border-left is correct
+    and expected). Only reproduces with the drawer actually laid out inside
+    a parent that owns its own background (mirroring how StudioWindow hosts
+    it) *and* given real elapsed time to settle (a bare processEvents()
+    loop with no sleep never lets the fade-in reach a paintable state) --
+    both matched here, not simplified away."""
+    import time as _time
+    from PyQt6.QtWidgets import QVBoxLayout
+
+    t = theme.DARK
+    host = QWidget()
+    host.setStyleSheet(f"background:{t['bg']};")
+    host.resize(360, 860)
+    lay = QVBoxLayout(host)
+    lay.setContentsMargins(0, 0, 0, 0)
+    d = ap.AssistantDrawer(host, t, controller, workspace)
+    lay.addWidget(d)
+    d.show()
+    host.show()
+    for _ in range(40):
+        styled_app.processEvents()
+        _time.sleep(0.01)
+
+    img = d.grab().toImage()
+    empty = d._chat._empty
+    pt = empty.mapTo(d, empty.rect().topLeft())
+    border = t["border"]
+    # Scan a narrow band around the empty state's own left edge (+/- a few
+    # px, to absorb sub-pixel mapTo()-vs-actual-paint rounding) at several
+    # y-offsets down its height -- every point here must be the surrounding
+    # background, never the border colour.
+    hits = [(dx, dy) for dy in range(5, empty.height() - 5, 5)
+            for dx in range(-3, 4)
+            if img.pixelColor(pt.x() + dx, pt.y() + dy).name() == border]
+    assert not hits, f"stray border-coloured pixel(s) near the empty state's left edge: {hits}"
+
+
+def test_change_card_title_and_detail_labels_are_not_individually_boxed(styled_app):
+    """ChangeCard.setStyleSheet() used to be a bare *type* selector
+    ("QFrame{...}", no #ObjectName) -- QLabel is itself a QFrame subclass,
+    so the card's own background+border+radius rule also matched its title
+    and detail QLabels, each repainting its own small bordered box around
+    just its own text (the exact rendering-bug family docstudio/CHANGELOG.md's
+    2026-07-08 "Guide & Docs" entry already named once)."""
+    t = theme.DARK
+    card = ap.ChangeCard(t, "Run a prediction first",
+                         "Predict on an image, then diagnose the result here for tuning advice.",
+                         {}, t["primary"], "", lambda c: None, lambda c: None)
+    card.resize(320, card.sizeHint().height())
+    card.show()
+    for _ in range(10):
+        styled_app.processEvents()
+    img = card.grab().toImage()
+
+    from PyQt6.QtWidgets import QLabel
+    labels = [w for w in card.findChildren(QLabel) if w.text()]
+    assert len(labels) >= 2   # title + detail, at minimum
+    border = t["border"]
+    for lbl in labels:
+        pt = lbl.mapTo(card, lbl.rect().topLeft())
+        # The label's own top-left corner: a real per-label border box (the
+        # bug) always outlines exactly here; the card's own border sits
+        # much further out (card.rect(), not any inner label's rect).
+        c = img.pixelColor(pt.x(), pt.y())
+        assert c.name() != border, f"{lbl.text()!r} is individually boxed"
 
 
 # ── cross-thread safety ─────────────────────────────────────────────────────

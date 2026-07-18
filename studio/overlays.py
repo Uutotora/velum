@@ -38,7 +38,16 @@ class LogsConsole(QFrame):
         super().__init__(parent)
         self._t = t
         self.setFixedHeight(self.HEIGHT)
-        self.setStyleSheet(f"background:{t['surface']}; border-top:1px solid {t['border']};")
+        # Qualified selector: an unqualified background+border rule here
+        # would cascade to every descendant that doesn't more specifically
+        # override `border` (bare QWidget/QLabel have no such override) —
+        # confirmed as a real, visible stray-line bug for this exact
+        # pattern on AssistantDrawer (see its own comment); fixed
+        # proactively here too rather than waiting to find it by screenshot
+        # once Logs is wired for real.
+        self.setObjectName("LogsConsole")
+        self.setStyleSheet(
+            f"QFrame#LogsConsole{{background:{t['surface']}; border-top:1px solid {t['border']};}}")
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
@@ -101,8 +110,10 @@ class CommandPalette(QWidget):
         panel = QFrame()
         panel.setFixedWidth(560)
         panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        panel.setObjectName("PalettePanel")   # qualified -- see AssistantDrawer's comment
         panel.setStyleSheet(
-            f"background:{t['surface']}; border:1px solid {t['border_strong']}; border-radius:14px;")
+            f"QFrame#PalettePanel{{background:{t['surface']}; border:1px solid {t['border_strong']};"
+            f" border-radius:14px;}}")
         v = QVBoxLayout(panel)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
@@ -190,9 +201,10 @@ class Toast(QFrame):
     def __init__(self, parent: QWidget, t: dict):
         super().__init__(parent)
         self._t = t
+        self.setObjectName("Toast")   # qualified -- see AssistantDrawer's comment
         self.setStyleSheet(
-            f"background:{t['surface']}; border:1px solid {t['border']};"
-            f"border-left:3px solid {t['success']}; border-radius:11px;")
+            f"QFrame#Toast{{background:{t['surface']}; border:1px solid {t['border']};"
+            f"border-left:3px solid {t['success']}; border-radius:11px;}}")
         row = QHBoxLayout(self)
         row.setContentsMargins(15, 12, 15, 12)
         row.setSpacing(12)
