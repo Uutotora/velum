@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import html
 import time
+from dataclasses import fields
 from pathlib import Path
 from typing import Optional
 
@@ -34,7 +35,7 @@ from PyQt6.QtWidgets import (
 
 from studio import icons
 from studio import theme, demo
-from studio.project import ENGINE_LABELS, ENGINE_KIND, Project
+from studio.project import ENGINE_LABELS, ENGINE_KIND, Project, ProjectSettings
 from studio.paint import nuclei_pixmap
 from studio.components import (
     Chip, Badge, PillButton, IconButton, SelectBox, Toggle, Slider, Stepper,
@@ -61,6 +62,11 @@ MODE_ICONS = [
     ("shuffle", "Shuffle colours", "__shuffle__"),
 ]
 QUALITY_PRESET_NAMES = ["Fast", "Balanced", "Accurate"]
+# Every real ProjectSettings field name — apply_assistant_changes() below
+# whitelists against this so a changes dict can only ever touch real
+# settings, never shadow a method (e.g. a stray "to_dict" key) on the
+# instance via setattr.
+_SETTINGS_FIELD_NAMES = {f.name for f in fields(ProjectSettings)}
 COLOR_BY_OPTIONS = ["Instance ID (default)", "Area (heatmap)", "Diameter (heatmap)",
                     "Solidity (heatmap)", "Mean intensity (heatmap)"]
 _COLOR_BY_KEYS = {"Area (heatmap)": "area", "Diameter (heatmap)": "diameter",
@@ -1526,6 +1532,66 @@ class WorkspaceScreen(QWidget):
             self._on_canvas_status(f"Segmented in {elapsed:.1f} s")
             self._toast("Segmentation complete", f"{n} cells · {elapsed:.1f} s")
         self._refresh_images_pane()
+
+    # ── Assistant integration ───────────────────────────────────────────────
+    # The narrow read/write surface the Assistant drawer uses to see the
+    # active session and act on it — mirrors the classic app's
+    # PredictWidget.last_context()/current_params()/apply_params()/rerun()
+    # contract, so the two apps' Assistants are built against the same shape.
+    def assistant_context(self) -> tuple[Optional[np.ndarray], Optional[np.ndarray], dict]:
+        """``(image, mask, params)`` for the Assistant's diagnose/chat.
+
+        Degrades to ``(None, None, {})`` with no project/image open —
+        ``advisor.diagnose`` handles that combination without crashing (it
+        just asks for a prediction first), so this never needs its own
+        empty-state branching.
+        """
+        # _select_image() always creates a "Segmentation" layer (zero-filled
+        # until something real is predicted), so its mere existence doesn't
+        # mean a result exists — gate on _last_result, the same signal the
+        # Results pane already uses (_export_csv's "Nothing to export", "Show
+        # measurements" without a run) to tell "genuinely segmented" apart
+        # from "just an empty placeholder", so an unpredicted image reads to
+        # the advisor as "no mask yet" rather than "0 cells found".
+        seg = self._layers.find("Segmentation")
+        mask = seg.data if (seg is not None and self._last_result is not None) else None
+        params: dict = {}
+        if self._project is not None:
+            image_path = self._current_image_path or (
+                self._project.image_paths[0] if self._project.image_paths else None)
+            if image_path is not None:
+                params = self._segment.build_params(self._project, image_path)
+        return self._current_image_array, mask, params
+
+    def apply_assistant_changes(self, changes: dict) -> Optional[list[str]]:
+        """Apply a ``{param: value}`` dict (an advisor finding's, or a chat
+        model's parsed ``SUGGEST:`` lines) to the active project's settings —
+        the same convention a manual threshold edit uses
+        (``_set_setting_custom``): marks ``quality_preset`` "Custom" and
+        persists immediately, then rebuilds the Segment pane so it reflects
+        the new values without needing to reopen the project.
+
+        Returns the keys actually applied, or ``None`` when there's no
+        active project — lets the caller (the Assistant) tell "nothing to
+        apply" apart from "nowhere to apply it".
+        """
+        if self._project is None:
+            return None
+        applied = [k for k in changes if k in _SETTINGS_FIELD_NAMES]
+        for k in applied:
+            setattr(self._project.settings, k, changes[k])
+        if applied:
+            self._project.settings.quality_preset = "Custom"
+            self._projects.store.save(self._project)
+            self._rebuild_segment_pane()
+        return applied
+
+    def rerun_predict(self) -> None:
+        """The Assistant's "Apply & re-run" — ``_start_predict`` already
+        guards every precondition (no project/image selected, already
+        running), so this is a thin, honestly-named alias rather than a
+        second copy of that logic."""
+        self._start_predict()
 
     # ── Results pane ─────────────────────────────────────────────────────────
     def _rebuild_results_pane(self) -> None:

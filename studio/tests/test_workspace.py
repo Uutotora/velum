@@ -955,6 +955,100 @@ def test_export_csv_without_a_result_toasts(app, segment, projects, toasts, tmp_
     assert toasts and "Nothing to export" in toasts[-1][0]
 
 
+# ── Assistant integration ───────────────────────────────────────────────────
+def test_assistant_context_with_no_project_is_empty(app, segment, projects, toasts):
+    ws = _ws(app, segment, projects, toasts)
+    image, mask, params = ws.assistant_context()
+    assert image is None and mask is None and params == {}
+
+
+def test_assistant_context_before_any_predict_has_image_and_params_but_no_mask(
+        app, segment, projects, toasts, tmp_path, storage):
+    """An image is selected (so a placeholder all-zero "Segmentation" layer
+    already exists) but nothing has actually been predicted yet — the
+    advisor must see mask=None (-> "run a prediction first"), not an
+    all-zero mask (-> "no cells detected", the wrong diagnosis)."""
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    image, mask, params = ws.assistant_context()
+    assert image is not None
+    assert mask is None
+    assert params["points_per_side"] == project.settings.points_per_side
+
+
+def test_assistant_context_after_predict_returns_real_mask(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._start_predict()
+    _pump(app, ws)
+    image, mask, params = ws.assistant_context()
+    assert image is not None
+    assert mask is not None and int(mask.max()) == 2
+    assert params["engine"] == "cellseg1"
+
+
+def test_apply_assistant_changes_without_a_project_returns_none(app, segment, projects, toasts):
+    ws = _ws(app, segment, projects, toasts)
+    assert ws.apply_assistant_changes({"pred_iou_thresh": 0.5}) is None
+
+
+def test_apply_assistant_changes_updates_settings_marks_custom_and_persists(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    applied = ws.apply_assistant_changes({"pred_iou_thresh": 0.55, "min_mask_area": 40})
+    assert set(applied) == {"pred_iou_thresh", "min_mask_area"}
+    assert ws._project.settings.pred_iou_thresh == 0.55
+    assert ws._project.settings.min_mask_area == 40
+    assert ws._project.settings.quality_preset == "Custom"
+    reloaded = projects.store.load(project.id)
+    assert reloaded.settings.pred_iou_thresh == 0.55
+
+
+def test_apply_assistant_changes_ignores_unknown_keys(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    applied = ws.apply_assistant_changes({"not_a_real_setting": 1})
+    assert applied == []
+    assert ws._project.settings.quality_preset == "Balanced"  # untouched — nothing real was applied
+
+
+def test_apply_assistant_changes_cannot_shadow_a_settings_method(
+        app, segment, projects, toasts, tmp_path, storage):
+    """A changes dict is always advisor-sourced in practice (a fixed,
+    known-safe key set) — but apply_assistant_changes whitelists against
+    real dataclass fields regardless, so a stray key can never setattr over
+    e.g. ProjectSettings.to_dict via this path."""
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    applied = ws.apply_assistant_changes({"to_dict": "clobbered"})
+    assert applied == []
+    assert callable(ws._project.settings.to_dict)
+
+
+def test_rerun_predict_without_project_toasts_like_start_predict(app, segment, projects, toasts):
+    ws = _ws(app, segment, projects, toasts)
+    ws.rerun_predict()
+    assert toasts and "No project open" in toasts[-1][0]
+
+
+def test_rerun_predict_runs_a_real_prediction(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws.rerun_predict()
+    assert ws._predicting is True
+    _pump(app, ws)
+    assert ws._last_result is not None
+    assert ws._last_result["n_cells"] == 2
+
+
 # ── real-click regressions: raw mouseReleaseEvent widgets must not crash ────
 # Found from an actual running session: clicking "preserve labels" / "show
 # selected" raised "TypeError: invalid argument to sipBadCatcherResult()" —
