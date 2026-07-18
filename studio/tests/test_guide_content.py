@@ -74,13 +74,30 @@ def test_faq_has_several_entries_with_real_content():
         assert item.a.strip()
 
 
-def test_no_article_documents_the_not_yet_wired_assistant():
-    # The Assistant tab isn't wired yet (docstudio/BACKLOG.md) — documenting
-    # it as a working feature would be worse than no article at all.
-    assert "assistant" not in gc.ARTICLES_BY_ID
-    for article in gc.ARTICLES:
-        assert "assistant" not in article.title.lower()
-        assert "assistant" not in article.id.lower()
+def test_assistant_article_exists_and_names_all_three_real_backends():
+    # The Assistant is wired now (docstudio/BACKLOG.md, 2026-07-18) — it gets
+    # a real article, and that article must actually match the three
+    # backends studio/assistant_controller.py implements (BACKENDS), not an
+    # aspirational subset.
+    from studio.assistant_controller import BACKENDS
+    assert "assistant" in gc.ARTICLES_BY_ID
+    article = gc.ARTICLES_BY_ID["assistant"]
+    text = " ".join(
+        b[1] if isinstance(b[1], str) else " ".join(b[1]) if b[0] == "ul" else ""
+        for b in article.blocks
+    ).lower()
+    assert "offline" in BACKENDS and "ollama" in BACKENDS and "custom" in BACKENDS
+    assert "offline" in text
+    assert "ollama" in text
+    assert "custom api" in text
+
+
+def test_faq_data_privacy_answer_carves_out_the_custom_api_exception():
+    # FAQ used to say data never leaves the device, full stop — now that
+    # Custom API can point at a remote endpoint, that claim must be
+    # qualified, not silently wrong.
+    item = next(f for f in gc.FAQ if "leave this computer" in f.q.lower())
+    assert "custom api" in item.a.lower()
 
 
 def test_engines_article_only_names_the_three_real_engine_keys():

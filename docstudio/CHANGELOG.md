@@ -5,6 +5,180 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-18 — Assistant tab wired end to end — the last P1 flagship, done
+
+The Assistant drawer goes from a hard-coded `demo.CHAT` transcript (three
+static bubbles, chips that changed nothing) to a real chat: own UI, reuse
+the logic, exactly the principle every other tab has already followed —
+plus local model selection, an Ollama connection, and a Custom-API
+connection for a user's own hosted/self-hosted model, as requested.
+
+**New `studio/assistant_controller.py`** (Qt-free, mirrors `train_controller.py`/
+`segment_controller.py`'s shape) — three interchangeable chat backends
+behind one `send_async()`:
+- **"offline"** — `napari_app.advisor.diagnose`, the existing deterministic
+  diagnostic engine, reused read-only (lazy import, never modified — the
+  same "reuse the logic" pattern `segment_controller.py` already uses for
+  `predict_controller`). Always available, no model, no network call.
+- **"ollama"** — `napari_app.advisor`'s existing Ollama bridge, also reused
+  verbatim: model discovery, `ollama_pull`, the "bake a task-specialised
+  `cellseg1-assistant`" flow, streaming chat.
+- **"custom"** — a brand-new bridge (`custom_api_available`/
+  `custom_api_models`/`custom_api_chat`), stdlib `urllib` + Server-Sent-Events
+  parsing, no new dependency — any OpenAI-compatible `/chat/completions`
+  endpoint, local (LM Studio, vLLM, llama.cpp's server, text-generation-webui,
+  …) or remote (OpenAI itself, OpenRouter, Groq, …), with or without an API
+  key. This is genuinely new capability (the classic app only ever had
+  Ollama), so it lives entirely in Studio's own module rather than being
+  added to `napari_app/advisor.py` — nothing in `napari_app/` changed.
+
+`AssistantSettings`/`AssistantSettingsStore` persist which backend + model
+is selected to one small JSON file under the shared storage dir (a
+machine-level choice, not a per-project one — mirrors `ProjectStore.save`'s
+atomic temp-file-then-replace write). `send_async()` falls back to the
+synchronous offline diagnostic reply whenever the configured backend isn't
+actually ready (no Ollama model picked, no Custom-API base-url+model set)
+instead of erroring, so a half-configured backend degrades gracefully.
+`refresh_status_async()` does the live reachability check (Ollama server up?
+Custom API endpoint reachable?) off the UI thread, always — including the
+one the drawer fires automatically the moment a non-offline backend is
+selected, so a slow or unreachable server never blocks the UI even for a
+second.
+
+**`studio/workspace.py`** gained the narrow read/write hook the Assistant
+needs into the active Segment session, mirroring the classic app's
+`PredictWidget.last_context()`/`current_params()`/`apply_params()`/`rerun()`
+contract: `assistant_context()` (image/mask/params — gated on `_last_result`,
+not just the "Segmentation" layer's existence, since `_select_image()`
+always creates a zero-filled placeholder the moment an image is picked; without
+that gate an unpredicted image would misreport to the advisor as "0 cells
+found" instead of "no prediction yet"), `apply_assistant_changes()` (same
+convention as a manual threshold edit — marks `quality_preset` "Custom",
+persists, rebuilds the Segment pane so a cross-tab change is visible without
+reopening the project; whitelisted against `ProjectSettings`' real dataclass
+fields rather than a bare `setattr`, so a stray key can never shadow an
+instance method), and `rerun_predict()` (a thin alias for `_start_predict()`,
+which already guards every precondition). This is the actual "connect it to
+the other tabs" wiring — a suggestion applied in the Assistant changes real
+settings the Segment tab's own inspector reflects immediately, and can
+trigger a real re-run.
+
+**New `studio/assistant_panel.py`** — Studio's own chat UI, importing
+nothing from `napari_app.widgets` (own tokens, own icons, same as every
+other tab):
+- `ChatView` — a Studio-native port of the chat idiom (message bubbles, a
+  streaming assistant reply with a typing indicator, an empty state) built
+  from Studio's own atoms/tokens rather than reusing the classic app's Qt
+  widget.
+- `ChangeCard` — a recommended parameter change with Apply / Apply &
+  re-run, built from `PillButton`/tokens.
+- `AssistantDrawer` itself (moved out of `overlays.py` entirely — it had
+  outgrown living alongside `LogsConsole`/`CommandPalette`/`Toast`): header
+  (unchanged) + a collapsed-by-default "Model" settings accordion (an
+  Offline/Ollama/Custom-API `SegControl`, per-backend fields, a live status
+  line, Ollama's recommended-models download catalogue + "Tune for
+  CellSeg1") + the chat (the hero surface, filling whatever room is left) +
+  Diagnose/input/Send. Every model/network call runs on a background
+  thread with guarded (`_safe_emit_*`, the established
+  `sip.delete()`-tested pattern already used throughout Studio for this
+  exact hazard) Qt-signal delivery back to the main thread.
+
+**Wiring**: `studio/app.py` now imports `AssistantDrawer` from
+`assistant_panel` (not `overlays`); `StudioWindow` gained an
+`assistant_controller` param (mirrors `project_controller`/
+`train_controller`/`segment_controller` — constructed once in `__init__`,
+*not* rebuilt in `_build_ui()`, so a chosen backend/model/API key survives
+`toggle_theme()`'s full UI teardown-and-rebuild) and passes the real Segment
+`WorkspaceScreen` through as the drawer's cross-tab context/actions source.
+`components.Accordion` gained a small, additive `set_title()` so the "Model
+· Ollama" header can update live as the backend picker changes, without
+rebuilding the whole accordion.
+
+**A real bug, found only by actually screenshotting the result offscreen —
+not by tests passing.** `ChangeCard`'s severity dot used a nested
+widget-with-its-own-`addStretch()` layout (`dot_wrap`/`dwl`) to pin the dot
+to the title's cap-height — copied faithfully from `napari_app`'s own
+`ChangeCard`, which uses the identical construction. Once embedded inside
+`ChatView`'s `QScrollArea` (rather than a plain standalone widget), that
+nested stretch made Qt balloon the whole card to 3-4x its `sizeHint()`:
+confirmed by instrumenting `card.geometry()` vs. `card.sizeHint()` before
+and after (75px tall standalone; 313px once actually laid out inside the
+chat), and by bisecting the exact construction line by line until removing
+just the inner `addStretch()` collapsed it back to 75px. A "Run a
+prediction first" card rendered as a ~300px-tall box with a large empty gap
+between its title and detail text instead of a compact one. Fixed by adding
+the dot directly to its row with `Qt.AlignmentFlag.AlignTop` instead of a
+nested-stretch wrapper widget — the identical visual result (the dot stays
+pinned to the top if the title wraps to two lines) without the failure
+mode, confirmed both by geometry introspection and by fresh offscreen
+screenshots. (The identical pattern in `napari_app`'s own `ChangeCard` was
+left untouched — out of scope, `napari_app/` wasn't touched at all this
+round, and it may or may not manifest the same way inside that app's own
+`ChatView` construction; not verified either way.)
+
+**Known, deliberate gap** — called out rather than half-built: the
+auto-tune predict→score→adjust loop the classic app's Assistant also has
+(a live score chart, a sortable trajectory table, CSV export, a
+parameter-importance readout) is *not* wired into Studio's drawer this
+round. It's a large, separate sub-feature on top of an already-large
+change; `napari_app/core/tuning_loop.py` (the Qt-free loop logic) is
+reusable as-is whenever this is picked up — see `BACKLOG.md`.
+
+**Verified:** 76 new pure-logic/Qt-wiring tests across three new files —
+47 in `studio/tests/test_assistant_controller.py` (settings round-trip,
+`backend_ready()` per backend, the Custom-API bridge against a mocked
+`urllib.request.urlopen` covering SSE framing/auth headers/an empty-url
+short-circuit/cooperative `stop()`, `send_async`'s per-backend dispatch
+including the tuned-agent-model system-prompt-skip path, error propagation,
+`chat_busy()`/`model_op_busy()` held open against a real background
+thread); 9 in `studio/tests/test_workspace.py` (now 85 total) for the three
+new hook methods, including the "unpredicted image must read as no-mask,
+not zero-cells" regression; 29 in `studio/tests/test_assistant_panel.py`
+for the drawer itself — backend switching + persistence, Diagnose →
+`ChangeCard`s, Apply/Apply & re-run against a fake workspace (a `None`
+"no active project" return handled without crashing), the offline
+backend's synchronous reply, a connected backend's real threaded streaming
+(send-while-busy is a no-op, error reporting lands in the chat, a stale
+status result from a since-switched backend is discarded), Ollama
+refresh/pull/bake-agent and Custom-API test-connection/field-persistence
+flows, and a `sip.delete()` regression proving every `_safe_emit_*`
+survives a torn-down widget. Two real test bugs caught and fixed before
+they shipped, not by luck: a case-sensitivity assertion mismatch against
+`Accordion`'s all-caps title rendering, and a fake-Ollama-pull-too-fast
+race (the trivial fake completed before the main thread's own
+`_rebuild_model_body()` call could observe `model_op_busy()==True` —
+fixed by holding the fake open on a `threading.Event` until the assertion
+runs, the same deterministic-synchronization pattern already used
+elsewhere in this suite for background-thread tests).
+
+Full `studio/tests` green throughout (536 tests, up from 460), both in the
+real conda env and in a from-scratch `python3.10` venv with only the
+declared `test` dependency-group installed (554 passed / 21 skipped — no
+PyQt6/torch/napari pulled in; `test_assistant_panel.py` correctly skips as
+one unit via `importorskip("PyQt6")`, and `test_assistant_controller.py`'s
+47 cases run for real there since the module has zero PyQt6/torch
+dependency). The full repo-wide `tests/` suite (classic app) also green,
+confirming the zero `napari_app/` changes this round didn't regress it.
+10 real offscreen screenshots across both themes (`QWidget.grab()`, several
+`app.processEvents()` pumps) — the empty state, Diagnose on an unpredicted
+image, a full simulated chat exchange (a monkeypatched Ollama reply with
+`SUGGEST:` lines streaming in, correctly parsed into a working Apply &
+re-run card), and the Ollama/Custom-API settings bodies (including a real,
+unmocked `custom_api_available()` call against `localhost:1234` failing
+fast and surfacing the "could not confirm, may still work" message rather
+than hanging) — plus one full-`StudioWindow` integration screenshot
+(sidebar → Assistant → the real drawer positioned correctly over a real
+opened project) — all visually confirmed correct, including the
+`ChangeCard` fix above (found *by* this same screenshot pass).
+
+**Not verified:** real Ollama/Custom-API server interaction beyond the
+mocked-`urlopen`/monkeypatched-`advisor` test seams (no live Ollama or
+OpenAI-compatible server was reachable in this environment); on-screen
+(non-offscreen) look, font rendering, and animation smoothness; real model
+inference through either bridge.
+
+---
+
 ## 2026-07-10 — Fix a real crash: clicking several Segment-tab controls could abort the app
 
 Found from an actual running session, not a test: clicking "preserve

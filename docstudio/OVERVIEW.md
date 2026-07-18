@@ -25,23 +25,35 @@ new design, so we don't rewrite the hard parts from scratch.
 
 Studio started as a pure design skeleton (Phase 0: every mockup screen
 reproduced in native PyQt6, no logic, `demo.py` static content everywhere)
-and was then wired tab by tab. As of 2026-07-09, Phase 0 and Phase 1 are both
-**done**:
+and was then wired tab by tab. As of 2026-07-18, Phase 0 and Phase 1 are both
+**done**, and Phase 2 is nearly done:
 
-- **Home, Projects, Models & Train, Dashboard, and Segment are all real** —
-  backed by real controllers (`project_controller.py`, `train_controller.py`,
-  `dashboard_controller.py`, `segment_controller.py`) and real persisted data
-  (`studio/project.py`'s `ProjectStore`), not `demo.py` reads. Real project
-  IO, real one-shot LoRA training, real predict (reusing the classic app's ML
-  core), real experiment tracking. `import torch`/the ML core *do* run now —
-  always lazily, only inside the controller method that needs them, never at
-  a shared module's top level (see "Ground rules" below).
+- **Home, Projects, Models & Train, Dashboard, Segment, and Assistant are
+  all real** — backed by real controllers (`project_controller.py`,
+  `train_controller.py`, `dashboard_controller.py`, `segment_controller.py`,
+  `assistant_controller.py`) and real persisted data (`studio/project.py`'s
+  `ProjectStore`; `assistant_controller.py`'s own small settings file), not
+  `demo.py` reads. Real project IO, real one-shot LoRA training, real
+  predict (reusing the classic app's ML core), real experiment tracking, a
+  real diagnostic/chat Assistant (offline, Ollama, or any OpenAI-compatible
+  Custom API) that can act on the Segment tab, not just talk about it.
+  `import torch`/the ML core *do* run now — always lazily, only inside the
+  controller method that needs them, never at a shared module's top level
+  (see "Ground rules" below).
 - **Segment is our own canvas + layer model** (`studio/canvas.py` +
   `studio/layer_model.py`) — still explicitly **not** embedded napari; see
   `ARCHITECTURE.md`'s "Segment tab specifically".
-- Still static/unwired: the Assistant drawer, Logs console, and ⌘K command
-  palette (Phase 2's remaining items) — check `BACKLOG.md` before assuming
-  otherwise, and update it (+ this file) the moment that changes.
+- **Assistant is a real chat** (`studio/assistant_panel.py` +
+  `assistant_controller.py`) — own chat UI (bubbles, streaming, an
+  Apply/Apply-&-re-run card), a "Model" settings accordion to pick
+  Offline/Ollama/Custom API, and a real hook into the active Segment
+  session so a suggestion actually changes `ProjectSettings` and can
+  re-run — not just a static `demo.CHAT` transcript. Its own auto-tune
+  predict→score→adjust loop (the classic app's Assistant has one) is a
+  known, deliberate gap, not wired yet — see `BACKLOG.md`.
+- Still static/unwired: the Logs console and ⌘K command palette (Phase 2's
+  remaining items) — check `BACKLOG.md` before assuming otherwise, and
+  update it (+ this file) the moment that changes.
 - The window is still **frameless with rounded corners** and our own dark
   title bar (own traffic lights, native move/resize), so it reads as a
   product, not a Qt window — that part of the original design skeleton work

@@ -140,12 +140,45 @@ When you finish a tab: log it in `CHANGELOG.md`, tick it here, update
 - **Tasks:** ☑ train form → training entry · ☑ progress/run state · ☑ model
   registry list · ☑ select-into-workspace · ☑ tests.
 
-### Assistant tab · M
+### Assistant tab · M · ✅ done (2026-07-18)
 - **Goal:** the diagnostic Assistant as a real chat.
-- **Work:** back the drawer with `napari_app/advisor.py` (offline diagnostics +
-  optional Ollama); make "apply" chips actually change settings & re-run.
-- **Tasks:** ☐ advisor bridge · ☐ streaming replies · ☐ apply-suggestion
-  actions · ☐ tests.
+- **Work:** `studio/assistant_controller.py` (new, Qt-free) — settings
+  (`AssistantSettings`/`AssistantSettingsStore`, one small JSON file under
+  the shared storage dir) + `AssistantController`, dispatching one chat turn
+  to whichever of three backends is configured: **offline** (the
+  deterministic engine, `napari_app.advisor.diagnose`, reused read-only,
+  always available), **Ollama** (`napari_app.advisor`'s existing bridge,
+  reused verbatim — model discovery/pull/"bake an agent"/streaming chat),
+  and **Custom API** (new — any OpenAI-compatible `/chat/completions`
+  endpoint, local or remote, with or without a key; Studio's own bridge,
+  stdlib `urllib` + SSE, since bring-your-own-model is capability the
+  classic app doesn't have). `studio/workspace.py` gained the narrow
+  `assistant_context()`/`apply_assistant_changes()`/`rerun_predict()` hook
+  the drawer reads/acts through (mirrors the classic app's
+  `PredictWidget.last_context()`/`apply_params()`/`rerun()` contract) — the
+  actual cross-tab wiring: a diagnosis/chat suggestion applied in the
+  Assistant writes straight into the active project's `ProjectSettings`,
+  marks the quality preset "Custom", persists, and can trigger a real
+  re-run, all reflected back in the Segment tab's own inspector immediately.
+  `studio/assistant_panel.py` (new) — Studio's own chat UI (`ChatView`:
+  bubbles/streaming/typing-indicator/empty-state; `ChangeCard`: Apply/Apply
+  & re-run) and `AssistantDrawer` itself (moved out of `overlays.py`
+  entirely): header + a collapsed-by-default "Model" accordion (backend
+  picker, per-backend fields, live status, Ollama's download catalogue +
+  "Tune for CellSeg1") + the chat (the hero surface) + Diagnose/input/Send.
+  Every model/network call runs on a guarded background thread (the
+  established `_safe_emit_*` + `sip.delete()`-tested pattern) so a slow or
+  unreachable backend never freezes the UI.
+- **Known, deliberate gap:** the auto-tune predict→score→adjust loop the
+  classic app's Assistant also has (trajectory chart/table/CSV export/
+  parameter importance) is *not* wired here — a large, separate sub-feature
+  on top of an already-large change; left as a follow-up rather than
+  half-built (`napari_app/core/tuning_loop.py` is Qt-free and reusable
+  as-is whenever this is picked up).
+- **Tasks:** ☑ advisor bridge (offline + Ollama, reused; Custom API, new) ·
+  ☑ streaming replies · ☑ apply-suggestion actions (incl. real cross-tab
+  re-run) · ☑ local model selection (Ollama discovery/pull/bake-agent,
+  Custom API base-url/key/model + test-connection) · ☑ tests.
 
 ### Dashboard tab · M · ✅ done (2026-07-09)
 - **Goal:** real experiment tracking.

@@ -26,10 +26,12 @@ This folder is Studio's own doc set — separate from the repo-wide `docs/`
 ## TL;DR for a new contributor
 
 - **Every screen from the mockup is reproduced in native Qt** and most are now
-  **real**: Home, Projects, Models & Train, Dashboard, and Segment (own
-  canvas + layer model, real predict/GT/batch/benchmark) all run on live
-  data/logic, not `demo.py`. Only the Assistant drawer, Logs console, and ⌘K
-  palette are still static — check `BACKLOG.md` before assuming otherwise.
+  **real**: Home, Projects, Models & Train, Dashboard, Segment (own
+  canvas + layer model, real predict/GT/batch/benchmark), and Assistant (a
+  real chat — offline diagnostics, Ollama, or any OpenAI-compatible Custom
+  API — that can act on the Segment tab) all run on live data/logic, not
+  `demo.py`. Only the Logs console and ⌘K palette are still static — check
+  `BACKLOG.md` before assuming otherwise.
 - The goal now is to **wire the remaining overlays one at a time**, each
   keeping the exact look while gaining real behaviour, tracked in `BACKLOG.md`.
 - The **classic app is untouched** (`napari_app/main.py`, `run_napari.sh`, the

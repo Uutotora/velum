@@ -9,8 +9,6 @@ only data source.
 Written for the product's actual audience: microscopists and cell biologists,
 not ML engineers (see the repo-root ``AGENTS.md``). Every claim here matches
 what's actually wired today (see ``docstudio/BACKLOG.md`` for what isn't yet).
-No Assistant content by design — that tab isn't wired yet, and documenting a
-diagnostic chat that doesn't answer anything would be worse than no article.
 
 Each ``Article.blocks`` entry is ``(kind, payload)``, rendered generically by
 ``guide_screen._render_block``:
@@ -88,7 +86,11 @@ FAQ: list[FAQItem] = [
         "Does my image data ever leave this computer?",
         "No. Studio runs entirely on this device — models, images and results "
         "all stay in the local **data_store** folder (see “This device” on "
-        "Home). Nothing is uploaded anywhere."),
+        "Home). Nothing is uploaded anywhere, **unless** you deliberately "
+        "connect the Assistant to a remote Custom API — see “The Assistant.” "
+        "Even then, only numeric summaries (cell count, size stats, current "
+        "settings) and your typed questions are sent — never the image or "
+        "mask pixels themselves."),
     FAQItem(
         "Which engine should I use?",
         "**Cellpose-SAM** if you just want a fast, zero-shot answer on a "
@@ -320,6 +322,51 @@ ARTICLES: list[Article] = [
             ]),
             ("callout", "The active project's name and engine follow you "
                         "here from Home or Projects — nothing to re-pick."),
+        ],
+    ),
+    Article(
+        id="assistant", title="The Assistant", category="Segmenting",
+        icon="assistant",
+        summary="Diagnose a result and apply fixes with one click — with an optional local or connected model.",
+        keywords=["assistant", "chat", "diagnose", "ollama", "custom api",
+                  "openai", "tune", "apply", "suggest"],
+        blocks=[
+            ("p", "The Assistant turns a segmentation result into concrete, "
+                  "one-click fixes. Open it from the sidebar's **Assistant** "
+                  "row, or Home's “Ask the Assistant” card.",),
+            ("h", "Diagnose — always available, no model needed"),
+            ("p", "Click the magnifier button next to the input box. A "
+                  "deterministic, offline engine inspects the current image "
+                  "and mask — no cells detected, likely over- or "
+                  "under-segmentation, low contrast, small cells at a low "
+                  "resolution — and posts one card per finding with an "
+                  "**Apply** or **Apply & re-run** button that writes "
+                  "straight into this project's settings."),
+            ("h", "Chat — three backends"),
+            ("p", "Type a question and the Assistant answers using whichever "
+                  "backend is selected in the collapsed **Model** section "
+                  "above the chat:"),
+            ("ul", [
+                "**Offline** — the same diagnostic engine as the magnifier "
+                "button, phrased as an answer. Always on, nothing to set up.",
+                "**Ollama** — a locally-installed language model "
+                "(ollama.com) sees your current image/mask statistics and "
+                "settings and can reason about them conversationally. "
+                "Download one of the recommended models right from this "
+                "panel, or “Tune for CellSeg1” to bake a version pinned to "
+                "this app's domain.",
+                "**Custom API** — any OpenAI-compatible server: your own "
+                "hosted model, a local one like LM Studio or vLLM, or a "
+                "cloud provider. Set a base URL, an optional API key, and a "
+                "model id, then “Test connection.”",
+            ]),
+            ("p", "Whichever backend replies, a suggested parameter change "
+                  "still becomes an Apply / Apply & re-run card — the chat "
+                  "is a second way to reach the same one-click fixes, not a "
+                  "separate feature."),
+            ("callout", "Offline and Ollama never send anything off this "
+                        "device. Custom API is the one exception — see the "
+                        "FAQ for exactly what that sends."),
         ],
     ),
     Article(

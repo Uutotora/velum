@@ -48,8 +48,31 @@ workspace.py      WorkspaceScreen — the signature Segment screen (Images|
                   Layers/layer-controls/Segment-settings/Run/Results (incl.
                   GT & evaluation/batch/benchmark) all live, not demo.
 extra_screens.py  ModelsScreen (train), DashboardScreen (charts + runs table).
-overlays.py       AssistantDrawer, LogsConsole, CommandPalette, Toast (now has
-                  a real announce() used by project creation, not just static).
+assistant_controller.py  AssistantController (Qt-free): settings
+                  (AssistantSettings/AssistantSettingsStore, one small JSON
+                  file) + backend-dispatching send_async() across three
+                  interchangeable chat backends — offline (the deterministic
+                  diagnostic engine, napari_app.advisor.diagnose, reused
+                  read-only), Ollama (napari_app.advisor's existing bridge,
+                  reused verbatim), and Custom API (this module's OWN
+                  OpenAI-compatible urllib+SSE bridge — new capability, not
+                  reused from napari_app, since the classic app has no
+                  bring-your-own-endpoint story).
+assistant_panel.py  Studio's own chat UI (own Qt, no import of
+                  napari_app.widgets.chat/assistant_widget): ChatView
+                  (bubbles/streaming/typing-indicator/empty-state),
+                  ChangeCard (Apply/Apply & re-run), and AssistantDrawer
+                  itself — header + a collapsed "Model" settings accordion
+                  (backend picker/per-backend fields/live status/Ollama
+                  catalogue) + the chat + Diagnose/input/Send. Talks to the
+                  Segment WorkspaceScreen only through its narrow
+                  assistant_context()/apply_assistant_changes()/
+                  rerun_predict() hook (see workspace.py's "Assistant
+                  integration" section) — the cross-tab wiring.
+overlays.py       LogsConsole, CommandPalette, Toast (Toast now has a real
+                  announce() used by project creation, not just static). The
+                  Assistant drawer used to live here too — it outgrew this
+                  file and moved to assistant_panel.py above.
 icons.py          Studio's OWN icon set (from the mockup) — self-contained.
 motion.py         Small motion helpers: fade_in (screen switches),
                   install_hover_lift (animated shadow "elevation" on hover —
