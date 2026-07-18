@@ -259,8 +259,14 @@ class HomeScreen(QWidget):
 
         tip = QFrame()
         tip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Qualified -- see components.EngineChip's comment. This is the
+        # exact instance docstudio/CHANGELOG.md's 2026-07-08 entry already
+        # found and screenshotted ("the identical double-box on the Tip
+        # card's text") but deliberately left unfixed as out of scope for
+        # that change -- fixed now.
+        tip.setObjectName("HomeTip")
         tip.setStyleSheet(
-            f"background:{t['primary_weak']}; border:1px solid {t['primary_line']}; border-radius:14px;")
+            f"QFrame#HomeTip{{background:{t['primary_weak']}; border:1px solid {t['primary_line']}; border-radius:14px;}}")
         tl = QVBoxLayout(tip)
         tl.setContentsMargins(16, 16, 16, 16)
         tl.setSpacing(6)
@@ -293,7 +299,14 @@ class HomeScreen(QWidget):
         c = QFrame()
         c.setFixedWidth(300)
         c.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        c.setStyleSheet(f"background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;")
+        # Qualified -- see components.EngineChip's comment. This is the
+        # exact instance docstudio/CHANGELOG.md's 2026-07-08 entry already
+        # found and screenshotted ("HomeScreen._card()... carry this same
+        # *latent, currently invisible* bug") but deliberately left unfixed
+        # as out of scope for that change -- fixed now. Shared objectName
+        # across both callers ("Resources", "This device").
+        c.setObjectName("HomeCard")
+        c.setStyleSheet(f"QFrame#HomeCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}")
         soft_shadow(c, 14, 20, 3)
         v = QVBoxLayout(c)
         v.setContentsMargins(16, 16, 16, 16)

@@ -399,11 +399,18 @@ class WorkspaceScreen(QWidget):
             status, dcol = "new", t["border_strong"]
         row = QFrame()
         row.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Qualified -- see components.EngineChip's comment. The filename/
+        # status-dot QLabels below don't set their own `border`, so an
+        # unscoped QFrame{...} rule here leaked this row's border onto
+        # them. Shared objectName across every row (one per project image)
+        # -- QSS matches by name, not uniqueness, same as e.g. screens.py's
+        # "PCard"/"RRow".
+        row.setObjectName("ImageRow")
         row.setStyleSheet(
-            (f"QFrame{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:8px;}}"
+            (f"QFrame#ImageRow{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:8px;}}"
              if sel else
-             f"QFrame{{background:transparent; border:1px solid transparent; border-radius:8px;}}"
-             f"QFrame:hover{{background:{t['surface2']};}}"))
+             f"QFrame#ImageRow{{background:transparent; border:1px solid transparent; border-radius:8px;}}"
+             f"QFrame#ImageRow:hover{{background:{t['surface2']};}}"))
         lay = QHBoxLayout(row)
         lay.setContentsMargins(8, 6, 8, 6)
         lay.setSpacing(10)
@@ -555,11 +562,13 @@ class WorkspaceScreen(QWidget):
         sel = i == self._layers.selected_index
         row = QFrame()
         row.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Qualified -- see _image_row's comment (same pattern, same fix).
+        row.setObjectName("LayerRow")
         row.setStyleSheet(
-            (f"QFrame{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:8px;}}"
+            (f"QFrame#LayerRow{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:8px;}}"
              if sel else
-             f"QFrame{{background:transparent; border:1px solid transparent; border-radius:8px;}}"
-             f"QFrame:hover{{background:{t['surface2']};}}"))
+             f"QFrame#LayerRow{{background:transparent; border:1px solid transparent; border-radius:8px;}}"
+             f"QFrame#LayerRow:hover{{background:{t['surface2']};}}"))
         lay = QHBoxLayout(row)
         lay.setContentsMargins(8, 7, 8, 7)
         lay.setSpacing(9)
@@ -981,7 +990,15 @@ class WorkspaceScreen(QWidget):
         self._legend = legend
 
         tools = QFrame(vp)
-        tools.setStyleSheet(f"background:rgba(21,24,30,0.86); border:1px solid {t['border']}; border-radius:11px;")
+        # Qualified -- see components.EngineChip's comment. Every current
+        # child here is a self-styled IconButton (protected regardless),
+        # but an unscoped rule is a silent trap for whoever adds a plain
+        # label here later -- fixed the same way regardless of current
+        # visible impact.
+        tools.setObjectName("FloatingToolStrip")
+        tools.setStyleSheet(
+            f"QFrame#FloatingToolStrip{{background:rgba(21,24,30,0.86); border:1px solid {t['border']};"
+            f" border-radius:11px;}}")
         tl = QVBoxLayout(tools)
         tl.setContentsMargins(5, 5, 5, 5)
         tl.setSpacing(4)
@@ -995,7 +1012,11 @@ class WorkspaceScreen(QWidget):
         self._vp_tools = tools
 
         vbar = QFrame(vp)
-        vbar.setStyleSheet(f"background:rgba(21,24,30,0.86); border:1px solid {t['border']}; border-radius:11px;")
+        # Qualified -- see `tools` above, same reasoning.
+        vbar.setObjectName("ViewerBar")
+        vbar.setStyleSheet(
+            f"QFrame#ViewerBar{{background:rgba(21,24,30,0.86); border:1px solid {t['border']};"
+            f" border-radius:11px;}}")
         vl = QHBoxLayout(vbar)
         vl.setContentsMargins(5, 5, 5, 5)
         vl.setSpacing(3)

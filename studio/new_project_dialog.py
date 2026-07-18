@@ -80,7 +80,13 @@ class _DropZone(QFrame):
         t = self._t
         border = t["primary_line"] if active else t["border_strong"]
         bg = t["primary_weak"] if active else "transparent"
-        self.setStyleSheet(f"QFrame{{background:{bg}; border:1px dashed {border}; border-radius:14px;}}")
+        # Qualified -- see components.EngineChip's comment. The icon/
+        # heading/subtitle QLabels above don't set their own `border`, so
+        # an unscoped QFrame{...} rule here leaks this zone's dashed border
+        # onto each of them individually.
+        self.setObjectName("DropZone")
+        self.setStyleSheet(
+            f"QFrame#DropZone{{background:{bg}; border:1px dashed {border}; border-radius:14px;}}")
 
     def _browse(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
@@ -130,8 +136,17 @@ class NewProjectDialog(QWidget):
         panel = QFrame()
         panel.setFixedWidth(480)
         panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Qualified -- see components.EngineChip's comment. This is the
+        # *whole dialog body's* container: fully unqualified here means
+        # every QLabel anywhere inside the panel (every field caption, step
+        # title, hint) inherits this panel's own border-radius-14 box
+        # around just its own text -- the most visible instance of this bug
+        # class found in the whole app, since it silently double-boxes
+        # nearly every line of text in the New Project flow.
+        panel.setObjectName("NewProjectPanel")
         panel.setStyleSheet(
-            f"background:{t['surface']}; border:1px solid {t['border_strong']}; border-radius:14px;")
+            f"QFrame#NewProjectPanel{{background:{t['surface']}; border:1px solid {t['border_strong']};"
+            f" border-radius:14px;}}")
         soft_shadow(panel, 28, 40, 10)
         v = QVBoxLayout(panel)
         v.setContentsMargins(0, 0, 0, 0)

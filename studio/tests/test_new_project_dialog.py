@@ -167,3 +167,52 @@ def test_click_outside_panel_closes(dialog):
                         QtNS.KeyboardModifier.NoModifier)
     dialog.mousePressEvent(event)
     assert dialog.isHidden()
+
+
+# ── rendering regression ─────────────────────────────────────────────────────
+def test_panel_border_does_not_leak_onto_every_label_in_the_dialog(app):
+    """_build_panel()'s own setStyleSheet() used to be fully unqualified
+    ("background:...;border:...;", no selector at all) on the QFrame that
+    wraps the *entire* dialog body (header, every step's fields, footer) --
+    QWidget has an app-wide type-selector for `background` (always safely
+    overridden), but nothing overrides plain `border` for a bare QLabel, so
+    the panel's own border leaked onto every label() anywhere inside it,
+    each repainting its own small bordered box around just its own text.
+    The most visible instance of this rendering-bug family found in the
+    whole app -- confirmed by an actual offscreen screenshot showing every
+    line of the New Project flow individually double-boxed before the fix.
+    Only reproduces with the real app-wide stylesheet applied and real
+    elapsed time for layout/paint to settle -- see the drawer's identical
+    test in test_assistant_panel.py for why.
+    """
+    import time as _time
+    from studio import theme
+
+    t = theme.DARK
+    app.setStyleSheet(theme.build_qss(t))
+    try:
+        parent = QWidget()
+        parent.resize(900, 700)
+        store = ProjectStore("/tmp/_unused_panel_border_test_store")
+        dlg = npd.NewProjectDialog(parent, t, store, on_created=lambda pid: None)
+        dlg.open()
+        dlg._set_name("Panel Border Test")
+        dlg._go_next()   # step 1 (Import images) has several visible labels
+        parent.show()
+        for _ in range(30):
+            app.processEvents()
+            _time.sleep(0.01)
+
+        img = dlg.grab().toImage()
+        border = t["border_strong"]   # the panel's own actual border colour
+        from PyQt6.QtWidgets import QLabel
+        labels = [w for w in dlg.findChildren(QLabel) if w.text().strip() and w.isVisible()]
+        assert len(labels) >= 3
+        offenders = []
+        for lbl in labels:
+            pt = lbl.mapTo(dlg, lbl.rect().topLeft())
+            if img.pixelColor(pt.x(), pt.y()).name() == border:
+                offenders.append(lbl.text())
+        assert not offenders, f"individually boxed labels: {offenders}"
+    finally:
+        app.setStyleSheet("")   # process-wide QApplication singleton -- don't leak

@@ -154,8 +154,16 @@ class EngineChip(QFrame):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        # Qualified by objectName, not a bare "QFrame{...}" type selector --
+        # QLabel (this chip's own text label) and the swatch dot below are
+        # both QFrame subclasses too, so an unscoped rule here would also
+        # match them and leak this chip's border onto each (neither sets
+        # its own `border`, only background) -- the same rendering-bug
+        # family docstudio/CHANGELOG.md's 2026-07-08 "Guide & Docs" entry
+        # and the 2026-07-18 Assistant entries already found repeatedly.
+        self.setObjectName("EngineChip")
         self.setStyleSheet(
-            f"QFrame{{background:{bg}; border:1px solid {border}; border-radius:999px;}}")
+            f"QFrame#EngineChip{{background:{bg}; border:1px solid {border}; border-radius:999px;}}")
         row = QHBoxLayout(self)
         row.setContentsMargins(9, 3, 9, 3)
         row.setSpacing(6)
@@ -231,9 +239,13 @@ class SelectBox(QFrame):
         self._on_select = on_select
         self._on_click = on_click
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Qualified -- see EngineChip's comment. This box's value/chevron
+        # labels don't set their own `border`, so an unscoped QFrame{...}
+        # rule here leaks this box's own border onto them too.
+        self.setObjectName("SelectBox")
         self.setStyleSheet(
-            f"QFrame{{background:{t['inset']}; border:1px solid {t['border']};"
-            f"border-radius:8px;}} QFrame:hover{{border-color:{t['border_strong']};}}")
+            f"QFrame#SelectBox{{background:{t['inset']}; border:1px solid {t['border']};"
+            f"border-radius:8px;}} QFrame#SelectBox:hover{{border-color:{t['border_strong']};}}")
         row = QHBoxLayout(self)
         row.setContentsMargins(11, 7, 10, 7)
         row.setSpacing(7)
@@ -400,8 +412,11 @@ class Stepper(QFrame):
         self._decimals = decimals
         self._suffix = suffix
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Qualified -- see EngineChip's comment. The value QLabel doesn't
+        # set its own `border`.
+        self.setObjectName("Stepper")
         self.setStyleSheet(
-            f"QFrame{{background:{t['inset']}; border:1px solid {t['border']}; border-radius:8px;}}")
+            f"QFrame#Stepper{{background:{t['inset']}; border:1px solid {t['border']}; border-radius:8px;}}")
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
@@ -464,8 +479,14 @@ class SegControl(QFrame):
         self._btns: list[QToolButton] = []
         self._icon_names: list[Optional[str]] = list(icons_) if icons_ else [None] * len(options)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Qualified -- see EngineChip's comment. No QLabel/QFrame children
+        # today (every segment is a self-styled QToolButton), so this isn't
+        # currently visibly broken, but a bare QFrame{...} type selector is
+        # a silent trap for whoever adds one later -- fixed the same way
+        # regardless of current visible impact.
+        self.setObjectName("SegControl")
         self.setStyleSheet(
-            f"QFrame{{background:{t['inset'] if compact else t['surface2']};"
+            f"QFrame#SegControl{{background:{t['inset'] if compact else t['surface2']};"
             f"border:1px solid {t['border']}; border-radius:8px;}}")
         row = QHBoxLayout(self)
         row.setContentsMargins(2, 2, 2, 2)
@@ -516,8 +537,15 @@ class StatTile(QFrame):
     def __init__(self, value: str, unit: str, caption: str, t: dict, ok: bool = False):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Qualified -- see EngineChip's comment. Both the value and caption
+        # QLabels below set only `color`/font properties, never their own
+        # `border`, so an unscoped QFrame{...} rule here leaked this tile's
+        # border onto each of them individually -- likely visible whenever
+        # StatTile has actually been on screen (Segment results, Dashboard),
+        # not just theoretical.
+        self.setObjectName("StatTile")
         self.setStyleSheet(
-            f"QFrame{{background:{t['inset']}; border:1px solid {t['border']}; border-radius:10px;}}")
+            f"QFrame#StatTile{{background:{t['inset']}; border:1px solid {t['border']}; border-radius:10px;}}")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 10, 8, 10)
         lay.setSpacing(2)

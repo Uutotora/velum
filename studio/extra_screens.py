@@ -186,7 +186,11 @@ class ModelsScreen(QWidget):
         t = self._t
         card = QFrame()
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        card.setStyleSheet(f"background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;")
+        # Qualified -- see components.EngineChip's comment. label() never
+        # sets its own `border`, so every label() call below this card was
+        # individually double-boxed by this unqualified rule.
+        card.setObjectName("TrainCard")
+        card.setStyleSheet(f"QFrame#TrainCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}")
         soft_shadow(card, 14, 22, 3)
         cv = QVBoxLayout(card)
         cv.setContentsMargins(20, 20, 20, 20)
@@ -336,9 +340,16 @@ class ModelsScreen(QWidget):
         row = QFrame()
         row.setCursor(Qt.CursorShape.PointingHandCursor)
         row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Qualified -- see components.EngineChip's comment. The badge icon
+        # and the F1 QLabel below both set only `background`/`color`, never
+        # `border`, so an unscoped QFrame{...} rule here leaked this row's
+        # border onto each individually. Shared objectName across every
+        # row (one per trained model) -- QSS matches by name, not
+        # uniqueness, same as e.g. screens.py's "PCard"/"RRow".
+        row.setObjectName("ModelRow")
         row.setStyleSheet(
-            f"QFrame{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:10px;}}"
-            f"QFrame:hover{{border-color:{t['border_strong']};}}")
+            f"QFrame#ModelRow{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:10px;}}"
+            f"QFrame#ModelRow:hover{{border-color:{t['border_strong']};}}")
         lay = QHBoxLayout(row)
         lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(13)
@@ -382,7 +393,8 @@ class ModelsScreen(QWidget):
         card = QFrame()
         card.setFixedWidth(320)
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        card.setStyleSheet(f"background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;")
+        card.setObjectName("RecentRunsCard")   # qualified -- see _train_card's comment
+        card.setStyleSheet(f"QFrame#RecentRunsCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}")
         soft_shadow(card, 14, 20, 3)
         cv = QVBoxLayout(card)
         cv.setContentsMargins(16, 16, 16, 16)
@@ -415,7 +427,8 @@ class ModelsScreen(QWidget):
         tip = QFrame()
         tip.setFixedWidth(320)
         tip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        tip.setStyleSheet(f"background:{t['primary_weak']}; border:1px solid {t['primary_line']}; border-radius:14px;")
+        tip.setObjectName("TrainTip")   # qualified -- see _train_card's comment
+        tip.setStyleSheet(f"QFrame#TrainTip{{background:{t['primary_weak']}; border:1px solid {t['primary_line']}; border-radius:14px;}}")
         tv = QVBoxLayout(tip)
         tv.setContentsMargins(16, 16, 16, 16)
         tv.setSpacing(6)
@@ -581,7 +594,10 @@ class DashboardScreen(QWidget):
         t = self._t
         card = QFrame()
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        card.setStyleSheet(f"background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;")
+        # Qualified -- see ModelsScreen._train_card's comment. Shared
+        # objectName across both callers (loss chart + F1 chart).
+        card.setObjectName("ChartCard")
+        card.setStyleSheet(f"QFrame#ChartCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}")
         soft_shadow(card, 14, 20, 3)
         v = QVBoxLayout(card)
         v.setContentsMargins(18, 16, 18, 16)
@@ -596,7 +612,8 @@ class DashboardScreen(QWidget):
         t = self._t
         card = QFrame()
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        card.setStyleSheet(f"background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;")
+        card.setObjectName("RunsTableCard")   # qualified -- see _train_card's comment
+        card.setStyleSheet(f"QFrame#RunsTableCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}")
         soft_shadow(card, 14, 20, 3)
         v = QVBoxLayout(card)
         v.setContentsMargins(18, 16, 18, 8)

@@ -5,6 +5,93 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-18 — Project-wide audit: the same border-cascade bug, everywhere else
+
+Asked directly, after the Assistant fixes: go through and fix this same
+problem across the whole product, not just the one screen it was reported
+on. It was a good instinct — the audit found the *worst* instance of this
+bug family yet, in one of the most-used flows in the app, that no prior
+session's reactive one-screenshot-at-a-time fixing had ever reached.
+
+**Method**: `grep -n "border:1px solid\|border:1px dashed\|border:2px solid" studio/*.py`
+for every literal visible-border declaration (not just background — the
+specific property this bug family leaks), then read the surrounding ~10-15
+lines of *each* to check two things: is the selector qualified
+(`#ObjectName{...}` or `QType#ObjectName{...}`, not a bare `QFrame{...}`
+type selector or no selector at all), and does the widget actually have
+`QLabel`/`QFrame`-family children that could inherit the leak (a leaf
+widget with no children is safe regardless of its own selector). An
+earlier automated regex pass was tried first and abandoned after it missed
+the single worst finding below — manual review of every real match was
+slower but the only reliable way to be sure. 16 real, previously-unscoped
+instances found and fixed across 5 files, all following the exact
+`#ObjectName{...}`-qualification pattern already established for
+`AssistantDrawer`/`ChangeCard`:
+
+- **`studio/new_project_dialog.py`'s `_build_panel()` — the single worst
+  instance found anywhere in the app.** The `QFrame` wrapping the *entire*
+  New Project dialog body (header, every step's fields, the footer) had a
+  fully unqualified `background:...;border:...;` rule — meaning every
+  `label()` call anywhere inside the whole 3-step flow inherited the
+  panel's own border and repainted its own small box around just its own
+  text. Confirmed by an actual offscreen screenshot: "Import images," "Step
+  2 of 3," "Drag & drop images here," the format list, the footer hint —
+  every single line of text in the dialog individually double-boxed.
+  Reduced to a clean, correct render by qualifying one selector.
+- **`studio/components.py`**: `EngineChip`, `SelectBox`, `Stepper`,
+  `SegControl` (defensive — no affected children today, but the same trap
+  for whoever adds one), `StatTile`. `StatTile` in particular is used
+  throughout Segment's Results pane and Dashboard's stat rows — this had
+  likely been double-boxing every stat value/caption pair since the tab
+  shipped.
+- **`studio/screens.py`**: `HomeScreen`'s "Tip — press ⌘K anywhere" callout
+  and its generic `_card()` helper (used for "Resources" and "This
+  device"). **Both are the exact instances this file's own 2026-07-08 entry
+  already found and screenshotted** ("the identical double-box on the Tip
+  card's text… HomeScreen._card()/its Tip callout still use the unscoped
+  form and carry this same latent, currently invisible bug") **and
+  deliberately left unfixed as out of scope at the time.** Now in scope,
+  now fixed.
+- **`studio/extra_screens.py`**: `ModelsScreen._train_card`, its
+  `_aside()` "Recent training runs" card, its "One-shot fine-tuning" tip,
+  and `DashboardScreen._chart_card` (shared by the loss and F1 charts) and
+  `_runs_table`. Between these and `screens.py`, this means Home, Models &
+  Train, and Dashboard were *all* silently double-boxing card text.
+- **`studio/workspace.py`**: `_image_row` and `_layer_row` (both per-row,
+  shared `objectName` across every instance — the same convention
+  `screens.py`'s `"PCard"`/`"RRow"` already use, confirmed safe: QSS
+  matches by name, not uniqueness) plus the floating tool strip and viewer
+  bar panels (defensive — currently-safe children, same reasoning as
+  `SegControl`).
+
+**Not touched, checked and confirmed safe**: every bare-type-selector or
+unqualified rule on an actual *leaf* widget (a colour swatch, a status
+dot, an icon-only button, `Slider`/`ChangeCard`'s drag knobs, `Chip` —
+which is itself a `QLabel` with no children) — these have no descendants to
+leak onto regardless of selector qualification, so "fix everything blindly"
+would have been performative rather than useful. `studio/guide_screen.py`
+was already fully qualified from its own 2026-07-08 fix and needed nothing
+further.
+
+Verified: 1 new pixel-level regression test for the worst finding
+(`test_new_project_dialog.py`), confirmed to *fail* against the reverted
+code first (correctly named all five individually-boxed labels) before
+being trusted, then confirmed to pass with the fix restored — the same
+discipline the previous entry called for. The other 15 fixes were verified
+by direct offscreen screenshot comparison (real app-wide QSS applied, real
+elapsed settle time) rather than one dedicated pixel-test each, given the
+volume — Home, Projects, Models & Train, Dashboard, the New Project dialog,
+and a constructed Segment workspace with real image rows were all
+screenshotted before and after and visually confirmed clean; a dedicated
+static-analysis "no bare type selectors" test was considered and skipped as
+its own separate undertaking with real false-positive risk, not a quick
+addition. Full `studio/tests` green (551, up from 550), full repo `tests/`
+green, the throwaway python3.10-venv light-group check green.
+
+**Not verified:** how any of this reads on a real, non-offscreen display.
+
+---
+
 ## 2026-07-18 — Follow-up #2: the fill fix wasn't the actual bug, found it for real
 
 The previous entry's `Accordion` `fill` fix was real but wasn't what the
