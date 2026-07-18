@@ -42,12 +42,14 @@ from studio.components import Sidebar
 from studio.project_controller import ProjectController
 from studio.train_controller import TrainController
 from studio.segment_controller import SegmentController
+from studio.assistant_controller import AssistantController
 from studio.new_project_dialog import NewProjectDialog
 from studio.screens import HomeScreen, ProjectsScreen
 from studio.workspace import WorkspaceScreen
 from studio.extra_screens import ModelsScreen, DashboardScreen
 from studio.guide_screen import GuideScreen
-from studio.overlays import AssistantDrawer, LogsConsole, CommandPalette, Toast
+from studio.assistant_panel import AssistantDrawer
+from studio.overlays import LogsConsole, CommandPalette, Toast
 from studio.window_chrome import (
     TitleBar, install_corner_grips, layout_corner_grips,
 )
@@ -88,12 +90,17 @@ class StudioWindow(QMainWindow):
     def __init__(self, theme_name: str = "dark",
                  project_controller: Optional[ProjectController] = None,
                  train_controller: Optional[TrainController] = None,
-                 segment_controller: Optional[SegmentController] = None):
+                 segment_controller: Optional[SegmentController] = None,
+                 assistant_controller: Optional[AssistantController] = None):
         super().__init__()
         self._theme_name = theme_name
         self._projects = project_controller or ProjectController()
         self._train = train_controller or TrainController()
         self._segment = segment_controller or SegmentController()
+        # Set once, not rebuilt in _build_ui() -- survives toggle_theme()'s
+        # full UI teardown/rebuild the same way _projects/_train/_segment do,
+        # so a chosen backend/model/API key isn't lost on a theme switch.
+        self._assistant_controller = assistant_controller or AssistantController()
         self._screens: dict[str, QWidget] = {}
         self.setWindowTitle("CellSeg1 Studio")
         self.resize(1320, 860)
@@ -164,7 +171,8 @@ class StudioWindow(QMainWindow):
         outer.addWidget(body, 1)
 
         # overlays (children of the window, positioned on resize / open)
-        self._assistant = AssistantDrawer(self, t)
+        self._assistant = AssistantDrawer(
+            self, t, self._assistant_controller, self._screens["workspace"])
         self._logs = LogsConsole(self, t)
         self._palette = CommandPalette(self, t)
         self._overlays = [self._assistant, self._logs, self._palette, self._toast,

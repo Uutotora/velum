@@ -1,18 +1,18 @@
-"""CellSeg1 Studio — overlay surfaces: Assistant drawer, Logs console,
-command palette, toast (static design skeleton).
+"""CellSeg1 Studio — overlay surfaces: Logs console, command palette, toast.
 
 Created as children of the main window; the window shows/hides and positions
-them. No logic — the chat, logs and palette render ``demo`` content; buttons
-give visual feedback only.
+them. Logs and the palette still render static ``demo`` content — buttons
+give visual feedback only. The Assistant drawer (real chat, real diagnostics,
+real model management) has grown into its own module,
+``studio/assistant_panel.py`` — imported from there, not here; see its
+docstring.
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
-
-from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
-    QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QLineEdit, QToolButton,
-    QScrollArea, QSizePolicy,
+    QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QLineEdit,
+    QScrollArea,
 )
 
 from studio import icons
@@ -27,124 +27,6 @@ def _scroll(inner: QWidget) -> QScrollArea:
     sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     sa.setWidget(inner)
     return sa
-
-
-class AssistantDrawer(QFrame):
-    """Right-side chat drawer."""
-
-    WIDTH = 360
-
-    def __init__(self, parent: QWidget, t: dict):
-        super().__init__(parent)
-        self._t = t
-        self.setFixedWidth(self.WIDTH)
-        self.setStyleSheet(f"background:{t['surface']}; border-left:1px solid {t['border']};")
-        v = QVBoxLayout(self)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(0)
-        v.addWidget(self._header())
-        v.addWidget(_scroll(self._chat()), 1)
-        v.addWidget(self._input())
-        self.hide()
-
-    def _header(self) -> QWidget:
-        t = self._t
-        h = QWidget()
-        row = QHBoxLayout(h)
-        row.setContentsMargins(15, 13, 12, 13)
-        row.setSpacing(10)
-        spark = QLabel()
-        spark.setFixedSize(23, 23)
-        spark.setPixmap(icons.pixmap("spark", "#fff", 13))
-        spark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        spark.setStyleSheet(
-            "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            f"stop:0 {t['primary']}, stop:1 {t['signal']}); border-radius:7px;")
-        row.addWidget(spark)
-        row.addWidget(label("Assistant", 14, t["text"], 600))
-        row.addStretch(1)
-        row.addWidget(IconButton("close", t, 27, "Close", self.hide))
-        wrap = QWidget()
-        wl = QVBoxLayout(wrap)
-        wl.setContentsMargins(0, 0, 0, 0)
-        wl.setSpacing(0)
-        wl.addWidget(h)
-        wl.addWidget(hline(t))
-        return wrap
-
-    def _chat(self) -> QWidget:
-        t = self._t
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(16, 16, 16, 16)
-        v.setSpacing(13)
-        for role, text, chips in demo.CHAT:
-            if role == "user":
-                bubble = QLabel(text)
-                bubble.setWordWrap(True)
-                bubble.setStyleSheet(
-                    f"background:{t['primary']}; color:#fff; padding:9px 13px;"
-                    f"border-radius:14px 14px 4px 14px; font-size:13px;")
-                bubble.setMaximumWidth(300)
-                v.addWidget(bubble, alignment=Qt.AlignmentFlag.AlignRight)
-            else:
-                col = QVBoxLayout()
-                col.setSpacing(9)
-                bubble = QLabel(text)
-                bubble.setWordWrap(True)
-                bubble.setStyleSheet(
-                    f"background:{t['surface2']}; color:{t['text']}; border:1px solid {t['border']};"
-                    f"padding:11px 13px; border-radius:14px 14px 14px 4px; font-size:13px;")
-                bubble.setMaximumWidth(320)
-                col.addWidget(bubble)
-                if chips:
-                    chiprow = QHBoxLayout()
-                    chiprow.setSpacing(7)
-                    for c in chips:
-                        b = QToolButton()
-                        b.setText(c)
-                        b.setCursor(Qt.CursorShape.PointingHandCursor)
-                        b.setStyleSheet(
-                            f"QToolButton{{color:{t['primary']}; background:{t['primary_weak']};"
-                            f"border:1px solid {t['primary_line']}; border-radius:999px;"
-                            f"padding:4px 10px; font-size:11.5px; font-weight:600;}}"
-                            f"QToolButton:hover{{background:{t['primary']}; color:#fff;}}")
-                        chiprow.addWidget(b)
-                    chiprow.addStretch(1)
-                    col.addLayout(chiprow)
-                cw = QWidget()
-                cw.setLayout(col)
-                v.addWidget(cw, alignment=Qt.AlignmentFlag.AlignLeft)
-        v.addStretch(1)
-        return w
-
-    def _input(self) -> QWidget:
-        t = self._t
-        w = QWidget()
-        row = QHBoxLayout(w)
-        row.setContentsMargins(12, 12, 12, 12)
-        row.setSpacing(8)
-        inp = QLineEdit()
-        inp.setPlaceholderText("Ask about this image, settings or results…")
-        row.addWidget(inp, 1)
-        send = QToolButton()
-        send.setFixedSize(34, 34)
-        send.setCursor(Qt.CursorShape.PointingHandCursor)
-        send.setIcon(icons.icon("send", "#fff", 16))
-        send.setStyleSheet(f"QToolButton{{background:{t['primary']}; border:none; border-radius:9px;}}")
-        row.addWidget(send)
-        wrap = QWidget()
-        wl = QVBoxLayout(wrap)
-        wl.setContentsMargins(0, 0, 0, 0)
-        wl.setSpacing(0)
-        wl.addWidget(hline(t))
-        wl.addWidget(w)
-        return wrap
-
-    def place(self):
-        p = self.parentWidget()
-        if p:
-            self.setGeometry(p.width() - self.WIDTH, 42, self.WIDTH, p.height() - 42)
 
 
 class LogsConsole(QFrame):

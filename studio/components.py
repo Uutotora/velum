@@ -568,6 +568,7 @@ class Accordion(QFrame):
         super().__init__()
         self._t = t
         self._open = open_
+        self._caps = caps
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
             f"QFrame#Acc{{background:{t['inset']}; border:1px solid {t['border']}; border-radius:10px;}}")
@@ -592,6 +593,7 @@ class Accordion(QFrame):
         # panel. caps=False already wraps instead (a deliberately different,
         # already-working pattern for full-sentence titles) and is untouched.
         title_lb = _ElidingLabel(title.upper()) if caps else QLabel(title)
+        self._title_lb = title_lb
         if not caps:
             title_lb.setWordWrap(True)
         if caps:
@@ -624,6 +626,11 @@ class Accordion(QFrame):
 
     def add_layout(self, l):
         self._body_lay.addLayout(l)
+
+    def set_title(self, title: str) -> None:
+        """Update the header title live (e.g. "Model · Ollama" as the
+        backend changes) without rebuilding the whole accordion."""
+        self._title_lb.setText(title.upper() if self._caps else title)
 
     def toggle(self):
         self._open = not self._open
