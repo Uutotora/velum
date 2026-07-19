@@ -237,9 +237,78 @@ When you finish a tab: log it in `CHANGELOG.md`, tick it here, update
   assistant/app) · ☑ tests (bus/handler pure-logic + console Qt-wiring,
   incl. a cross-thread emit and a `sip.delete()` unsubscribe regression).
 
-### Command palette (⌘K) · M
+### Command palette (⌘K) · M · ✅ done (2026-07-20) ← the last P1 item
 - **Goal:** every action reachable — run, switch engine, apply preset, export,
   navigate. Fuzzy search over a real action registry.
+- **Work:** `studio/command_registry.py` (new, Qt-free) — a `Command`
+  dataclass (label/section/icon/hint/keywords/handler/enabled) and a real
+  Sublime-Text/VS-Code-style fuzzy matcher: a literal contiguous substring
+  always outranks a scattered subsequence match (two separate score bands,
+  not one flat heuristic — a flat one ranked "Switch engine" above "Run
+  segmentation" for the query "seg" purely because it hit more word-boundary
+  starts, caught by a test before it shipped). Empty query returns commands
+  grouped by section (the mockup's "ACTIONS"/"EXPORT" caps-label browsing
+  view); a real query returns a flat, score-ranked list with no section
+  headers, matching how every real command palette actually behaves once
+  you start typing. `studio/overlays.py`'s `CommandPalette` is rebuilt on
+  top: a bounded, scrollable results list (`_PaletteRow`, cheap to
+  reselect-in-place so arrow keys never rebuild or lose scroll position),
+  full keyboard navigation (Up/Down/Enter via an event filter on the search
+  box, wrapping top↔bottom), click-to-run, disabled rows shown dimmed
+  rather than hidden (discoverability — "this is possible, but not right
+  now"), and running a command is deferred one event-loop tick
+  (`QTimer.singleShot(0, ...)`) before hiding the palette and calling the
+  handler — the same established sipBadCatcherResult-safe pattern
+  `workspace.py`'s 2026-07-10 fix already uses, since a handler can itself
+  rebuild the very screen the palette sits over. `get_commands` is called
+  fresh every time the palette opens (`studio/app.py`'s new
+  `StudioWindow._build_commands()`), so availability always reflects the
+  live project/theme/backend/running state, never a stale snapshot.
+- **The registry itself** spans every tab, each command wired through the
+  same narrow, testable public-alias convention the Assistant integration
+  already established (`workspace.py`/`extra_screens.py`/
+  `assistant_panel.py`'s own "Command palette integration" sections) —
+  nothing invented, every command is a real, already-existing action:
+  **Navigate** (derived straight from the sidebar's own `_NAV` list, so it
+  can never drift out of sync, plus Guide & Docs; shortcut hints shown for
+  Assistant/Logs); **Segment** (Run/Batch/Benchmark/Save/Export, "Switch
+  engine → X" and "Apply preset → X" generated per project — only the
+  *other* available engines/presets are offered, using the short
+  `ENGINE_LABELS` display name, not `list_available_engines()`'s long
+  descriptive combo-box text); **Models & Train** (Start/Stop — mutually
+  gated on `is_training()` — Import); **Dashboard** (Open in Aim);
+  **Assistant** (Diagnose, "Switch backend → X" — both open the drawer
+  first so the effect is visible immediately); **Appearance** (names the
+  concrete destination theme, not a generic toggle); **Projects** (New
+  Project…, Open Sample); **Help** (mirrors Home's own Resources links
+  exactly, GitHub included).
+- **Also added: ⌘L / Ctrl+L opens (or closes) Logs** — the shortcut Logs
+  itself never got when it shipped (2026-07-19), mirroring the exact
+  ⌘K/⌘T dual-binding pattern. Documented in the Guide's keyboard-shortcuts
+  article and the in-app shortcuts list (now 4 real bindings, was 3).
+- **A real, pre-existing rendering bug found and fixed along the way**
+  (not introduced by this work, just never caught): `CommandPalette`'s
+  input-row and footer wrappers were plain `QWidget()`s, which inherit the
+  app-wide `QWidget{background:<bg>}` rule and paint an opaque
+  `<bg>`-coloured rectangle over their own children — invisible against the
+  near-identical dark tones of the dark theme but a glaring flat-grey patch
+  in light theme, the same "bare `QWidget()` wrapper" family
+  `CHANGELOG.md`'s 2026-07-09 entry already found and fixed elsewhere
+  (Guide screen). `CommandPalette` was still 100% static content at the
+  time and never got a real screenshot pass, so this instance went
+  undiscovered until the palette actually rendered live content — caught by
+  an actual light-theme screenshot, not by any test passing; a pixel-level
+  regression test now pins it (confirmed to fail against the reverted code
+  first).
+- **Tasks:** ☑ action registry + fuzzy search (Qt-free) · ☑ live, scrollable
+  results list · ☑ keyboard navigation (Up/Down/Enter, wrapping) · ☑
+  click-to-run · ☑ disabled/dim rows · ☑ every tab's real actions wired ·
+  ☑ ⌘L for Logs · ☑ tests (registry pure-logic + palette Qt-wiring, incl.
+  a deferred-execution regression and the bare-widget pixel regression).
+
+**P1 is now fully done** — every P1 backlog item (Projects, New-project
+dialog, Segment, Models & Train, Assistant, Dashboard, Logs, Command
+palette) is real. See `ROADMAP.md`.
 
 ---
 

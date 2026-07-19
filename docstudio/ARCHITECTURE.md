@@ -74,12 +74,25 @@ log_bus.py        LogBus (a bounded, thread-safe ring buffer of LogRecord)
                   — the Studio-wide log stream every tab's real operational
                   log lines (segment/train/assistant/app) feed and
                   overlays.LogsConsole reads live. Qt-free (stdlib only).
+command_registry.py  Command (label/section/icon/hint/keywords/handler/
+                  enabled) + a real Sublime/VS-Code-style fuzzy matcher
+                  (a contiguous substring always outranks a scattered
+                  subsequence match — two score bands, not one flat
+                  heuristic) + group_by_section for the empty-query
+                  browsing view. Qt-free (stdlib only) — the palette's
+                  *content* (which commands exist, whether each is enabled
+                  right now) is built by app.py's StudioWindow.
+                  _build_commands(), which has the real controller/screen
+                  references this module deliberately doesn't.
 overlays.py       LogsConsole (real, live — see log_bus.py above: level
                   filter, text search, autoscroll, clear, export),
-                  CommandPalette (still static demo content), Toast (a real
-                  announce() used by project creation, not just static).
-                  The Assistant drawer used to live here too — it outgrew
-                  this file and moved to assistant_panel.py above.
+                  CommandPalette (real, live — see command_registry.py
+                  above: fuzzy search, full keyboard navigation, disabled/
+                  dim rows, click-to-run, a bounded scrollable results
+                  list), Toast (a real announce() used by project creation,
+                  not just static). The Assistant drawer used to live here
+                  too — it outgrew this file and moved to
+                  assistant_panel.py above.
 icons.py          Studio's OWN icon set (from the mockup) — self-contained.
 motion.py         Small motion helpers: fade_in (screen switches),
                   install_hover_lift (animated shadow "elevation" on hover —

@@ -1620,6 +1620,43 @@ class WorkspaceScreen(QWidget):
         second copy of that logic."""
         self._start_predict()
 
+    # ── Command palette integration ─────────────────────────────────────────
+    # A narrow set of real actions the ⌘K palette can trigger from outside —
+    # same principle as the Assistant integration above (own UI, act through
+    # a small public surface, never poke at a private attribute from another
+    # module). Each one is a thin alias over an already-self-guarding
+    # private method (toasts on a bad precondition, no-ops if already
+    # running) rather than a second copy of that logic.
+    def run_batch(self) -> None:
+        self._start_batch()
+
+    def run_benchmark(self) -> None:
+        self._start_benchmark()
+
+    def save_masks(self) -> None:
+        self._save_masks()
+
+    def export_measurements(self) -> None:
+        self._export_csv()
+
+    def switch_engine(self, key: str) -> None:
+        """Set the active engine by registry key — the palette already has
+        the key straight from ``segment_controller.list_available_engines()``,
+        so this is ``_on_engine_select``'s same two-line effect without the
+        label-string round-trip that method needs for its own combo box."""
+        if self._project is None:
+            return
+        self._project.settings.engine = key
+        self._rebuild_segment_pane()
+
+    def apply_preset(self, name: str) -> None:
+        """Apply a quality preset by name (Fast/Balanced/Accurate) — the
+        palette's equivalent of picking it from the SegControl."""
+        if self._project is None or name not in QUALITY_PRESET_NAMES:
+            return
+        apply_quality_preset(self._project.settings, name)
+        self._rebuild_segment_pane()
+
     # ── Results pane ─────────────────────────────────────────────────────────
     def _rebuild_results_pane(self) -> None:
         layout = self._results_container_layout

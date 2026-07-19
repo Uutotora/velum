@@ -21,12 +21,13 @@ settings, our own tools — and reuse the classic app's proven **functionality**
 (the ML core: engines, predict, train, morphometry) by wrapping it under the
 new design, so we don't rewrite the hard parts from scratch.
 
-## The current phase: **Phase 2 — Differentiation** (see `ROADMAP.md`)
+## The current phase: **Phase 2 — Differentiation, done** (see `ROADMAP.md`)
 
 Studio started as a pure design skeleton (Phase 0: every mockup screen
 reproduced in native PyQt6, no logic, `demo.py` static content everywhere)
-and was then wired tab by tab. As of 2026-07-19, Phase 0 and Phase 1 are both
-**done**, and Phase 2 is nearly done:
+and was then wired tab by tab. As of 2026-07-20, Phase 0, Phase 1, and Phase 2
+are all **done** — every P1 backlog item is real, nothing is left rendering
+`demo.py` content:
 
 - **Home, Projects, Models & Train, Dashboard, Segment, and Assistant are
   all real** — backed by real controllers (`project_controller.py`,
@@ -56,9 +57,15 @@ and was then wired tab by tab. As of 2026-07-19, Phase 0 and Phase 1 are both
   training, the Assistant, app startup/crashes — reused via a real stdlib
   `logging` bridge, not a static transcript), with a level filter, text
   search, autoscroll, clear, and export to a file.
-- Still static/unwired: the ⌘K command palette (Phase 2's one remaining
-  item) — check `BACKLOG.md` before assuming otherwise, and update it
-  (+ this file) the moment that changes.
+- **The ⌘K command palette is real** (`studio/command_registry.py` +
+  `overlays.CommandPalette`) — a genuine Spotlight-style action registry
+  spanning every tab (run/switch engine/apply preset/export/train/navigate/
+  diagnose/toggle theme/…), fuzzy search, full keyboard navigation, not a
+  static 6-item list. `⌘L` also now opens Logs, alongside the existing
+  `⌘K`/`⌘T`.
+- Nothing left in Phase 2 is static — check `BACKLOG.md`'s P2 ("polish &
+  platform") for what's next, and update it (+ this file) the moment that
+  changes.
 - The window is still **frameless with rounded corners** and our own dark
   title bar (own traffic lights, native move/resize), so it reads as a
   product, not a Qt window — that part of the original design skeleton work

@@ -14,23 +14,28 @@ root `AGENTS.md`.
 
 ## Where things stand
 
-Studio is past the design-skeleton phase. As of 2026-07-19, Home, Projects,
-Models & Train, Dashboard, **Segment** (the flagship — own canvas, own layer
-model, real predict/GT/batch/benchmark), **Assistant** (a real chat —
-offline diagnostics, Ollama, or any OpenAI-compatible Custom API — that can
-act on the Segment tab), and **Logs** (a real, live stream from
-`studio/log_bus.py` — every tab's actual operational log lines, a level
-filter, text search, autoscroll, export) are all wired to real data and
-logic — see `ROADMAP.md` (Phase 0 + 1 done, Phase 2 nearly done) and
-`BACKLOG.md` for exactly what's real vs. still static. Still unwired: the
-⌘K command palette. It launches with `bash run_studio.sh`. The classic app
-(`napari_app/main.py`, `cellseg1`) is separate and untouched.
+Studio is past the design-skeleton phase — **P1 is fully done** as of
+2026-07-20 (`ROADMAP.md`: Phase 0, 1, and 2 all ✅). Home, Projects, Models &
+Train, Dashboard, **Segment** (the flagship — own canvas, own layer model,
+real predict/GT/batch/benchmark), **Assistant** (a real chat — offline
+diagnostics, Ollama, or any OpenAI-compatible Custom API — that can act on
+the Segment tab), **Logs** (a real, live stream from `studio/log_bus.py` —
+every tab's actual operational log lines, a level filter, text search,
+autoscroll, export), and the **⌘K command palette** (a real Spotlight-style
+action registry, `studio/command_registry.py` — fuzzy search, full keyboard
+navigation, spans every tab; `⌘L` also opens Logs) are all wired to real
+data and logic — nothing left renders `demo.py` content. `BACKLOG.md`'s P2
+("polish & platform") is next: theme persistence, onboarding/empty states,
+a Settings screen, native rounded corners, packaging. It launches with
+`bash run_studio.sh`. The classic app (`napari_app/main.py`, `cellseg1`) is
+separate and untouched.
 
 ## Your job
 
-Take **one tab** from `docstudio/BACKLOG.md` and wire it end to end — real data
-and interactions — **without changing how it looks**. Follow "How to wire a
-tab" in `ARCHITECTURE.md`:
+Take **one item** from `docstudio/BACKLOG.md`'s P2 list and build it end to
+end — real data and interactions — **without changing how the rest of the
+app looks**. Most of P2 isn't "wire a tab to already-real data" (that part's
+done) so much as new platform capability — adapt the same discipline:
 
 1. Reintroduce/adopt the data it needs (e.g. the `Project` data model is in git
    history: `git log --oneline -- studio/project.py`).
@@ -77,11 +82,11 @@ tab" in `ARCHITECTURE.md`:
   branches: ["**"]`), so a PR buys nothing here and only piles up. Keep local
   and remote in sync; never leave work only local.
 - Test before committing: `QT_QPA_PLATFORM=offscreen <python> -m pytest studio/tests -q`.
-- Log the tab in `docstudio/CHANGELOG.md`, tick it in `docstudio/BACKLOG.md`.
+- Log it in `docstudio/CHANGELOG.md`, tick it in `docstudio/BACKLOG.md`.
 
 ## Environment
 
 - Python with all deps: `/opt/homebrew/Caskroom/miniforge/base/envs/cellseg1/bin/python`.
 - Run the app: `bash run_studio.sh`  (pure PyQt6 — no GPU/napari/torch needed).
 
-Start by telling me which tab you're taking and your task list for it.
+Start by telling me which P2 item you're taking and your task list for it.

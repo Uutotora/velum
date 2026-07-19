@@ -5,6 +5,146 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-20 — Command palette (⌘K) wired end to end — P1 is now fully done
+
+The ⌘K palette goes from a hard-coded 6-item `demo.PALETTE` list (no search,
+no keyboard navigation, clicking did nothing) to Studio's real Spotlight-style
+action registry — the actual last P1 item (the previous entry's own title
+called Logs "the last P1 backlog item," which was already inaccurate at the
+time — this one genuinely is). Also added: ⌘L for Logs, which shipped
+without its own shortcut yesterday.
+
+**New `studio/command_registry.py`** (Qt-free, stdlib only):
+- `Command` — label/section/icon/hint/keywords/handler/enabled. Plain data
+  plus a callable, no Qt, so the whole registry is unit-testable headless.
+- A real fuzzy matcher, Sublime-Text/VS-Code style. The first version
+  scored every match on one flat "reward contiguous runs + word-boundary
+  starts" heuristic — and a test caught it ranking "Switch engine → SAM 2"
+  *above* "Run segmentation" for the query "seg", purely because "seg" as a
+  scattered subsequence across "switch"/"engine" happened to hit two
+  word-boundary starts, while "seg" as a literal substring of "segmentation"
+  only hit one. Fixed with two separate score bands instead: any real
+  contiguous substring match (scored in the thousands, with a prefix bonus
+  and a tighter-label bonus) always outranks any scattered subsequence match
+  (scored in the tens, a genuine but weaker fallback signal for
+  abbreviation-style queries like "rseg"). `search()` returns commands
+  grouped by section for an empty query (the mockup's own "ACTIONS"/
+  "EXPORT" caps-label browsing view) and a flat, score-ranked list with no
+  section headers the moment there's a real query — real command palettes
+  (VS Code, Spotlight) drop headers exactly at that point, since ranking
+  *across* sections is the whole point of searching.
+
+**`studio/overlays.py`'s `CommandPalette`** rebuilt on top: `get_commands`
+is called fresh every time the palette opens, so availability always
+reflects the live project/theme/backend/running state, never a stale
+snapshot from whenever the app launched. A bounded `QScrollArea` (420px
+max) replaces the flat list the 6-item static version got away with; each
+row is now a small `_PaletteRow` that restyles itself in place
+(`set_selected()`) rather than the whole list rebuilding on every arrow
+key — instant, and never loses scroll position mid-navigation. Full
+keyboard control via an event filter on the search box (Up/Down move the
+selection and wrap top↔bottom, Enter activates), plus real click-to-run.
+Disabled commands render dimmed rather than being hidden entirely —
+discoverability ("this is possible, just not right now") over silence.
+Running a command is deferred one event-loop tick
+(`QTimer.singleShot(0, ...)`) before hiding the palette and calling the
+handler: the same established sipBadCatcherResult-safe pattern
+`workspace.py`'s 2026-07-10 fix already uses for the identical shaped
+hazard, since a handler can itself rebuild the very screen the palette
+sits over (switching tabs, switching engines) while the click/key dispatch
+that triggered it is still on the call stack.
+
+**The registry spans every tab**, each command wired through the same
+narrow, testable public-alias convention the Assistant integration already
+established — nothing invented, every command is a real, already-existing
+action reached one hop away:
+- `workspace.py` gained `switch_engine(key)`/`apply_preset(name)`/
+  `run_batch()`/`run_benchmark()`/`save_masks()`/`export_measurements()` —
+  thin aliases over already-self-guarding private methods (mirrors
+  `rerun_predict()`'s existing shape exactly).
+- `extra_screens.py`'s `ModelsScreen` gained `start_training()`/
+  `stop_training()`/`import_model()`; `DashboardScreen` gained
+  `open_in_aim()`.
+- `assistant_panel.py`'s `AssistantDrawer` gained `run_diagnose()`/
+  `switch_backend(idx)` (the latter reuses `_backend_seg._select()` exactly
+  as this module's own tests already did, rather than a second copy of
+  `_on_backend_changed`'s effect).
+- `studio/app.py`'s new `StudioWindow._build_commands()` assembles all of
+  it: **Navigate** (derived straight from the sidebar's own `_NAV` list —
+  can never drift out of sync — plus Guide & Docs; real shortcut hints for
+  Assistant/Logs), **Segment** (Run/Batch/Benchmark/Save/Export always
+  listed but greyed out without a project; "Switch engine → X"/"Apply
+  preset → X" generated per project, only the *other* available
+  engines/presets), **Models & Train** (Start/Stop mutually gated on
+  `is_training()`, Import), **Dashboard** (Open in Aim), **Assistant**
+  (Diagnose, "Switch backend → X" — both open the drawer first so the
+  effect is visible immediately, not silently behind a closed panel),
+  **Appearance** (names the concrete destination theme), **Projects** (New
+  Project…, Open Sample), **Help** (mirrors Home's own Resources links
+  exactly, GitHub included).
+- A real bug caught before it shipped: the engine-switch commands
+  initially used `list_available_engines()`'s own label — the long,
+  descriptive combo-box text ("Cellpose-SAM (zero-shot, generalist)"), not
+  the short display name the mockup's own "Switch engine → SAM 2" style
+  uses. Fixed to use `ENGINE_LABELS` (`project.py`) instead, caught while
+  writing the end-to-end test, not by a test passing.
+
+**⌘L / Ctrl+L opens (or closes) Logs** — the one shortcut Logs itself
+didn't get when it shipped yesterday, mirroring the exact ⌘K/⌘T
+dual-binding pattern (`QShortcut` on both key sequences). Documented in the
+Guide's keyboard-shortcuts article and the in-app shortcuts list (now 4
+real bindings, was 3).
+
+**A real, pre-existing rendering bug found and fixed, not introduced by
+this work** — caught by an actual light-theme screenshot, not by any test
+passing: `CommandPalette`'s input-row and footer wrappers (`inp_wrap`,
+`foot`) were plain `QWidget()`s, which inherit the app-wide
+`QWidget{background:<bg>}` rule and paint an opaque `<bg>`-coloured
+rectangle over their own children. Invisible in dark theme (`bg`/`surface`
+are both near-black), a glaring flat-grey patch in light theme (`bg`
+`#f4f6f8` vs. this panel's own `surface` `#ffffff`) — the exact "bare
+`QWidget()` wrapper" bug family the 2026-07-09 entry below already found
+and fixed in the Guide screen's table/shortcut rows. `CommandPalette` was
+still 100% static content at the time of that audit and never got a real
+screenshot pass, so this instance sat undiscovered until the palette
+finally rendered live content here. Fixed with `bare_widget()`, the
+existing helper built for exactly this. A pixel-level regression test
+pins it — confirmed to *fail* against the reverted code first (sampling a
+`QWidget()` wrapper's own margin corner, not its centre, which falls on a
+child widget instead and would pass either way — the same trap
+`test_guide_screen.py`'s own row-fill test already documents).
+
+**Verified:** 653 `studio/tests` (up from 604), all green, incl. a new
+`test_command_registry.py` (11 pure-logic cases: the substring-vs-scattered
+ranking fix above, keyword matching, section grouping) and 15 new
+`CommandPalette` cases in `test_overlays.py` (grouped-vs-flat rendering,
+arrow-key wrap, Enter/click execution, disabled commands no-op, the
+deferred-hide regression, `open()` re-fetching commands fresh, the
+bare-widget pixel regression) — plus new alias tests in
+`test_workspace.py`/`test_extra_screens.py`/`test_assistant_panel.py` and
+18 new end-to-end cases in `test_app_wiring.py` covering the real registry
+construction (per-section content, enabled/disabled state under every
+condition above) and three full real-palette runs: typing a query and
+switching tabs, typing and toggling the theme, and — the flagship proof —
+typing "run segmentation" and watching a real prediction happen through
+the exact production call chain, not a mocked handler standing in for the
+palette's own wiring. Full repo `tests/` (445, classic app untouched) also
+green. The throwaway-venv light-group check (`python3.10`) green: 592
+passed, 22 skipped, no torch/napari/PyQt6 pulled in. Full `studio/tests`
+re-run clean after every fix. Real offscreen screenshots in both themes
+(the empty-query grouped view with live Navigate/Segment sections and real
+⌘T/⌘L hints, a live "switch engine" search narrowing to one ranked
+result, and the light-theme shot that caught the bare-widget bug above)
+all visually confirmed correct.
+
+**Not verified:** how this reads on a real, non-offscreen display, incl.
+felt keyboard-navigation responsiveness; real Ollama/Custom-API server
+interaction (unchanged from prior entries); real model/GPU inference (the
+flagship palette→predict test uses the same monkeypatched engine seam this
+suite always has).
+
+---
+
 ## 2026-07-19 — Logs tab wired end to end — the last P1 backlog item, done
 
 The Logs console goes from a hard-coded `demo.LOGS` transcript (7 static

@@ -58,15 +58,16 @@ def test_step_actions_only_reference_real_nav_keys_special_actions_or_real_artic
                         f"{article.id}: unknown step action {step.action!r}")
 
 
-def test_shortcuts_cover_the_three_real_key_bindings():
+def test_shortcuts_cover_the_four_real_key_bindings():
     # studio/app.py wires exactly: Ctrl+K/Meta+K -> palette, Ctrl+T/Meta+T ->
-    # Assistant, Escape -> close. Every addition there should get a matching
-    # row here.
+    # Assistant, Ctrl+L/Meta+L -> Logs, Escape -> close. Every addition there
+    # should get a matching row here.
     all_keys = [k for sc in gc.SHORTCUTS for k in sc.keys]
     assert any("K" in k for k in all_keys)
     assert any("T" in k for k in all_keys)
+    assert any("L" in k for k in all_keys)
     assert any("Esc" in k for k in all_keys)
-    assert len(gc.SHORTCUTS) == 3
+    assert len(gc.SHORTCUTS) == 4
 
 
 def test_faq_has_several_entries_with_real_content():

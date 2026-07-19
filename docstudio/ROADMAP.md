@@ -16,16 +16,18 @@ Layers panel, real predict + Results reusing the classic app's ML core. You
 can create a project, load images, segment, and read results — end to end,
 in the new UI.
 
-### Phase 2 — Differentiation (current)
+### Phase 2 — Differentiation ✅ (2026-07-20)
 Models & Train and Dashboard are wired (2026-07-09); Assistant is wired
 (2026-07-18) — a real chat (offline diagnostics, Ollama, or any
 OpenAI-compatible Custom API) that can act on the Segment tab. Logs is
 wired (2026-07-19) — a real, live stream from `studio/log_bus.py`, the
-studio-wide log every tab's controllers and the app shell itself feed.
-Still open: the ⌘K command palette. The feature that makes Studio more than
-a viewer.
+studio-wide log every tab's controllers and the app shell itself feed. The
+⌘K command palette is wired (2026-07-20) — a real Spotlight-style action
+registry (`studio/command_registry.py`) spanning every tab, fuzzy search,
+full keyboard navigation; `⌘L` also now opens Logs. **P1 is fully done** —
+every backlog item that makes Studio more than a viewer is real.
 
-### Phase 3 — Polish & platform
+### Phase 3 — Polish & platform (current)
 Live theme repaint + persistence, Guide/onboarding, Settings, native rounded
 corners, and a packaged `.app`. The 1.0 finish.
 

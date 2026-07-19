@@ -2,12 +2,13 @@
 
 This app is a faithful, native-Qt reproduction of the north-star mockup, with
 functionality wired back tab by tab (see ``docstudio/`` — OVERVIEW,
-ARCHITECTURE, BACKLOG, AGENT_PROMPT). Home/Projects are backed by a real
-``ProjectController``; Models & Train and Dashboard are backed by a real
-``TrainController``/``DashboardController`` (one-shot LoRA training, a real
-trained-models list, real experiment history). Segment (the workspace canvas)
-still renders static ``demo`` content pending its own tab — the flagship item
-left in ``docstudio/BACKLOG.md``. No napari, no torch — those are reused
+ARCHITECTURE, BACKLOG, AGENT_PROMPT). Every screen is real: Home/Projects
+(``ProjectController``), Segment (``SegmentController`` + our own canvas/layer
+model), Models & Train/Dashboard (``TrainController``/``DashboardController``),
+Assistant (``AssistantController`` + a real chat), Logs (``studio.log_bus`` —
+a live stream, not a static transcript), and the ⌘K command palette
+(``studio.command_registry`` — ``_build_commands`` below is the real, live
+action registry every tab feeds). No napari, no torch — those are reused
 lazily, only inside the tab that needs them.
 
 ``StudioWindow`` owns a frameless, rounded window with our own dark title bar,
@@ -39,14 +40,16 @@ from PyQt6.QtWidgets import (
 )
 
 from studio import theme
+from studio import screens
 from studio.components import Sidebar
 from studio.project_controller import ProjectController
 from studio.train_controller import TrainController
 from studio.segment_controller import SegmentController
-from studio.assistant_controller import AssistantController
+from studio.assistant_controller import AssistantController, BACKENDS, BACKEND_LABELS
 from studio.new_project_dialog import NewProjectDialog
 from studio.screens import HomeScreen, ProjectsScreen
-from studio.workspace import WorkspaceScreen
+from studio.workspace import WorkspaceScreen, QUALITY_PRESET_NAMES
+from studio.project import ENGINE_LABELS
 from studio.extra_screens import ModelsScreen, DashboardScreen
 from studio.guide_screen import GuideScreen
 from studio.assistant_panel import AssistantDrawer
@@ -55,6 +58,7 @@ from studio.window_chrome import (
     TitleBar, install_corner_grips, layout_corner_grips,
 )
 from studio.log_bus import install_handler
+from studio.command_registry import Command
 
 _log = logging.getLogger("studio.app")
 
@@ -126,6 +130,8 @@ class StudioWindow(QMainWindow):
         QShortcut(QKeySequence("Meta+K"), self, activated=self._toggle_palette)
         QShortcut(QKeySequence("Ctrl+T"), self, activated=lambda: self.navigate("assistant"))
         QShortcut(QKeySequence("Meta+T"), self, activated=lambda: self.navigate("assistant"))
+        QShortcut(QKeySequence("Ctrl+L"), self, activated=lambda: self.navigate("logs"))
+        QShortcut(QKeySequence("Meta+L"), self, activated=lambda: self.navigate("logs"))
         QShortcut(QKeySequence("Escape"), self, activated=self._close_overlays)
 
     @property
@@ -186,7 +192,7 @@ class StudioWindow(QMainWindow):
         self._assistant = AssistantDrawer(
             self, t, self._assistant_controller, self._screens["workspace"])
         self._logs = LogsConsole(self, t)
-        self._palette = CommandPalette(self, t)
+        self._palette = CommandPalette(self, t, get_commands=self._build_commands)
         self._overlays = [self._assistant, self._logs, self._palette, self._toast,
                            self._new_project_dialog]
 
@@ -264,6 +270,150 @@ class StudioWindow(QMainWindow):
             self._palette.hide()
         else:
             self._palette.open()
+
+    # ── ⌘K command registry ─────────────────────────────────────────────────
+    # Built fresh every time the palette opens (CommandPalette's own
+    # get_commands callback) so availability always reflects the current
+    # project/theme/backend/running-state — never a stale snapshot. Every
+    # command is a real, already-existing action reached through the same
+    # narrow public aliases the Assistant integration established
+    # (workspace.py/extra_screens.py/assistant_panel.py's "Command palette
+    # integration" sections) — nothing here is invented for the palette.
+    def _build_commands(self) -> list[Command]:
+        ws = self._screens["workspace"]
+        train_screen = self._screens["train"]
+        dashboard_screen = self._screens["dashboard"]
+        project = self._projects.get_active()
+
+        commands: list[Command] = []
+
+        # Navigate -- derived straight from _NAV so it can never drift from
+        # the sidebar's own list; "assistant"/"logs" already toggle their
+        # drawer via navigate() itself, same as a sidebar click would.
+        _SHORTCUT_HINTS = {"assistant": "⌘T", "logs": "⌘L"}
+        for key, icon_name, nav_label, _section in _NAV:
+            commands.append(Command(
+                id=f"nav.{key}", label=f"Go to {nav_label}", section="Navigate",
+                icon=icon_name, hint=_SHORTCUT_HINTS.get(key, ""),
+                handler=lambda k=key: self.navigate(k)))
+        commands.append(Command(
+            id="nav.guide", label="Go to Guide & Docs", section="Navigate",
+            icon="guide", handler=lambda: self.navigate("guide")))
+
+        # Segment -- Run/Save/Export are always listed (greyed out with no
+        # active project) since _start_predict/_save_masks/etc. already
+        # guard every precondition with a toast; "Switch engine"/"Apply
+        # preset" only make sense (and are only generated) with a project
+        # to compare "current" against.
+        commands += [
+            Command(id="segment.run", label="Run segmentation", section="Segment",
+                    icon="run", handler=ws.rerun_predict, enabled=project is not None),
+            Command(id="segment.batch", label="Run batch prediction", section="Segment",
+                    icon="batch", handler=ws.run_batch, enabled=project is not None),
+            Command(id="segment.benchmark", label="Run benchmark vs. ground truth", section="Segment",
+                    icon="chart", handler=ws.run_benchmark, enabled=project is not None),
+            Command(id="segment.save", label="Save masks", section="Segment",
+                    icon="save", handler=ws.save_masks, enabled=project is not None),
+            Command(id="segment.export_csv", label="Export measurements → CSV", section="Segment",
+                    icon="csv", handler=ws.export_measurements, enabled=project is not None),
+        ]
+        if project is not None:
+            current_engine = project.settings.engine
+            for key, _elabel, available in self._segment.list_available_engines():
+                if available and key != current_engine:
+                    # list_available_engines()'s own label is the long,
+                    # descriptive combo-box text ("Cellpose-SAM (zero-shot,
+                    # generalist)") -- ENGINE_LABELS (project.py) is the
+                    # short display name the mockup itself uses ("Switch
+                    # engine → SAM 2"), a much better fit for one palette row.
+                    short_label = ENGINE_LABELS.get(key, key)
+                    keywords = "zstack timelapse z-stack" if key == "sam2" else ""
+                    commands.append(Command(
+                        id=f"segment.engine.{key}", label=f"Switch engine → {short_label}",
+                        section="Segment", icon="workspace", keywords=keywords,
+                        handler=lambda k=key: ws.switch_engine(k)))
+            current_preset = project.settings.quality_preset
+            for name in QUALITY_PRESET_NAMES:
+                if name != current_preset:
+                    commands.append(Command(
+                        id=f"segment.preset.{name}", label=f"Apply preset → {name}",
+                        section="Segment", icon="chart",
+                        handler=lambda n=name: ws.apply_preset(n)))
+
+        # Models & Train
+        is_training = self._train.is_training()
+        commands += [
+            Command(id="train.start", label="Start training", section="Models & Train",
+                    icon="models", handler=train_screen.start_training, enabled=not is_training),
+            Command(id="train.stop", label="Stop training", section="Models & Train",
+                    icon="close", handler=train_screen.stop_training, enabled=is_training),
+            Command(id="train.import", label="Import a trained model…", section="Models & Train",
+                    icon="folder", handler=train_screen.import_model),
+        ]
+
+        # Dashboard
+        commands.append(Command(
+            id="dashboard.aim", label="Open in Aim", section="Dashboard",
+            icon="chart", handler=dashboard_screen.open_in_aim))
+
+        # Assistant -- opens the drawer, then acts, so the effect is visible
+        # immediately rather than happening silently behind a closed panel.
+        commands.append(Command(
+            id="assistant.diagnose", label="Diagnose current result", section="Assistant",
+            icon="diagnose", handler=self._cmd_diagnose))
+        current_backend = self._assistant_controller.settings.backend
+        for idx, key in enumerate(BACKENDS):
+            if key != current_backend:
+                commands.append(Command(
+                    id=f"assistant.backend.{key}",
+                    label=f"Switch Assistant backend → {BACKEND_LABELS[key]}",
+                    section="Assistant", icon="assistant",
+                    handler=lambda i=idx: self._cmd_switch_backend(i)))
+
+        # Appearance -- names the concrete destination, not a generic toggle,
+        # the same "Switch engine → X" naming convention as Segment above.
+        other_theme = "Light" if self._theme_name == "dark" else "Dark"
+        commands.append(Command(
+            id="appearance.theme", label=f"Switch to {other_theme} theme", section="Appearance",
+            icon="sun" if other_theme == "Light" else "moon", handler=self.toggle_theme))
+
+        # Projects
+        commands.append(Command(
+            id="projects.new", label="New Project…", section="Projects",
+            icon="plus", handler=self._new_project_dialog.open))
+        commands.append(Command(
+            id="projects.sample", label="Open Sample", section="Projects",
+            icon="chart", handler=self._cmd_open_sample))
+
+        # Help -- mirrors Home's own Resources links exactly (see
+        # screens.py's HomeScreen._resources_card), including the
+        # already-established redundancy against "Go to Assistant" above.
+        commands += [
+            Command(id="help.docs", label="Documentation", section="Help",
+                    icon="guide", handler=lambda: self.navigate("guide")),
+            Command(id="help.getting_started", label="Getting started guide", section="Help",
+                    icon="guide", handler=lambda: self.navigate("guide:getting-started")),
+            Command(id="help.ask_assistant", label="Ask the Assistant", section="Help",
+                    icon="assistant", handler=lambda: self.navigate("assistant")),
+            Command(id="help.github", label="GitHub", section="Help",
+                    icon="settings", handler=screens._open_github),
+        ]
+        return commands
+
+    def _cmd_diagnose(self) -> None:
+        self.navigate("assistant")
+        self._assistant.run_diagnose()
+
+    def _cmd_switch_backend(self, idx: int) -> None:
+        self.navigate("assistant")
+        self._assistant.switch_backend(idx)
+
+    def _cmd_open_sample(self) -> None:
+        projects = self._projects.list_projects()
+        if projects:
+            self._open_project(projects[0].id)
+        else:
+            self._new_project_dialog.open()
 
     def _close_overlays(self) -> None:
         for o in (self._palette, self._assistant, self._logs, self._new_project_dialog):

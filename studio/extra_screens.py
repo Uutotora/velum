@@ -297,6 +297,19 @@ class ModelsScreen(QWidget):
         self._train.stop_training()
         self.refresh()
 
+    # ── Command palette integration ─────────────────────────────────────────
+    # Thin aliases over already-self-guarding private methods — the ⌘K
+    # palette's equivalent of clicking Start/Stop/Import on this tab,
+    # callable regardless of which tab is actually visible.
+    def start_training(self) -> None:
+        self._start_training()
+
+    def stop_training(self) -> None:
+        self._stop_training()
+
+    def import_model(self) -> None:
+        self._import_model()
+
     def _safe_emit_log(self, msg: str) -> None:
         # The training thread outlives this screen across a theme toggle
         # (which tears the old screen down and builds a fresh one) — guard
@@ -593,6 +606,11 @@ class DashboardScreen(QWidget):
             return
         webbrowser.open(url)
         self._toast("Opening Aim", url)
+
+    def open_in_aim(self) -> None:
+        """Public alias for the ⌘K palette — same convention as
+        ModelsScreen's start_training()/stop_training()/import_model()."""
+        self._open_in_aim()
 
     def _chart_card(self, title: str, cap: str, chart: QWidget) -> QFrame:
         t = self._t

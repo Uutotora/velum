@@ -363,6 +363,70 @@ def test_quality_preset_updates_thresholds(app, segment, projects, toasts, tmp_p
     assert project.settings.points_per_side == 48
 
 
+# ── Command palette integration aliases ─────────────────────────────────────
+def test_switch_engine_alias_sets_the_engine_by_key(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws.switch_engine("cellpose")
+    assert project.settings.engine == "cellpose"
+
+
+def test_switch_engine_alias_is_a_noop_without_a_project(app, segment, projects, toasts):
+    ws = _ws(app, segment, projects, toasts)
+    ws.switch_engine("cellpose")  # must not raise
+
+
+def test_apply_preset_alias_applies_by_name(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws.apply_preset("Accurate")
+    assert project.settings.quality_preset == "Accurate"
+    assert project.settings.points_per_side == 48
+
+
+def test_apply_preset_alias_ignores_an_unknown_name(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    before = project.settings.quality_preset
+    ws.apply_preset("Nonsense")
+    assert project.settings.quality_preset == before
+
+
+def test_run_batch_alias_delegates_to_start_batch(app, segment, projects, toasts, monkeypatch):
+    ws = _ws(app, segment, projects, toasts)
+    calls = []
+    monkeypatch.setattr(ws, "_start_batch", lambda: calls.append(True))
+    ws.run_batch()
+    assert calls == [True]
+
+
+def test_run_benchmark_alias_delegates_to_start_benchmark(app, segment, projects, toasts, monkeypatch):
+    ws = _ws(app, segment, projects, toasts)
+    calls = []
+    monkeypatch.setattr(ws, "_start_benchmark", lambda: calls.append(True))
+    ws.run_benchmark()
+    assert calls == [True]
+
+
+def test_save_masks_alias_delegates_to_save_masks_private(app, segment, projects, toasts, monkeypatch):
+    ws = _ws(app, segment, projects, toasts)
+    calls = []
+    monkeypatch.setattr(ws, "_save_masks", lambda: calls.append(True))
+    ws.save_masks()
+    assert calls == [True]
+
+
+def test_export_measurements_alias_delegates_to_export_csv(app, segment, projects, toasts, monkeypatch):
+    ws = _ws(app, segment, projects, toasts)
+    calls = []
+    monkeypatch.setattr(ws, "_export_csv", lambda: calls.append(True))
+    ws.export_measurements()
+    assert calls == [True]
+
+
 def test_manual_threshold_change_marks_preset_custom(app, segment, projects, toasts, tmp_path, storage):
     from studio.components import Badge
     project = _make_project(tmp_path, projects, storage)

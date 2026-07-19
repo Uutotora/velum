@@ -556,6 +556,19 @@ class AssistantDrawer(QFrame):
         if p:
             self.setGeometry(p.width() - self.WIDTH, 42, self.WIDTH, p.height() - 42)
 
+    # ── Command palette integration ─────────────────────────────────────────
+    # Thin public aliases — the ⌘K palette's "Diagnose" / "Switch backend →
+    # X" entries, same convention as WorkspaceScreen's/ModelsScreen's own
+    # command-palette aliases. switch_backend reuses _backend_seg._select()
+    # exactly as this module's own tests already do
+    # (test_switching_backend_persists_and_updates_title), rather than a
+    # second copy of _on_backend_changed's effect.
+    def run_diagnose(self) -> None:
+        self._run_diagnose()
+
+    def switch_backend(self, idx: int) -> None:
+        self._backend_seg._select(idx)
+
     # ── diagnostics ──────────────────────────────────────────────────────────
     def _run_diagnose(self) -> None:
         image, mask, params = self._workspace.assistant_context()

@@ -25,16 +25,20 @@ This folder is Studio's own doc set — separate from the repo-wide `docs/`
 
 ## TL;DR for a new contributor
 
-- **Every screen from the mockup is reproduced in native Qt** and most are now
-  **real**: Home, Projects, Models & Train, Dashboard, Segment (own
+- **Every screen from the mockup is reproduced in native Qt, and all of it is
+  now real**: Home, Projects, Models & Train, Dashboard, Segment (own
   canvas + layer model, real predict/GT/batch/benchmark), Assistant (a
   real chat — offline diagnostics, Ollama, or any OpenAI-compatible Custom
-  API — that can act on the Segment tab), and Logs (a real, live stream from
-  every tab's actual log lines — see `studio/log_bus.py`) all run on live
-  data/logic, not `demo.py`. Only the ⌘K palette is still static — check
-  `BACKLOG.md` before assuming otherwise.
-- The goal now is to **wire the remaining overlays one at a time**, each
-  keeping the exact look while gaining real behaviour, tracked in `BACKLOG.md`.
+  API — that can act on the Segment tab), Logs (a real, live stream from
+  every tab's actual log lines — see `studio/log_bus.py`), and the ⌘K
+  command palette (a real Spotlight-style action registry spanning every
+  tab, fuzzy search, full keyboard navigation — see
+  `studio/command_registry.py`) all run on live data/logic, not `demo.py`.
+  P1 is fully done — check `BACKLOG.md`'s P2 ("polish & platform") for
+  what's next.
+- The goal now is **polish & platform** (P2): theme persistence, onboarding,
+  a Settings screen, native rounded corners, packaging — tracked in
+  `BACKLOG.md`.
 - The **classic app is untouched** (`napari_app/main.py`, `run_napari.sh`, the
   `cellseg1` command) — launch it any time to use the fully-functional (if
   less polished) product.

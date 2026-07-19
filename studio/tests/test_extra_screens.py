@@ -163,6 +163,31 @@ def test_models_screen_stop_training_delegates_to_controller(parent, train_ctrl,
     assert calls == [True]
 
 
+# ── Command palette integration aliases ─────────────────────────────────────
+def test_start_training_public_alias_delegates(parent, train_ctrl, project_ctrl, on_toast, monkeypatch):
+    scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
+    calls = []
+    monkeypatch.setattr(scr, "_start_training", lambda: calls.append(True))
+    scr.start_training()
+    assert calls == [True]
+
+
+def test_stop_training_public_alias_delegates(parent, train_ctrl, project_ctrl, on_toast, monkeypatch):
+    scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
+    calls = []
+    monkeypatch.setattr(scr, "_stop_training", lambda: calls.append(True))
+    scr.stop_training()
+    assert calls == [True]
+
+
+def test_import_model_public_alias_delegates(parent, train_ctrl, project_ctrl, on_toast, monkeypatch):
+    scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
+    calls = []
+    monkeypatch.setattr(scr, "_import_model", lambda: calls.append(True))
+    scr.import_model()
+    assert calls == [True]
+
+
 def test_models_screen_import_model_copies_and_refreshes(parent, train_ctrl, project_ctrl, on_toast, toasts, tmp_path, monkeypatch):
     src = tmp_path / "external.pth"
     src.write_bytes(b"weights")
@@ -359,6 +384,14 @@ def test_dashboard_screen_open_in_aim_success_opens_browser_and_toasts(
     scr._open_in_aim()
     assert opened == ["http://127.0.0.1:9999"]
     assert any("Opening Aim" in t for t, _ in toasts)
+
+
+def test_open_in_aim_public_alias_delegates(parent, train_ctrl, project_ctrl, on_toast, monkeypatch):
+    scr = es.DashboardScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
+    calls = []
+    monkeypatch.setattr(scr, "_open_in_aim", lambda: calls.append(True))
+    scr.open_in_aim()
+    assert calls == [True]
 
 
 def test_dashboard_screen_open_in_aim_missing_aim_toasts_hint(

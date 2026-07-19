@@ -142,6 +142,20 @@ def test_offline_body_shows_a_description_no_status_row(app, parent, controller,
     assert not hasattr(d, "_status_lbl") or d._model_body_lay.count() == 1
 
 
+# ── Command palette integration aliases ─────────────────────────────────────
+def test_switch_backend_public_alias_matches_the_segcontrol_select(app, parent, controller, workspace):
+    d = _drawer(parent, controller, workspace)
+    d.switch_backend(2)   # Custom API — empty base_url short-circuits before any real I/O
+    assert controller.settings.backend == "custom"
+
+
+def test_run_diagnose_public_alias_delegates(app, parent, controller, workspace):
+    d = _drawer(parent, controller, workspace)
+    before = d._chat._v.count()
+    d.run_diagnose()
+    assert d._chat._v.count() > before
+
+
 def test_switching_to_ollama_kicks_off_a_status_check(app, parent, controller, workspace, monkeypatch):
     monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: True)
     monkeypatch.setattr("napari_app.advisor.ollama_models", lambda: ["llama3.2:3b"])

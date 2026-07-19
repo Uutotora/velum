@@ -568,6 +568,23 @@ def test_ctrl_t_and_meta_t_shortcuts_toggle_the_assistant(app, controller, train
     assert win._assistant.isHidden()
 
 
+def test_ctrl_l_and_meta_l_shortcuts_toggle_logs(app, controller, train_controller, assistant_controller):
+    from PyQt6.QtGui import QShortcut, QKeySequence
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller,
+                                assistant_controller=assistant_controller)
+    for seq in ("Ctrl+L", "Meta+L"):
+        matches = [s for s in win.findChildren(QShortcut) if s.key() == QKeySequence(seq)]
+        assert len(matches) == 1, f"no registered shortcut for {seq!r}"
+
+    ctrl_l = next(s for s in win.findChildren(QShortcut) if s.key() == QKeySequence("Ctrl+L"))
+    assert win._logs.isHidden()
+    ctrl_l.activated.emit()
+    assert not win._logs.isHidden()
+    ctrl_l.activated.emit()
+    assert win._logs.isHidden()
+
+
 def test_theme_toggle_rebuilds(app, controller, train_controller, assistant_controller):
     from studio import window_chrome
     win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
@@ -690,3 +707,201 @@ def test_uncaught_exception_hook_logs_a_critical_record():
         app_logger.removeHandler(added)
     assert any("boom-from-test" in r.message and r.level >= logging.CRITICAL
                for r in bus.snapshot())
+
+
+# ── ⌘K command registry (studio/command_registry.py) ────────────────────────
+def _win(controller, train_controller, assistant_controller, **kw):
+    return app_mod.StudioWindow(theme_name="dark", project_controller=controller,
+                                train_controller=train_controller,
+                                assistant_controller=assistant_controller, **kw)
+
+
+def test_build_commands_navigate_section_mirrors_nav_plus_guide(
+        app, empty_controller, train_controller, assistant_controller):
+    win = _win(empty_controller, train_controller, assistant_controller)
+    nav_labels = {f"Go to {label}" for _key, _icon, label, _section in app_mod._NAV}
+    nav_labels.add("Go to Guide & Docs")
+    cmds = win._build_commands()
+    got = {c.label for c in cmds if c.section == "Navigate"}
+    assert got == nav_labels
+
+
+def test_build_commands_navigate_hints_carry_the_real_shortcuts(
+        app, empty_controller, train_controller, assistant_controller):
+    win = _win(empty_controller, train_controller, assistant_controller)
+    cmds = win._build_commands()
+    by_label = {c.label: c.hint for c in cmds if c.section == "Navigate"}
+    assert by_label["Go to Assistant"] == "⌘T"
+    assert by_label["Go to Logs"] == "⌘L"
+    assert by_label["Go to Home"] == ""
+
+
+def test_build_commands_segment_actions_disabled_without_a_project(
+        app, empty_controller, train_controller, assistant_controller):
+    win = _win(empty_controller, train_controller, assistant_controller)
+    cmds = win._build_commands()
+    segment_ids = {"segment.run", "segment.batch", "segment.benchmark", "segment.save", "segment.export_csv"}
+    by_id = {c.id: c for c in cmds if c.id in segment_ids}
+    assert set(by_id) == segment_ids
+    assert all(not c.enabled for c in by_id.values())
+    # nothing to switch engine/preset *to* without a current project
+    assert not [c for c in cmds if c.id.startswith("segment.engine.")]
+    assert not [c for c in cmds if c.id.startswith("segment.preset.")]
+
+
+def test_build_commands_segment_actions_enabled_with_a_project(
+        app, empty_controller, train_controller, assistant_controller, tmp_path):
+    from studio.project import ProjectSettings
+    from studio.segment_controller import SegmentController
+
+    storage = tmp_path / "storage"
+    (storage / "loras").mkdir(parents=True)
+    lora = storage / "loras" / "nuclei-dapi-r8.pth"
+    lora.write_bytes(b"fake")
+    project = empty_controller.store.create(
+        "P", "x", image_paths=[], settings=ProjectSettings(engine="cellseg1", model_name=str(lora)))
+
+    win = _win(empty_controller, train_controller, assistant_controller,
+               segment_controller=SegmentController(storage_dir=storage))
+    win._open_project(project.id)
+    cmds = win._build_commands()
+    segment_ids = {"segment.run", "segment.batch", "segment.benchmark", "segment.save", "segment.export_csv"}
+    assert all(c.enabled for c in cmds if c.id in segment_ids)
+    # cellseg1 is current -> only *other* available engines are offered
+    engine_labels = {c.label for c in cmds if c.id.startswith("segment.engine.")}
+    assert "Switch engine → CellSeg1 · LoRA" not in engine_labels
+    assert all(label.startswith("Switch engine → ") for label in engine_labels)
+    # "Balanced" is the default preset -> only Fast/Accurate are offered
+    preset_labels = {c.label for c in cmds if c.id.startswith("segment.preset.")}
+    assert preset_labels == {"Apply preset → Fast", "Apply preset → Accurate"}
+
+
+def test_build_commands_train_start_stop_reflect_is_training(
+        app, empty_controller, train_controller, assistant_controller, monkeypatch):
+    win = _win(empty_controller, train_controller, assistant_controller)
+    monkeypatch.setattr(train_controller, "is_training", lambda: False)
+    cmds = {c.id: c for c in win._build_commands()}
+    assert cmds["train.start"].enabled is True
+    assert cmds["train.stop"].enabled is False
+
+    monkeypatch.setattr(train_controller, "is_training", lambda: True)
+    cmds = {c.id: c for c in win._build_commands()}
+    assert cmds["train.start"].enabled is False
+    assert cmds["train.stop"].enabled is True
+
+
+def test_build_commands_assistant_backend_excludes_the_current_one(
+        app, empty_controller, train_controller, assistant_controller):
+    win = _win(empty_controller, train_controller, assistant_controller)
+    assert assistant_controller.settings.backend == "offline"
+    labels = {c.label for c in win._build_commands() if c.id.startswith("assistant.backend.")}
+    assert labels == {"Switch Assistant backend → Ollama", "Switch Assistant backend → Custom API"}
+
+
+def test_build_commands_appearance_names_the_other_theme(
+        app, empty_controller, train_controller, assistant_controller):
+    win = _win(empty_controller, train_controller, assistant_controller)
+    cmds = {c.id: c for c in win._build_commands()}
+    assert cmds["appearance.theme"].label == "Switch to Light theme"
+    win._theme_name = "light"
+    cmds = {c.id: c for c in win._build_commands()}
+    assert cmds["appearance.theme"].label == "Switch to Dark theme"
+
+
+def test_ctrl_k_opens_a_really_populated_palette(
+        app, empty_controller, train_controller, assistant_controller):
+    win = _win(empty_controller, train_controller, assistant_controller)
+    win._toggle_palette()
+    assert not win._palette.isHidden()
+    assert len(win._palette._commands) > 20
+    win._toggle_palette()
+    assert win._palette.isHidden()
+
+
+def _pump(app, timeout=0.5):
+    # Lets a deferred QTimer.singleShot(0, ...) callback (CommandPalette._trigger's
+    # established sipBadCatcherResult-safe deferral) actually fire -- paired
+    # sleep+processEvents, the same convention test_workspace.py's/
+    # test_assistant_panel.py's own _pump helpers already use for exactly
+    # this kind of wait.
+    import time
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        app.processEvents()
+        time.sleep(0.01)
+
+
+def test_running_a_navigate_command_through_the_real_palette_switches_tabs(
+        app, empty_controller, train_controller, assistant_controller):
+    win = _win(empty_controller, train_controller, assistant_controller)
+    win._toggle_palette()
+    win._palette.input.setText("go to models")
+    assert win._palette._visible[0].id == "nav.train"
+    win._palette._activate_selected()
+    _pump(app)
+    assert win._stack.currentWidget() is win._screens["train"]
+    assert win._palette.isHidden()
+
+
+def test_running_the_theme_command_through_the_real_palette_toggles_theme(
+        app, empty_controller, train_controller, assistant_controller):
+    win = _win(empty_controller, train_controller, assistant_controller)
+    win._toggle_palette()
+    win._palette.input.setText("switch to light theme")
+    assert win._palette._visible and win._palette._visible[0].id == "appearance.theme"
+    win._palette._activate_selected()
+    _pump(app)
+    assert win._theme_name == "light"
+
+
+def test_running_run_segmentation_through_the_real_palette_predicts_for_real(
+        app, empty_controller, train_controller, assistant_controller, tmp_path, monkeypatch):
+    """The flagship proof: type into the real ⌘K box, hit the equivalent of
+    Enter, and a real prediction happens through the exact production call
+    chain -- not a mocked handler standing in for the palette's own wiring."""
+    import cv2
+    import numpy as np
+
+    from studio.project import ProjectSettings
+    from studio.segment_controller import SegmentController
+
+    def _fake_predict_cached(config, image_rgb):
+        h, w = image_rgb.shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint16)
+        mask[h // 8: h // 2, w // 8: w // 2] = 1
+        return mask
+
+    monkeypatch.setattr("napari_app.inference_cache.predict_cached", _fake_predict_cached)
+    monkeypatch.setattr("napari_app.engines.cellpose_available", lambda: False)
+
+    storage = tmp_path / "storage"
+    (storage / "sam_backbone").mkdir(parents=True)
+    (storage / "sam_backbone" / "sam_vit_h_4b8939.pth").write_bytes(b"fake")
+    (storage / "loras").mkdir(parents=True)
+    lora = storage / "loras" / "nuclei-dapi-r8.pth"
+    lora.write_bytes(b"fake")
+    img = tmp_path / "img.png"
+    cv2.imwrite(str(img), (np.random.rand(48, 48, 3) * 255).astype(np.uint8))
+    project = empty_controller.store.create(
+        "P", "x", image_paths=[str(img)],
+        settings=ProjectSettings(engine="cellseg1", model_name=str(lora)))
+
+    win = _win(empty_controller, train_controller, assistant_controller,
+               segment_controller=SegmentController(storage_dir=storage))
+    win._open_project(project.id)
+
+    win._toggle_palette()
+    win._palette.input.setText("run segmentation")
+    assert win._palette._visible[0].id == "segment.run"
+    win._palette._activate_selected()
+
+    ws = win._screens["workspace"]
+    _pump(app)
+    import time
+    t0 = time.monotonic()
+    while ws._predicting and time.monotonic() - t0 < 5:
+        app.processEvents()
+        time.sleep(0.01)
+    _pump(app, timeout=0.5)
+    assert ws._last_result is not None
+    assert ws._last_result.get("n_cells", 0) >= 1

@@ -100,13 +100,3 @@ CHAT = [
     ("bot", "Alternatively switch the engine to SAM 2 and drop two point prompts — "
             "it separates touching instances cleanly here.", []),
 ]
-
-# Command palette entries (section, icon, text, hint)
-PALETTE = [
-    ("Actions", "run", "Run segmentation", "⏎"),
-    ("Actions", "models", "Switch engine → SAM 2", "z-stack"),
-    ("Actions", "chart", "Apply preset → Accurate", ""),
-    ("Actions", "models", "Train LoRA from this annotation", ""),
-    ("Export", "csv", "Export masks → COCO / PNG / label TIFF", ""),
-    ("Export", "csv", "Export measurements → CSV", ""),
-]

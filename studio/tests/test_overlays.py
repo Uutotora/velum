@@ -1,6 +1,7 @@
-"""Headless wiring tests for studio/overlays.py's LogsConsole -- the real,
-live log stream (studio/log_bus.py) rendered with a level filter, text
-search, autoscroll, clear, and export. Offscreen Qt only; no napari/torch.
+"""Headless wiring tests for studio/overlays.py's LogsConsole and
+CommandPalette -- the real, live log stream (studio/log_bus.py) and the
+real, live action registry (studio/command_registry.py), not static demo
+content. Offscreen Qt only; no napari/torch.
 
 Every test constructs its own private LogBus (never the real
 log_bus.get_log_bus() singleton) for isolation, the same convention
@@ -15,15 +16,31 @@ import pytest
 pytest.importorskip("PyQt6")
 overlays = pytest.importorskip("studio.overlays")
 
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtWidgets import QApplication, QLabel, QWidget
 
 from studio import theme
+from studio.command_registry import Command
 from studio.log_bus import LogBus
 
 
 @pytest.fixture
 def app():
     return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture
+def styled_app(app):
+    """The shared QApplication with the real app-wide stylesheet applied --
+    the bare-QWidget-inherits-bg hazard (see the CommandPalette test below)
+    only cascades through that *app-wide* rule, so a test using the plain
+    ``app`` fixture alone would pass whether or not the code is actually
+    fixed. Reset afterward since ``app`` is a process-wide singleton shared
+    with every other test module in this session (same convention as
+    test_guide_screen.py's own ``styled_app`` fixture)."""
+    app.setStyleSheet(theme.build_qss(theme.LIGHT))
+    yield app
+    app.setStyleSheet("")
 
 
 @pytest.fixture
@@ -255,3 +272,200 @@ def test_place_anchors_to_the_bottom_spanning_the_remaining_width(parent, bus):
     assert geom.height() == overlays.LogsConsole.HEIGHT
     assert geom.y() == parent.height() - overlays.LogsConsole.HEIGHT
     assert geom.width() == parent.width() - Sidebar.WIDTH
+
+
+# ── CommandPalette -- a real, live action registry, not a static list ───────
+def _pump(app, timeout=2):
+    import time
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        app.processEvents()
+
+
+def _commands(calls):
+    return [
+        Command(id="run", label="Run segmentation", section="Segment", icon="run",
+                handler=lambda: calls.append("run")),
+        Command(id="batch", label="Run batch prediction", section="Segment", icon="batch",
+                handler=lambda: calls.append("batch")),
+        Command(id="disabled", label="Stop training", section="Models & Train", icon="close",
+                handler=lambda: calls.append("disabled"), enabled=False),
+        Command(id="home", label="Go to Home", section="Navigate", icon="home",
+                handler=lambda: calls.append("home")),
+    ]
+
+
+def _palette(parent, calls):
+    p = overlays.CommandPalette(parent, theme.DARK, get_commands=lambda: _commands(calls))
+    p.setParent(parent)
+    return p
+
+
+def test_open_builds_rows_grouped_by_section_with_empty_query(parent, app):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    assert [c.label for c in palette._visible] == [
+        "Run segmentation", "Run batch prediction", "Stop training", "Go to Home"]
+    # a section header widget precedes each section's first row -- more
+    # layout items than commands proves the headers are really there
+    assert palette._results_layout.count() > len(palette._visible)
+
+
+def test_typing_filters_to_a_flat_ranked_list_no_headers(parent, app):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    palette.input.setText("run")
+    assert [c.label for c in palette._visible] == ["Run segmentation", "Run batch prediction"]
+    # flat: exactly one layout item per visible row, no section headers
+    assert palette._results_layout.count() == len(palette._visible) + 1  # + the trailing stretch
+
+
+def test_no_matching_query_shows_empty_state(parent, app):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    palette.input.setText("xyzxyz")
+    assert palette._visible == []
+    labels = [w.text() for w in palette._results_container.findChildren(QLabel)]
+    assert any("No matching commands" in t for t in labels)
+
+
+def test_arrow_keys_move_selection_and_wrap(parent, app):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    assert palette._selected == 0
+    palette._move_selection(1)
+    assert palette._selected == 1
+    palette._move_selection(-1)
+    assert palette._selected == 0
+    palette._move_selection(-1)  # wraps to the last row
+    assert palette._selected == len(palette._visible) - 1
+
+
+def test_selection_resets_to_zero_when_the_query_changes(parent, app):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    palette._move_selection(1)
+    assert palette._selected == 1
+    palette.input.setText("run")
+    assert palette._selected == 0
+
+
+def test_enter_activates_the_selected_command(app, parent):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    palette.input.setText("run batch")
+    assert palette._visible[0].id == "batch"
+    palette._activate_selected()
+    _pump(app)
+    assert calls == ["batch"]
+
+
+def test_clicking_a_row_activates_that_command_directly(app, parent):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    from PyQt6.QtGui import QMouseEvent
+    from PyQt6.QtCore import QPointF
+    row = palette._rows[1]   # "Run batch prediction" at empty-query position 1
+    assert row.cmd.id == "batch"
+    event = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPointF(5, 5),
+                        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    row.mousePressEvent(event)
+    _pump(app)
+    assert calls == ["batch"]
+
+
+def test_activating_a_disabled_command_does_nothing(app, parent):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    disabled_idx = next(i for i, c in enumerate(palette._visible) if c.id == "disabled")
+    palette._selected = disabled_idx
+    palette._activate_selected()
+    _pump(app)
+    assert calls == []
+
+
+def test_running_a_command_hides_the_palette_but_only_after_the_event_loop_turns(app, parent):
+    """The hide+run is deferred (QTimer.singleShot(0, ...)) -- the same
+    established fix as the documented sipBadCatcherResult hazard elsewhere
+    in Studio, since a handler can itself rebuild the very screen the
+    palette sits over. Confirm it's genuinely deferred, not accidentally
+    synchronous."""
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    palette.input.setText("run segmentation")
+    palette._activate_selected()
+    assert not palette.isHidden()   # not yet -- still queued
+    assert calls == []
+    _pump(app)
+    assert palette.isHidden()
+    assert calls == ["run"]
+
+
+def test_open_rebuilds_commands_fresh_and_resets_query_and_selection(app, parent):
+    calls = []
+    state = {"enabled": True}
+    palette = overlays.CommandPalette(
+        parent, theme.DARK,
+        get_commands=lambda: [Command(id="x", label="X", section="S", enabled=state["enabled"])])
+    palette.setParent(parent)
+    palette.open()
+    palette.input.setText("leftover query")
+    palette._move_selection(1)
+    state["enabled"] = False
+    palette.open()   # reopening must re-fetch commands and reset state
+    assert palette.input.text() == ""
+    assert palette._selected == 0
+    assert palette._visible[0].enabled is False
+
+
+def test_results_area_has_a_bounded_max_height(parent, app):
+    calls = []
+    palette = _palette(parent, calls)
+    assert palette._results_area.maximumHeight() == overlays.CommandPalette._MAX_RESULTS_HEIGHT
+
+
+def test_input_and_footer_rows_match_the_panel_surface_not_the_page_bg(styled_app, parent):
+    """Regression: inp_wrap/foot used to be plain QWidget()s, which inherit
+    the app-wide QWidget{background:<bg>} rule and paint an opaque
+    <bg>-coloured rectangle over their own children -- invisible against the
+    near-identical dark tones of the dark theme but a glaring flat-grey
+    patch in light theme (bg #f4f6f8 vs. this panel's own surface #ffffff),
+    the same "bare QWidget() wrapper" family docstudio/CHANGELOG.md's
+    2026-07-09 entry already found and fixed elsewhere. CommandPalette was
+    still 100% static content at the time and never got a real screenshot
+    pass, so this instance went undiscovered until the palette actually
+    rendered live content (caught by an actual light-theme screenshot, not
+    by any test passing -- this test pins it after the fact)."""
+    calls = []
+    light_t = theme.LIGHT
+    palette = overlays.CommandPalette(parent, light_t, get_commands=lambda: _commands(calls))
+    palette.setParent(parent)
+    palette.open()
+    styled_app.processEvents()
+    img = palette.grab().toImage()
+
+    for name in ("PaletteInputRow", "PaletteFootRow"):
+        row = palette.findChild(QWidget, name)
+        assert row is not None, f"{name} not found"
+        # Both rows' own layout has a 17px/10-15px margin before their first
+        # child starts -- the row's *centre* falls on a child (the QLineEdit
+        # spans most of the input row's width via a stretch factor), so it
+        # isn't a valid sample point regardless of a fix, the same trap
+        # test_guide_screen.py's own row-fill test already documents. A
+        # corner inside that margin band is guaranteed to be painted only by
+        # the row wrapper itself.
+        pt = row.mapTo(palette, row.rect().topLeft() + QPoint(4, 4))
+        sample = img.pixelColor(pt.x(), pt.y())
+        assert sample.name() == light_t["surface"], (
+            f"{name} margin-corner sampled {sample.name()!r}, expected the panel's "
+            f"own surface fill {light_t['surface']!r} -- a bare QWidget() row "
+            f"wrapper is painting the page bg over it again")
