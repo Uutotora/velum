@@ -5,6 +5,73 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-20 — Follow-up: the palette read as bloated, and it genuinely was
+
+Direct feedback right after the ship below: the palette looked worse than
+the north-star mockup — specifically, badly over-spaced. Right call: a real
+bug, not a matter of taste.
+
+**Root cause**: `_results_area` (the scrollable results list) only ever had
+`setMaximumHeight(420)` — a ceiling, not an actual size. With few results
+(a narrow search, or a fresh install with no project yet), the box still
+reserved the *full* 420px, rendering as one or two rows sitting inside a
+mostly-empty white rectangle — the "raздуло" (bloated) the mockup, sized
+to exactly 6 fixed demo rows and nothing more, never had.
+
+Three separate, compounding issues, found in order by direct measurement
+(`.sizeHint()`/`.geometry()` inspection), each confirmed against a real
+offscreen screenshot before moving to the next rather than guessed at:
+
+1. **A `QScrollArea`'s `sizeHint()` doesn't track its content's actual
+   size** by default — needed `_BoundedScrollArea`, a small subclass whose
+   `sizeHint()` reads the content widget's *current* `sizeHint().height()`,
+   capped at `_MAX_RESULTS_HEIGHT`, replacing the static
+   `setMaximumHeight(420)`. This is what makes the box shrink for a short
+   list and only reach the cap (then scroll) for a long one.
+2. **A freshly-mutated layout's `sizeHint()` reads back stale (in one case,
+   just its own margins — `(0, 12)` for 2 real rows) for one event-loop
+   tick** after `_clear_layout` + re-adding rows — confirmed directly:
+   correct one tick later, wrong in the same tick. `_rerender()` now defers
+   the fit-and-scroll step one tick (`QTimer.singleShot(0, ...)`, guarded
+   the same way every other cross-callback hazard in Studio is).
+3. **The actual root cause of the panel itself never shrinking**: a plain
+   `QFrame`'s default vertical size policy is `Preferred`, which happily
+   *grows* to fill whatever space a layout offers — `AlignTop` (already set
+   on the outer layout) only governs how a layout **shorter than** its
+   available space is positioned, it doesn't stop a `Preferred`-policy sole
+   child from being stretched to fill in the first place. Confirmed by
+   direct experiment: `panel.sizeHint()` was correctly small the whole
+   time; only `outer.addStretch(1)` after the panel — letting the stretch
+   absorb the extra space instead of the panel — actually changed the
+   on-screen geometry. The original static 6-item version never exposed
+   this: its fixed content happened to be large enough, relative to the
+   window, that "stretched to fill" and "sized to content" looked the same
+   by coincidence.
+
+Also refactored `_apply_selection_styles()`/`_scroll_to_selected()` apart
+from the old combined `_restyle_rows()` — the styling half is safe to run
+synchronously from arrow-key navigation (existing, already-settled rows),
+only the post-*re-render* fit-and-scroll needed the deferred tick.
+
+**Verified**: 655 `studio/tests` (up from 653) — 2 of the previous entry's
+own new tests updated for the corrected contract (no more static
+`setMaximumHeight` to assert on; no more manual trailing-stretch-inside-
+the-results-layout to count), plus 3 new regression tests, including one
+that reproduces the *actual* end-to-end symptom (the panel's real
+`.height()` across three searches — full → short → back to full — not
+just an internal sizeHint) and was confirmed to fail first (804 == 804,
+not shrinking) with the stretch fix reverted, before being trusted. Full
+repo `tests/` (445) untouched. Fresh offscreen screenshots in both themes
+at multiple result-set sizes (2 rows, ~7 rows, the full ~27-command browse
+list) confirm the palette now sizes tightly to its actual content, closely
+matching the mockup's density, instead of a fixed oversized box.
+
+**Not verified**: how this reads on a real, non-offscreen display, incl.
+whether the resize itself is visually smooth frame-to-frame while typing
+fast (only the end-state geometry was checked, not intermediate frames).
+
+---
+
 ## 2026-07-20 — Command palette (⌘K) wired end to end — P1 is now fully done
 
 The ⌘K palette goes from a hard-coded 6-item `demo.PALETTE` list (no search,

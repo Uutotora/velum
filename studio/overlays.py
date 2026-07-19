@@ -24,7 +24,7 @@ from typing import Optional
 
 from typing import Callable
 
-from PyQt6.QtCore import Qt, QEvent, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QEvent, QSize, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QLineEdit,
     QTextEdit, QFileDialog, QScrollArea,
@@ -332,6 +332,34 @@ class _PaletteRow(QFrame):
         self._icon.setPixmap(icons.pixmap(self.cmd.icon, icon_color, 16))
 
 
+class _BoundedScrollArea(QScrollArea):
+    """A QScrollArea whose ``sizeHint`` tracks its content widget's *actual*
+    natural height, capped at ``max_height``, instead of the fixed
+    "reserve the full max regardless of content" footprint a bare
+    ``QScrollArea`` (with only ``setMaximumHeight``) has by default.
+
+    This lets the *parent layout* size (and resize, across re-renders) it
+    correctly on its own — the robust, idiomatic fix. An earlier version
+    tried to force this after the fact with ``setFixedHeight()`` +
+    ``self._panel.adjustSize()`` on the container; that fought the layout
+    system unpredictably (confirmed empirically: the panel's geometry
+    reverted to its old, larger size on a later event-loop pass the manual
+    resize never anticipated). Overriding ``sizeHint`` instead means there
+    is no snapshotted value to go stale — anything that asks (the parent
+    layout, on any re-flow) always gets a fresh answer computed from the
+    content widget's own current sizeHint.
+    """
+
+    def __init__(self, max_height: int):
+        super().__init__()
+        self._max_height = max_height
+
+    def sizeHint(self) -> QSize:
+        w = self.widget()
+        content_height = w.sizeHint().height() if w is not None else 0
+        return QSize(super().sizeHint().width(), min(content_height, self._max_height))
+
+
 class CommandPalette(QWidget):
     """Centered ⌘K command palette over a scrim — a real, live action
     registry (``studio.command_registry``) with fuzzy search and full
@@ -355,7 +383,20 @@ class CommandPalette(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 96, 0, 0)
         outer.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-        outer.addWidget(self._build_panel())
+        self._panel = self._build_panel()
+        outer.addWidget(self._panel)
+        # A real stretch item, not just the AlignTop flag above: a QFrame's
+        # default vertical size policy is Preferred, which happily grows to
+        # fill whatever extra space a layout has -- alignment flags only
+        # decide how a *shorter-than-available* layout is positioned, they
+        # don't stop a Preferred-policy sole child from being stretched to
+        # fill in the first place. Without this, the panel silently filled
+        # the whole scrim height regardless of how few rows it held
+        # (confirmed empirically: identical panel.sizeHint() either way;
+        # only the stretch changes the actual on-screen geometry) -- a short
+        # search result rendered as a couple of rows sitting in a
+        # mostly-empty white box reaching almost to the window's bottom.
+        outer.addStretch(1)
         self.input.textChanged.connect(self._on_query_changed)
         self.input.installEventFilter(self)
         self.hide()
@@ -419,11 +460,10 @@ class CommandPalette(QWidget):
         self._results_layout = QVBoxLayout(self._results_container)
         self._results_layout.setContentsMargins(0, 6, 0, 6)
         self._results_layout.setSpacing(0)
-        self._results_area = QScrollArea()
+        self._results_area = _BoundedScrollArea(self._MAX_RESULTS_HEIGHT)
         self._results_area.setWidgetResizable(True)
         self._results_area.setFrameShape(QFrame.Shape.NoFrame)
         self._results_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._results_area.setMaximumHeight(self._MAX_RESULTS_HEIGHT)
         self._results_area.setStyleSheet(f"QScrollArea{{background:{t['surface']}; border:none;}}")
         self._results_area.setWidget(self._results_container)
         v.addWidget(self._results_area)
@@ -466,18 +506,60 @@ class CommandPalette(QWidget):
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty.setContentsMargins(0, 30, 0, 30)
             self._results_layout.addWidget(empty)
-        self._results_layout.addStretch(1)   # keep a short list top-anchored, not centred
         self._selected = 0
-        self._restyle_rows()
+        self._apply_selection_styles()
+        # Deferred: right after adding brand-new widgets to the layout, Qt
+        # hasn't settled them yet -- self._results_container.sizeHint() and
+        # ensureWidgetVisible() both read back stale/zero geometry if called
+        # synchronously here (confirmed empirically: sizeHint() measured
+        # (0, 12) -- just this container's own margins, none of the new
+        # rows -- immediately after _clear_layout + re-add, correcting
+        # itself to the real value exactly one event-loop tick later).
+        # Rows already on screen (the _move_selection path below, which
+        # never adds anything) don't have this problem and stay synchronous.
+        QTimer.singleShot(0, self._safe_finish_layout)
 
     def _add_row(self, cmd: Command) -> None:
         row = _PaletteRow(self._t, cmd, self._trigger)
         self._results_layout.addWidget(row)
         self._rows.append(row)
 
-    def _restyle_rows(self) -> None:
+    def _safe_finish_layout(self) -> None:
+        try:
+            self._finish_layout()
+        except RuntimeError:
+            pass
+
+    def _finish_layout(self) -> None:
+        """Tell Qt's layout system the results area's ``sizeHint`` has
+        changed, so it re-flows the panel to fit — shrinking for a short
+        list, growing (up to ``_BoundedScrollArea``'s cap, where it starts
+        scrolling instead) for a long one, exactly the "grows with content,
+        caps, then scrolls" behaviour every real command palette (Spotlight,
+        Raycast, VS Code's Quick Open) has.
+
+        ``updateGeometry()`` — not a manual ``setFixedHeight()`` +
+        ``self._panel.adjustSize()`` — is the correct, idiomatic way to ask:
+        a widget managed by a layout (``self._results_area`` is, via
+        ``_build_panel``'s own ``v.addWidget(...)``) has its geometry
+        *authoritatively* owned by that layout, so forcing it manually
+        fights the layout system unpredictably — confirmed empirically: the
+        panel's geometry reverted to its old, larger size on a later
+        event-loop pass the manual resize never anticipated.
+        ``_BoundedScrollArea.sizeHint()`` is what actually reports the new
+        (correct, capped) height; this just triggers the re-flow that reads
+        it.
+        """
+        self._results_layout.activate()
+        self._results_area.updateGeometry()
+        self._panel.updateGeometry()
+        self._scroll_to_selected()
+
+    def _apply_selection_styles(self) -> None:
         for i, row in enumerate(self._rows):
             row.set_selected(i == self._selected)
+
+    def _scroll_to_selected(self) -> None:
         if 0 <= self._selected < len(self._rows):
             self._results_area.ensureWidgetVisible(self._rows[self._selected])
 
@@ -500,7 +582,8 @@ class CommandPalette(QWidget):
         if not self._rows:
             return
         self._selected = (self._selected + delta) % len(self._rows)
-        self._restyle_rows()
+        self._apply_selection_styles()
+        self._scroll_to_selected()
 
     def _activate_selected(self) -> None:
         if 0 <= self._selected < len(self._visible):

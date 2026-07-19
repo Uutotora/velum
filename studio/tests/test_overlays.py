@@ -318,8 +318,11 @@ def test_typing_filters_to_a_flat_ranked_list_no_headers(parent, app):
     palette.open()
     palette.input.setText("run")
     assert [c.label for c in palette._visible] == ["Run segmentation", "Run batch prediction"]
-    # flat: exactly one layout item per visible row, no section headers
-    assert palette._results_layout.count() == len(palette._visible) + 1  # + the trailing stretch
+    # flat: exactly one layout item per visible row, no section headers, no
+    # trailing stretch either -- the container sizes exactly to content
+    # (see _BoundedScrollArea) rather than needing an internal stretch to
+    # top-anchor a short list within an otherwise fixed-height box.
+    assert palette._results_layout.count() == len(palette._visible)
 
 
 def test_no_matching_query_shows_empty_state(parent, app):
@@ -427,10 +430,57 @@ def test_open_rebuilds_commands_fresh_and_resets_query_and_selection(app, parent
     assert palette._visible[0].enabled is False
 
 
-def test_results_area_has_a_bounded_max_height(parent, app):
+def test_results_area_shrinks_to_fit_a_short_list(parent, app):
+    """Regression: the results area used to always reserve the full
+    _MAX_RESULTS_HEIGHT box regardless of how few results were showing --
+    a short list (a narrow search, or a fresh install with no project yet)
+    rendered as a couple of rows sitting in a mostly-empty box, reading as
+    broken/bloated. It must now size to its *actual* content instead."""
     calls = []
     palette = _palette(parent, calls)
-    assert palette._results_area.maximumHeight() == overlays.CommandPalette._MAX_RESULTS_HEIGHT
+    palette.open()
+    palette.input.setText("run segmentation")  # narrows to exactly one row
+    _pump(app)
+    assert len(palette._visible) == 1
+    height = palette._results_area.sizeHint().height()
+    assert 0 < height < overlays.CommandPalette._MAX_RESULTS_HEIGHT
+
+
+def test_results_area_caps_at_max_height_for_a_long_list(parent, app):
+    many = [Command(id=f"c{i}", label=f"Command number {i}", section="Section")
+            for i in range(60)]
+    palette = overlays.CommandPalette(parent, theme.DARK, get_commands=lambda: many)
+    palette.setParent(parent)
+    palette.open()
+    _pump(app)
+    assert palette._results_area.sizeHint().height() == overlays.CommandPalette._MAX_RESULTS_HEIGHT
+
+
+def test_panel_shrinks_and_grows_across_searches_not_stuck_at_one_size(parent, app):
+    """The actual end-to-end regression: not just the results area's own
+    sizeHint, but the *panel*'s real on-screen geometry must follow it --
+    caught by an actual screenshot, not by any test passing, since a plain
+    QFrame's default vertical size policy (Preferred) happily fills
+    whatever space a layout offers regardless of alignment flags unless
+    something else (a trailing stretch) absorbs the extra space instead."""
+    from PyQt6.QtWidgets import QFrame
+
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    _pump(app)
+    full_height = palette._panel.height()
+
+    palette.input.setText("batch")   # narrows _commands()'s 4 rows down to 1
+    _pump(app)
+    short_height = palette._panel.height()
+
+    palette.input.setText("")
+    _pump(app)
+    restored_height = palette._panel.height()
+
+    assert short_height < full_height
+    assert restored_height == full_height
 
 
 def test_input_and_footer_rows_match_the_panel_surface_not_the_page_bg(styled_app, parent):
