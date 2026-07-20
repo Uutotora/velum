@@ -40,7 +40,7 @@ from studio.project import ENGINE_LABELS, ENGINE_KIND, Project, ProjectSettings
 from studio.paint import nuclei_pixmap
 from studio.components import (
     Chip, Badge, EngineChip, PillButton, IconButton, SelectBox, Toggle, Slider, Stepper,
-    SegControl, StatTile, FieldRow, GroupLabel, Accordion, SmoothScrollArea,
+    SegControl, StatTile, FieldRow, GroupLabel, Accordion, SmoothScrollArea, SwipeRow,
     hline, label, bare_widget,
 )
 from studio.canvas import Canvas
@@ -597,21 +597,18 @@ class WorkspaceScreen(QWidget):
             status, dcol = "annotated", t["success"]
         else:
             status, dcol = "new", t["border_strong"]
-        row = QFrame()
-        row.setCursor(Qt.CursorShape.PointingHandCursor)
-        # Qualified -- see components.EngineChip's comment. The filename/
-        # status-dot QLabels below don't set their own `border`, so an
-        # unscoped QFrame{...} rule here leaked this row's border onto
-        # them. Shared objectName across every row (one per project image)
-        # -- QSS matches by name, not uniqueness, same as e.g. screens.py's
-        # "PCard"/"RRow".
-        row.setObjectName("ImageRow")
-        row.setStyleSheet(
-            (f"QFrame#ImageRow{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:8px;}}"
-             if sel else
-             f"QFrame#ImageRow{{background:transparent; border:1px solid transparent; border-radius:8px;}}"
-             f"QFrame#ImageRow:hover{{background:{t['surface2']};}}"))
-        lay = QHBoxLayout(row)
+        # The foreground content -- opaque (inset when unselected, so it fully
+        # covers the SwipeRow's red delete backdrop until you actually swipe).
+        # Qualified objectName -- see components.EngineChip's comment; the
+        # inner QLabels set no border, so an unscoped rule would leak this
+        # frame's border onto them.
+        content = QFrame()
+        content.setObjectName("ImageRow")
+        content.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        content.setStyleSheet(
+            f"QFrame#ImageRow{{background:{t['surface'] if sel else t['inset']};"
+            f" border:1px solid {t['border'] if sel else 'transparent'}; border-radius:8px;}}")
+        lay = QHBoxLayout(content)
         lay.setContentsMargins(8, 6, 8, 6)
         lay.setSpacing(10)
         thumb = QLabel()
@@ -630,16 +627,48 @@ class WorkspaceScreen(QWidget):
         dot.setFixedSize(8, 8)
         dot.setStyleSheet(f"background:{dcol}; border-radius:4px;")
         lay.addWidget(dot)
-        # Deferred, not called straight from this handler: _select_image()
-        # ends up rebuilding _images_list_layout (this very row's parent)
-        # via _refresh_images_pane() — tearing down a widget while its own
-        # mouseReleaseEvent is still on the call stack corrupts PyQt/SIP's
-        # bookkeeping for that virtual call ("TypeError: invalid argument
-        # to sipBadCatcherResult()", a hard process abort in the real app,
-        # not just a caught exception). QTimer.singleShot(0, ...) runs it
-        # on the next event-loop tick, once this call has fully returned.
-        row.mouseReleaseEvent = lambda e, p=path: QTimer.singleShot(0, lambda: self._select_image(p))
-        return row
+        # Swipe left to reveal Delete (iOS-style); a plain tap selects. Both
+        # callbacks are deferred one event-loop tick: each ends up rebuilding
+        # _images_list_layout (this very row's parent) via
+        # _refresh_images_pane(), and tearing a widget down while its own
+        # mouse handler is still on the stack corrupts PyQt/SIP's virtual-call
+        # bookkeeping ("invalid argument to sipBadCatcherResult()", a hard
+        # process abort in the real app).
+        return SwipeRow(
+            content, t,
+            on_click=lambda p=path: QTimer.singleShot(0, lambda: self._select_image(p)),
+            on_delete=lambda p=path: QTimer.singleShot(0, lambda: self._remove_image(p)))
+
+    def _remove_image(self, path: str) -> None:
+        """Drop an image from the project (the swipe-left Delete). Also tidies
+        the in-project *copy* on disk (only ever a file under this project's
+        own images dir -- never an external source we merely reference). If it
+        was the open image, moves to the next one (or clears the canvas)."""
+        if self._project is None or path not in self._project.image_paths:
+            return
+        self._project.image_paths.remove(path)
+        self._project.stats.n_images = len(self._project.image_paths)
+        self._projects.store.save(self._project)
+        try:
+            store_imgs = str(self._projects.store.image_dir(self._project.id).resolve())
+            if str(Path(path).resolve()).startswith(store_imgs) and Path(path).exists():
+                Path(path).unlink()  # our own copy -- safe to delete
+        except Exception:
+            pass  # best-effort cleanup; the reference is already gone
+        self._thumb_cache.pop(path, None)
+        if path == self._current_image_path:
+            self._current_image_path = None
+            self._current_image_array = None
+            self._last_result = None
+            self._layers.clear()
+            remaining = self._project.image_paths
+            if remaining:
+                self._select_image(remaining[0])
+            else:
+                self._rebuild_layer_controls()
+                self._update_legend()
+        self._refresh_images_pane()
+        self._toast("Image removed", f"“{Path(path).name}” removed from the project.")
 
     def _thumbnail(self, path: str) -> QPixmap:
         cached = self._thumb_cache.get(path)

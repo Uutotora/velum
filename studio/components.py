@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PyQt6.QtCore import Qt, QSize, QPointF, QEasingCurve, QVariantAnimation, pyqtSignal
+from PyQt6.QtCore import (
+    Qt, QSize, QPoint, QPointF, QEasingCurve, QPropertyAnimation, QVariantAnimation, pyqtSignal,
+)
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QToolButton,
     QPushButton, QSizePolicy, QGraphicsDropShadowEffect, QMenu, QScrollArea,
@@ -892,3 +894,98 @@ class Sidebar(QFrame):
         for k, item in self._items.items():
             if item.isCheckable():
                 item.set_active(k == key)
+
+
+class SwipeRow(QFrame):
+    """A list row that reveals a Delete action when swiped left, iOS-style.
+
+    A plain click calls ``on_click``; dragging the row left past a commit
+    threshold and releasing calls ``on_delete`` (deferred by the caller, since
+    deleting rebuilds the very list this row lives in). Below the threshold the
+    row springs back. ``content`` is the foreground widget shown at rest — it
+    must be opaque (it slides over the red delete backdrop), and it's made
+    mouse-transparent so every drag lands on this row, not on the labels inside.
+
+    Deliberately no fancy fly-off animation on delete: the list rebuild that
+    ``on_delete`` triggers replaces the row anyway, and animating a widget
+    that's about to be torn down is the exact deleted-object hazard motion.py
+    documents. The spring-back (the non-destructive case) *is* animated.
+    """
+
+    def __init__(self, content: QWidget, t: dict, on_click, on_delete,
+                 height: int = 46, reveal: int = 86):
+        super().__init__()
+        self._t = t
+        self._on_click = on_click
+        self._on_delete = on_delete
+        self._reveal = reveal
+        self._commit = reveal * 0.55  # drag this far left -> release deletes
+        self._drag_start: Optional[float] = None
+        self._swiping = False
+        self._offset = 0.0
+        self.setFixedHeight(height)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self._back = QFrame(self)
+        self._back.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._back.setObjectName("SwipeDel")
+        self._back.setStyleSheet(
+            f"QFrame#SwipeDel{{background:{t['danger']}; border-radius:8px;}}")
+        bl = QHBoxLayout(self._back)
+        bl.setContentsMargins(0, 0, 18, 0)
+        bl.addStretch(1)
+        trash = QLabel()
+        trash.setPixmap(icons.pixmap("trash", "#fff", 16))
+        bl.addWidget(trash)
+
+        self._fg = content
+        self._fg.setParent(self)
+        self._fg.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def resizeEvent(self, e):
+        self._back.setGeometry(0, 0, self.width(), self.height())
+        self._fg.setGeometry(int(self._offset), 0, self.width(), self.height())
+
+    def _set_offset(self, x: float) -> None:
+        self._offset = max(-self._reveal, min(0.0, x))
+        self._fg.move(int(self._offset), 0)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = e.position().x()
+            self._swiping = False
+
+    def mouseMoveEvent(self, e):
+        if self._drag_start is None:
+            return
+        dx = e.position().x() - self._drag_start
+        if dx < -4:
+            self._swiping = True
+        self._set_offset(dx)
+
+    def mouseReleaseEvent(self, e):
+        if self._drag_start is None:
+            return
+        was_swipe, off = self._swiping, self._offset
+        self._drag_start = None
+        self._swiping = False
+        if was_swipe:
+            if off <= -self._commit:
+                self._on_delete()  # caller defers the actual list rebuild
+            else:
+                self._spring_back()
+        else:
+            self._on_click()
+
+    def _spring_back(self) -> None:
+        try:
+            anim = QPropertyAnimation(self._fg, b"pos", self)
+            anim.setDuration(170)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            anim.setStartValue(QPoint(int(self._offset), 0))
+            anim.setEndValue(QPoint(0, 0))
+            anim.finished.connect(lambda: setattr(self, "_offset", 0.0))
+            anim.start()
+            self._spring_anim = anim  # keep a ref alive
+        except Exception:
+            self._set_offset(0.0)

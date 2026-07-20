@@ -5,6 +5,32 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — Segment: swipe an image row left to delete it (iOS-style)
+
+Direct feedback: a referenced-but-unreadable image just sat stuck in the list
+with no obvious way to remove it — the ask was an iPhone-style swipe-left.
+
+- New `components.SwipeRow`: the foreground content slides left under the
+  drag to reveal a red Delete backdrop; releasing past a commit threshold
+  fires delete, a shorter swipe springs back (animated), and a plain tap still
+  selects. The content is made mouse-transparent so the whole row is one drag
+  target, and it's opaque (panel-inset when unselected) so the red only shows
+  once you swipe.
+- Image rows use it: tap selects (as before), swipe-left removes.
+  `WorkspaceScreen._remove_image` drops the image from the project, persists,
+  cleans up the in-project *copy* on disk (only ever a file under the
+  project's own images dir — never an external source we merely reference),
+  and — if it was the open image — moves to the next one or clears the canvas.
+  This is finally an easy way to clear out a dead `~/Downloads` reference.
+
+Both row callbacks are deferred one event-loop tick (the same SIP virtual-call
+hazard the tap handler already guarded). Full suite green; tests cover SwipeRow
+(tap vs commit-swipe vs spring-back vs offset clamp) and `_remove_image`
+(drop+persist, switch-to-next, clear-on-last, on-disk copy cleanup). Not
+verified: the live drag/spring-back animation on a real pointer.
+
+---
+
 ## 2026-07-21 — Segment: the three panes are now resizable and collapsible (product-standard layout)
 
 Direct feedback: the side panels were a locked, un-hideable rail ("нельзя её

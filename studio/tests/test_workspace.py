@@ -469,6 +469,54 @@ def test_canvas_bar_has_undo_and_redo_buttons(app, segment, projects, toasts, tm
     assert "redo" in ws._vbar_buttons
 
 
+# ── swipe-to-delete image rows ────────────────────────────────────────────────
+def test_remove_image_drops_it_from_the_project_and_persists(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=2)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    victim = project.image_paths[1]  # not the currently-open one
+    ws._remove_image(victim)
+    assert victim not in project.image_paths
+    assert projects.store.load(project.id).image_paths == project.image_paths
+    assert projects.store.load(project.id).stats.n_images == 1
+    assert any("Image removed" in t[0] for t in toasts)
+
+
+def test_remove_current_image_switches_to_another(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=2)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    current = ws._current_image_path
+    assert current == project.image_paths[0]
+    ws._remove_image(current)
+    assert ws._current_image_path == project.image_paths[0]  # moved to the survivor
+    assert current not in project.image_paths
+
+
+def test_remove_last_image_clears_the_canvas(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._remove_image(project.image_paths[0])
+    assert ws._current_image_path is None
+    assert project.image_paths == []
+    assert len(list(ws._layers)) == 0
+
+
+def test_remove_image_deletes_the_in_project_copy_on_disk(app, segment, projects, toasts, tmp_path, storage):
+    project = projects.store.create("Copy Del", settings=ProjectSettings(
+        engine="cellseg1", model_name=str(storage / "loras" / "nuclei-dapi-r8.pth")))
+    src = tmp_path / "orig.png"
+    _write_image(src)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._add_image_paths([str(src)])           # copied into the project store
+    copied = project.image_paths[0]
+    assert Path(copied).exists()
+    ws._remove_image(copied)
+    assert not Path(copied).exists()          # our copy is cleaned up
+
+
 # ── resizable / collapsible panels ────────────────────────────────────────────
 def test_body_is_a_resizable_splitter_with_three_panes(app, segment, projects, toasts, tmp_path, storage):
     from PyQt6.QtWidgets import QSplitter

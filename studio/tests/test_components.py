@@ -304,3 +304,54 @@ def test_waving_emoji_paint_event_does_not_raise(app):
     w.grab()  # renders at rest (angle 0)
     w._set_angle(15.0)
     w.grab()  # renders mid-wave (a non-zero rotation)
+
+
+# ── SwipeRow (swipe-left-to-delete) ───────────────────────────────────────────
+def _swipe_release(widget, x, y=7):
+    ev = QMouseEvent(QMouseEvent.Type.MouseButtonRelease, QPointF(x, y), Qt.MouseButton.LeftButton,
+                     Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    widget.mouseReleaseEvent(ev)
+
+
+def _swipe_row(app):
+    from studio.components import SwipeRow
+    seen = {"click": 0, "delete": 0}
+    content = QLabel("row")
+    row = SwipeRow(content, theme.DARK,
+                   on_click=lambda: seen.__setitem__("click", seen["click"] + 1),
+                   on_delete=lambda: seen.__setitem__("delete", seen["delete"] + 1),
+                   reveal=80)
+    row.resize(240, 46)
+    return row, seen
+
+
+def test_swiperow_tap_selects_not_deletes(app):
+    row, seen = _swipe_row(app)
+    _press(row, 100)
+    _swipe_release(row, 100)  # no movement -> a tap
+    assert seen == {"click": 1, "delete": 0}
+
+
+def test_swiperow_full_swipe_left_deletes(app):
+    row, seen = _swipe_row(app)
+    _press(row, 200)
+    _drag(row, 130)      # dragged 70px left, past the ~44px commit threshold
+    _swipe_release(row, 130)
+    assert seen["delete"] == 1
+    assert seen["click"] == 0
+
+
+def test_swiperow_short_swipe_springs_back_no_delete(app):
+    row, seen = _swipe_row(app)
+    _press(row, 200)
+    _drag(row, 185)      # only 15px -- past the tap wobble but under commit
+    _swipe_release(row, 185)
+    assert seen["delete"] == 0
+    assert seen["click"] == 0  # it was a swipe, just not far enough
+
+
+def test_swiperow_offset_is_clamped_to_reveal_width(app):
+    row, _ = _swipe_row(app)
+    _press(row, 200)
+    _drag(row, -400)     # yank way past the reveal width
+    assert row._offset == -80  # clamped to reveal, not unbounded
