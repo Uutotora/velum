@@ -202,6 +202,12 @@ class ProjectController:
         project = self.store.load(project_id)
         return self.store.set_favorite(project_id, not project.favorite)
 
+    def rename_project(self, project_id: str, new_name: str) -> Project:
+        return self.store.rename(project_id, new_name)
+
+    def duplicate_project(self, project_id: str) -> Project:
+        return self.store.duplicate(project_id)
+
     # ── trash ────────────────────────────────────────────────────────────────
     def list_trashed(self) -> list[Project]:
         return self.store.trashed()

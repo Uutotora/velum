@@ -12,6 +12,7 @@ from studio.project import (
     ENGINES,
     Project,
     ProjectSettings,
+    ProjectStats,
     ProjectStore,
     slugify,
     SCHEMA_VERSION,
@@ -208,6 +209,73 @@ def test_is_trashed_property_reflects_trashed_at(tmp_path):
     assert not p.is_trashed
     trashed = store.trash(p.id)
     assert trashed.is_trashed
+
+
+# ── rename / duplicate ──────────────────────────────────────────────────────
+def test_rename_updates_name_keeps_id(tmp_path):
+    store = ProjectStore(tmp_path)
+    p = store.create("Old Name")
+    renamed = store.rename(p.id, "New Name")
+    assert renamed.id == p.id
+    assert renamed.name == "New Name"
+    assert store.load(p.id).name == "New Name"
+
+
+def test_rename_blank_keeps_the_existing_name(tmp_path):
+    store = ProjectStore(tmp_path)
+    p = store.create("Keep Me")
+    renamed = store.rename(p.id, "   ")
+    assert renamed.name == "Keep Me"
+
+
+def test_rename_strips_whitespace(tmp_path):
+    store = ProjectStore(tmp_path)
+    p = store.create("A")
+    renamed = store.rename(p.id, "  Padded  ")
+    assert renamed.name == "Padded"
+
+
+def test_duplicate_copies_settings_tags_and_images_resets_stats(tmp_path):
+    store = ProjectStore(tmp_path)
+    settings = ProjectSettings(engine="sam2", points_per_side=48)
+    source = store.create("Source", description="desc", tags=["a", "b"],
+                          settings=settings, image_paths=["/x/1.tif", "/x/2.tif"])
+    store.set_favorite(source.id, True)
+    source = store.load(source.id)
+    source.stats = ProjectStats(n_images=2, n_cells=500, last_f1=0.9, progress=100)
+    store.save(source, touch=False)
+
+    dup = store.duplicate(source.id)
+
+    assert dup.id != source.id
+    assert dup.name == "Source copy"
+    assert dup.description == "desc"
+    assert dup.tags == ["a", "b"]
+    assert dup.settings == settings
+    assert dup.image_paths == ["/x/1.tif", "/x/2.tif"]
+    assert dup.favorite is False  # not carried over
+    # n_images is a derived count of the copied image list (create() sets it
+    # for every new project, duplicate included) -- everything that reflects
+    # an actual *run*, nothing has, resets.
+    assert dup.stats == ProjectStats(n_images=2)
+
+
+def test_duplicate_settings_are_independent_of_the_source(tmp_path):
+    store = ProjectStore(tmp_path)
+    source = store.create("Source", settings=ProjectSettings(points_per_side=32))
+    dup = store.duplicate(source.id)
+    dup.settings.points_per_side = 64
+    store.save(dup)
+    assert store.load(source.id).settings.points_per_side == 32  # untouched
+
+
+def test_duplicate_twice_does_not_collide_on_id(tmp_path):
+    store = ProjectStore(tmp_path)
+    source = store.create("Source")
+    dup1 = store.duplicate(source.id)
+    dup2 = store.duplicate(source.id)
+    assert dup1.id != dup2.id
+    assert len(store.list()) == 3
 
 
 # ── delete ───────────────────────────────────────────────────────────────────

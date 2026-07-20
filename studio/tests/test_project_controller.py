@@ -194,6 +194,24 @@ def test_get_active_returns_none_if_project_was_deleted(store):
     assert ctrl.get_active() is None
 
 
+# ── rename / duplicate ───────────────────────────────────────────────────────
+def test_rename_project_via_controller(store):
+    ctrl = ProjectController(store)
+    p = ctrl.list_projects()[0]
+    renamed = ctrl.rename_project(p.id, "Renamed")
+    assert renamed.name == "Renamed"
+    assert store.load(p.id).name == "Renamed"
+
+
+def test_duplicate_project_via_controller_adds_a_new_project(store):
+    ctrl = ProjectController(store)
+    before = len(ctrl.list_projects())
+    p = ctrl.list_projects()[0]
+    dup = ctrl.duplicate_project(p.id)
+    assert dup.name == f"{p.name} copy"
+    assert len(ctrl.list_projects()) == before + 1
+
+
 # ── trash ────────────────────────────────────────────────────────────────────
 def test_trash_project_removes_it_from_list_projects(store):
     ctrl = ProjectController(store)

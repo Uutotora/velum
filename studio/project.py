@@ -363,6 +363,32 @@ class ProjectStore:
         self.save(project)
         return project
 
+    def rename(self, project_id: str, new_name: str) -> Project:
+        """Rename a project in place -- the id (and its on-disk folder) is
+        unaffected, so anything already referencing the id keeps working."""
+        project = self.load(project_id)
+        project.name = new_name.strip() or project.name
+        self.save(project)
+        return project
+
+    def duplicate(self, project_id: str) -> Project:
+        """Copy a project's settings/tags/image references into a new
+        project. Mirrors Label Studio's own "Duplicate": configuration
+        carries over, results don't -- stats/favourite/timestamps reset,
+        since nothing has run against the copy yet. Image paths are copied
+        as references (images live on the filesystem, not owned by the
+        project), so both projects point at the same source files with
+        independent settings/results from here on.
+        """
+        source = self.load(project_id)
+        return self.create(
+            f"{source.name} copy",
+            description=source.description,
+            tags=list(source.tags),
+            settings=ProjectSettings.from_dict(source.settings.to_dict()),
+            image_paths=list(source.image_paths),
+        )
+
 
 def default_store_root() -> Path:
     """The conventional projects root: ``<STORAGE_DIR>/projects``.

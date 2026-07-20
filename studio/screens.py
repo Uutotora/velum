@@ -30,7 +30,7 @@ from studio.components import (
     SegControl, StatTile, FieldRow, GroupLabel, Accordion, SmoothScrollArea,
     hline, soft_shadow, label,
 )
-from studio.project_dialogs import confirm_trash, TrashDialog
+from studio.project_dialogs import confirm_trash, RenameDialog, TrashDialog
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -550,10 +550,29 @@ class ProjectsScreen(QWidget):
         """
         menu = QMenu(self)
         menu.addAction("Open", lambda: self._open(project_id))
+        menu.addAction("Rename…", lambda: self._open_rename(project_id, project_name))
+        menu.addAction("Duplicate", lambda: self._duplicate(project_id))
         menu.addSeparator()
         menu.addAction("Move to Trash", lambda: self._confirm_trash(project_id, project_name))
         menu.popup(anchor.mapToGlobal(anchor.rect().bottomRight()))
         self._card_menu = menu  # keep a ref alive while it's open
+
+    def _open_rename(self, project_id: str, project_name: str) -> None:
+        # Keep a ref alive while it's open -- see _confirm_trash's comment.
+        self._active_dialog = RenameDialog(
+            self, self._t, project_name,
+            on_save=lambda new_name: self._do_rename(project_id, new_name))
+        self._active_dialog.open()
+
+    def _do_rename(self, project_id: str, new_name: str) -> None:
+        self._controller.rename_project(project_id, new_name)
+        self.refresh()
+
+    def _duplicate(self, project_id: str) -> None:
+        dup = self._controller.duplicate_project(project_id)
+        self.refresh()
+        if self._toast:
+            self._toast("Project duplicated", f"“{dup.name}” created.")
 
     def _confirm_trash(self, project_id: str, project_name: str) -> None:
         # Keep a ref alive while it's open -- same reason _open_card_menu

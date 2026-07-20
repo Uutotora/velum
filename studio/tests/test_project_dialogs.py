@@ -128,6 +128,68 @@ def test_confirm_delete_forever_wires_confirm(parent):
     assert seen == [1]
 
 
+# ── RenameDialog ─────────────────────────────────────────────────────────────
+def test_rename_dialog_hidden_until_open(parent):
+    dlg = pd.RenameDialog(parent, theme.DARK, "Old Name", on_save=lambda n: None)
+    assert dlg.isHidden()
+    dlg.open()
+    assert not dlg.isHidden()
+
+
+def test_rename_dialog_prefills_and_selects_the_current_name(parent):
+    dlg = pd.RenameDialog(parent, theme.DARK, "Old Name", on_save=lambda n: None)
+    assert dlg._input.text() == "Old Name"
+    assert dlg._input.selectedText() == "Old Name"
+
+
+def test_rename_dialog_click_outside_does_not_save(parent):
+    seen = []
+    dlg = pd.RenameDialog(parent, theme.DARK, "Old Name", on_save=lambda n: seen.append(n))
+    dlg.open()
+    _click_outside(dlg)
+    assert dlg.isHidden()
+    assert seen == []
+
+
+def test_rename_dialog_save_calls_on_save_with_the_trimmed_name(parent):
+    seen = []
+    dlg = pd.RenameDialog(parent, theme.DARK, "Old Name", on_save=lambda n: seen.append(n))
+    dlg.open()
+    dlg._input.setText("  New Name  ")
+    dlg._save()
+    assert seen == ["New Name"]
+    assert dlg.isHidden()
+
+
+def test_rename_dialog_return_pressed_also_saves(parent):
+    """The QLineEdit's returnPressed is wired to the same save path -- Enter
+    should work, not just clicking Save."""
+    seen = []
+    dlg = pd.RenameDialog(parent, theme.DARK, "Old Name", on_save=lambda n: seen.append(n))
+    dlg.open()
+    dlg._input.setText("Via Enter")
+    dlg._input.returnPressed.emit()
+    assert seen == ["Via Enter"]
+
+
+def test_rename_dialog_blank_name_does_not_save(parent):
+    seen = []
+    dlg = pd.RenameDialog(parent, theme.DARK, "Old Name", on_save=lambda n: seen.append(n))
+    dlg.open()
+    dlg._input.setText("   ")
+    dlg._save()
+    assert seen == []
+    assert dlg.isHidden()  # still closes -- blank just means "no-op", not "stay open"
+
+
+def test_rename_dialog_self_disposes_after_a_real_hide(app, parent):
+    dlg = pd.RenameDialog(parent, theme.DARK, "Old Name", on_save=lambda n: None)
+    dlg.open()
+    dlg.hide()
+    app.processEvents()
+    assert sip.isdeleted(dlg)
+
+
 # ── TrashDialog ──────────────────────────────────────────────────────────────
 def test_trash_dialog_empty_state(parent, controller):
     dlg = pd.TrashDialog(parent, theme.DARK, controller)

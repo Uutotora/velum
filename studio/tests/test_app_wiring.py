@@ -361,14 +361,44 @@ def test_projects_screen_list_row_has_exactly_one_more_button(app, controller):
     assert len(more_buttons) == 1
 
 
-def test_projects_screen_card_menu_lists_open_and_move_to_trash(app, controller):
+def test_projects_screen_card_menu_lists_every_action(app, controller):
     from PyQt6.QtWidgets import QToolButton
     scr = _projects_screen(controller)
     p = controller.list_projects()[0]
     scr._open_card_menu(QToolButton(), p.id, p.name)
     labels = [a.text() for a in scr._card_menu.actions() if not a.isSeparator()]
-    assert labels == ["Open", "Move to Trash"]
+    assert labels == ["Open", "Rename…", "Duplicate", "Move to Trash"]
     scr._card_menu.close()
+
+
+def test_projects_screen_rename_dialog_only_renames_on_save(app, controller):
+    from studio.project_dialogs import RenameDialog
+    scr = _projects_screen(controller)
+    p = controller.list_projects()[0]
+
+    scr._open_rename(p.id, p.name)
+    dlg = next(w for w in scr.findChildren(RenameDialog) if not w.isHidden())
+    dlg.hide()  # Cancel
+    assert controller.store.load(p.id).name == p.name
+
+    scr._open_rename(p.id, p.name)
+    dlg = next(w for w in scr.findChildren(RenameDialog) if not w.isHidden())
+    dlg._input.setText("Renamed Project")
+    dlg._save()
+    assert controller.store.load(p.id).name == "Renamed Project"
+
+
+def test_projects_screen_duplicate_adds_a_project_and_toasts(app, controller):
+    scr = _projects_screen(controller)
+    p = controller.list_projects()[0]
+    before = len(controller.list_projects())
+    seen_toasts = []
+    scr._toast = lambda *a, **kw: seen_toasts.append((a, kw))
+
+    scr._duplicate(p.id)
+
+    assert len(controller.list_projects()) == before + 1
+    assert seen_toasts and seen_toasts[0][0][0] == "Project duplicated"
 
 
 def test_projects_screen_do_trash_removes_from_grid_enables_trash_button_and_toasts(app, controller):

@@ -1,7 +1,7 @@
 """CellSeg1 Studio — the Projects tab's small modals: a generic confirm
-dialog and the Trash view.
+dialog, a rename dialog, and the Trash view.
 
-Both are scrim-backed, centred panels -- the same construction
+All scrim-backed, centred panels -- the same construction
 ``new_project_dialog.NewProjectDialog`` and ``overlays.CommandPalette``
 already use (full-window overlay, click-outside-to-close). Kept in their own
 module, mirroring how ``new_project_dialog.py`` got its own file rather than
@@ -13,7 +13,7 @@ import html
 from typing import Callable, Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QWidget, QFrame, QHBoxLayout, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QWidget, QFrame, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit
 
 from studio.components import IconButton, PillButton, SmoothScrollArea, hline, label, soft_shadow
 from studio.project_controller import ProjectController, relative_time
@@ -130,6 +130,84 @@ def confirm_delete_forever(parent: QWidget, t: dict, project_name: str,
         confirm_label="Delete Forever", confirm_kind="danger", on_confirm=on_confirm)
     dlg.open()
     return dlg
+
+
+class RenameDialog(QWidget):
+    """A scrim-backed rename modal: a QLineEdit pre-filled with the current
+    name, Cancel/Save. Same construction (and same fresh-per-use,
+    self-disposing lifecycle) as ``ConfirmDialog`` -- see its docstring.
+    """
+
+    def __init__(self, parent: QWidget, t: dict, current_name: str,
+                 on_save: Optional[Callable[[str], None]] = None):
+        super().__init__(parent)
+        self._t = t
+        self._on_save = on_save
+        self.setStyleSheet("background:rgba(8,10,20,0.34);")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 140, 0, 0)
+        outer.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        outer.addWidget(self._build_panel(current_name))
+        self.hide()
+
+    def _build_panel(self, current_name: str) -> QFrame:
+        t = self._t
+        panel = QFrame()
+        panel.setFixedWidth(400)
+        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Qualified -- see ConfirmDialog._build_panel's identical comment.
+        panel.setObjectName("RenamePanel")
+        panel.setStyleSheet(
+            f"QFrame#RenamePanel{{background:{t['surface']}; border:1px solid {t['border_strong']};"
+            f" border-radius:14px;}}")
+        soft_shadow(panel, 28, 40, 10)
+        v = QVBoxLayout(panel)
+        v.setContentsMargins(22, 20, 22, 18)
+        v.setSpacing(10)
+        v.addWidget(label("Rename project", 15, t["text"], 600))
+        self._input = QLineEdit(current_name)
+        self._input.selectAll()
+        self._input.returnPressed.connect(self._save)
+        v.addWidget(self._input)
+        v.addSpacing(4)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = PillButton("Cancel", t, "ghost", small=True)
+        cancel.clicked.connect(self.hide)
+        row.addWidget(cancel)
+        save = PillButton("Save", t, "primary", small=True)
+        save.clicked.connect(self._save)
+        row.addWidget(save)
+        v.addLayout(row)
+        return panel
+
+    def _save(self) -> None:
+        name = self._input.text().strip()
+        self.hide()
+        if name and self._on_save:
+            self._on_save(name)
+
+    def place(self) -> None:
+        p = self.parentWidget()
+        if p:
+            self.setGeometry(0, 0, p.width(), p.height())
+
+    def open(self) -> None:
+        self.place()
+        self.show()
+        self.raise_()
+        self._input.setFocus()
+
+    def mousePressEvent(self, e) -> None:
+        child = self.childAt(e.position().toPoint())
+        if child is None:
+            self.hide()
+        super().mousePressEvent(e)
+
+    def hideEvent(self, e) -> None:
+        super().hideEvent(e)
+        self.deleteLater()  # throwaway, one-shot -- see ConfirmDialog's docstring
 
 
 class TrashDialog(QWidget):
