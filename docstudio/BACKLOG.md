@@ -315,6 +315,95 @@ palette) is real. See `ROADMAP.md`.
 ## P2 — polish & platform
 
 - [ ] Live theme repaint without a full rebuild; persist the choice.
+- [ ] **Projects tab v2 — deletion, trash, rename/duplicate, real scroll
+  performance** · L · in progress (2026-07-20). The Projects tab was marked
+  done in the skeleton-to-real pass (2026-07-08), but that pass only covered
+  browse/search/favourite/grid-list — a real product also needs to
+  delete/rename/duplicate/organise projects, and the grid's scroll needs to
+  stop stuttering. Triggered by a full review against Label Studio (the
+  project's own design reference, see `OVERVIEW.md`) and general
+  product-dashboard practice.
+  - **Root cause found for "scroll is bad, not smooth"** (read from the code,
+    not guessed — cross-checked against Qt performance literature):
+    `ProjectsScreen._card()`'s cover is a *live-painting* `NucleiView`
+    (`paint.py`), whose `paintEvent` regenerates the entire procedural
+    nuclei field (gradient blobs + antialiased polygons, `paint_nuclei()`)
+    from scratch on **every single repaint** — nothing is cached. Every
+    card also carries an **always-on** `QGraphicsDropShadowEffect`
+    (`install_hover_lift(card, base=(14, 22, 3), ...)` — `base` alpha is 22,
+    not 0, so the blur composites live even at rest, not only on hover).
+    `QGraphicsDropShadowEffect` blur is known-expensive to composite
+    (uncached ~30fps vs cached ~60fps in Qt-forum benchmarks — it rasterises
+    the whole source and Gaussian-blurs it, unbounded by the changed area).
+    Scrolling the grid forces a repaint of every visible card each frame, so
+    N simultaneously-visible cards × (full procedural repaint + live blur
+    composite) run on *every* scroll tick. Projects is the one screen in the
+    app that combines "many cards," "expensive live-painted cover," and
+    "always-on blur" inside a `QScrollArea` — Home's quick-cards use the same
+    `install_hover_lift` base, but there are only 4 of them and the page
+    rarely scrolls, which is why the identical mechanism doesn't manifest
+    there. Secondary, smaller contributor: `screens.py`'s `scroll()` and
+    `workspace.py`'s separate, duplicated `_scroll()` are both bare
+    `QScrollArea`s with zero wheel-step tuning — fine on a trackpad
+    (pixel-precise deltas), a blunt fixed jump on a physical mouse wheel.
+  - **Work:**
+    1. *Perf:* cache `NucleiView`'s painted output to an internal `QPixmap`,
+       regenerated only when size/seed/density actually change, not on every
+       `paintEvent` — keeps its whole reason to exist (tracking the card's
+       live responsive width, unlike the pre-baked `nuclei_pixmap()` used
+       elsewhere) while making repeat repaints (scroll, hover, sibling
+       updates) a cheap `drawPixmap`. A wall-clock timing test proves the
+       drop, run against the pre-fix code first to confirm it actually
+       fails there (per the project's own established regression-test
+       discipline).
+    2. *Perf:* consolidate `screens.py`'s `scroll()` and `workspace.py`'s
+       `_scroll()` (currently duplicated) into one shared helper and give it
+       a smaller, less jarring wheel `singleStep` — a real fix, not a mask
+       for #1, but part of "make scrolling itself better" as separately
+       asked for.
+    3. *Feature — deletion:* `ProjectStore.delete()` (`project.py`) already
+       exists but is called from **nowhere** — dead code. Rather than wiring
+       it to a hard, irreversible delete, add a **trash/soft-delete** layer
+       in front of it (`trashed_at` on `Project`; `ProjectStore.trash()`/
+       `restore()`/`purge()`, `purge()` being the first real caller of the
+       existing `delete()`; `list()`/`recent()`/`favorites()` exclude
+       trashed by default). Chosen over a scary type-to-confirm hard-delete
+       because (a) Studio is a local, single-user desktop app — none of the
+       "N teammates lose access" blast-radius that justifies heavy
+       interrogation in a multi-user SaaS Danger Zone — and (b) "prefer
+       reversibility over interrogation where you can" is the stated best
+       practice for destructive-action UX; a project can represent real
+       segmentation/training work, so recoverability matters more than
+       ceremony. Confirmation dialog still required before trashing (reuses
+       `new_project_dialog.py`'s scrim+panel construction) — names the
+       project and what's at stake, red action button — plus a Toast with
+       an Undo action right after.
+    4. *Feature — organise:* a **⋯ kebab menu** on every grid card and list
+       row (Open · Rename · Duplicate · Move to Trash) — the concrete
+       feature Label Studio has (its own project overflow menu: rename via
+       Settings, Duplicate, Pin, Danger Zone) that Studio's cards currently
+       lack entirely (today: a star for favourite, and the whole card is one
+       big click-to-open target — no secondary actions at all). Duplicate
+       mirrors Label Studio's own semantics: copy settings/tags/image
+       references, reset stats/favourite/timestamps (no completed-results
+       carried over, since nothing has run against the copy yet).
+    5. *Feature — organise:* a small **Trash** entry point (only shown once
+       something's been trashed) listing trashed projects with
+       Restore/Delete Forever.
+    6. *Feature — findability:* a **Sort** control (Name / Last modified /
+       Created / Most cells) — today the grid has no user-facing sort at
+       all, only the store's implicit `updated_at` ordering. Present in
+       essentially every comparable product (Label Studio, Linear, Notion).
+    7. *Visual:* an audit of every margin/spacing/radius literal in
+       `ProjectsScreen` against `DESIGN.md`'s rhythm (2·4·8·14·16·24·34) and
+       radii (7/10/14/18) tokens — fix any that drifted off it.
+  - **Tasks:** ☐ NucleiView pixmap cache + timing regression test ☐
+    consolidated scroll helper + wheel tuning ☐ trash/restore/purge in
+    `project.py` + `project_controller.py` (pure-logic tests) ☐ kebab menu +
+    delete-confirm dialog + Undo toast ☐ Trash view ☐ rename + duplicate
+    (controller + dialog) ☐ Sort control ☐ spacing audit ☐ offscreen
+    screenshots, both themes, real QSS applied (per this file's own
+    hard-learned verification rule) ☐ `CHANGELOG.md` entries per increment.
 - [x] **Guide & Docs screen** — done (2026-07-08). A real, in-app documentation
   surface (`studio/guide_content.py` + `guide_screen.py`): searchable article
   nav (5 topics, 10 articles) + the selected article, reached from the
