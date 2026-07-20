@@ -5,6 +5,24 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — Segment: a real empty-state for the Layers pane (no more stray lines on a blank panel)
+
+Direct feedback on the left panel with nothing loaded: "непонятные линии если
+там ничего нету" — a floating add-layer toolbar hovering over a blank area with
+a stray scrollbar groove, which read as broken.
+
+The Layers pane is now a two-state QStackedWidget. With no image loaded it
+shows a single centred empty-state — a soft image badge, "No image loaded", one
+line of guidance, and an "Add images" button — instead of the toolbar + empty
+list + controls scroll. Once an image loads (any layer exists) it swaps to the
+real content. Driven by `_sync_layers_pane_state()` off every layer-list change
+(and once at construction). Verified with an offscreen render of a project with
+no images (clean centred card, no stray lines) and tests for the state
+switching (empty on no-image, content on load, back to empty when the last
+image is removed).
+
+---
+
 ## 2026-07-21 — Segment: swipe an image row left to delete it (iOS-style)
 
 Direct feedback: a referenced-but-unreadable image just sat stuck in the list

@@ -469,6 +469,32 @@ def test_canvas_bar_has_undo_and_redo_buttons(app, segment, projects, toasts, tm
     assert "redo" in ws._vbar_buttons
 
 
+# ── Layers-pane empty state ───────────────────────────────────────────────────
+def test_layers_pane_shows_empty_state_when_no_image_loaded(app, segment, projects, toasts, tmp_path, storage):
+    project = projects.store.create("Empty", settings=ProjectSettings(engine="cellseg1"))
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)  # a project with no images -> no layers
+    assert len(list(ws._layers)) == 0
+    assert ws._layers_stack.currentIndex() == 1  # the empty-state, not the toolbar+list
+
+
+def test_layers_pane_shows_content_once_an_image_is_loaded(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)  # auto-selects the first image -> layers exist
+    assert len(list(ws._layers)) > 0
+    assert ws._layers_stack.currentIndex() == 0
+
+
+def test_removing_the_last_image_returns_to_the_empty_state(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    assert ws._layers_stack.currentIndex() == 0
+    ws._remove_image(project.image_paths[0])
+    assert ws._layers_stack.currentIndex() == 1  # back to empty-state
+
+
 # ── swipe-to-delete image rows ────────────────────────────────────────────────
 def test_remove_image_drops_it_from_the_project_and_persists(app, segment, projects, toasts, tmp_path, storage):
     project = _make_project(tmp_path, projects, storage, n_images=2)

@@ -212,6 +212,7 @@ class WorkspaceScreen(QWidget):
         self._redo_shortcut.activated.connect(self._redo)
 
         self._load_project(None)  # establish the empty state now everything exists
+        self._sync_layers_pane_state()  # no layers yet -> show the Layers empty-state
 
     # ── project lifecycle ────────────────────────────────────────────────────
     def refresh(self) -> None:
@@ -770,8 +771,15 @@ class WorkspaceScreen(QWidget):
     # ── Layers pane ──────────────────────────────────────────────────────────
     def _layers_pane(self) -> QWidget:
         t = self._t
-        w = QWidget()
-        v = QVBoxLayout(w)
+        # Two states: real content (toolbar + list + controls) once an image is
+        # loaded, or a single clean empty-state when nothing is. Before this,
+        # the empty pane showed a floating add-layer toolbar over a blank area
+        # with a stray scrollbar groove -- the "непонятные линии если там ничего
+        # нету" a user reported.
+        self._layers_stack = QStackedWidget()
+
+        content = QWidget()
+        v = QVBoxLayout(content)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
 
@@ -800,7 +808,52 @@ class WorkspaceScreen(QWidget):
         self._layer_controls_layout.setContentsMargins(0, 0, 0, 0)
         self._layer_controls_layout.setSpacing(0)
         v.addWidget(_scroll(self._layer_controls_container), 1)
+
+        self._layers_stack.addWidget(content)
+        self._layers_stack.addWidget(self._pane_empty_state(
+            "image", "No image loaded",
+            "Add images to this project, then pick one to segment.",
+            "Add images", self._add_images))
+        return self._layers_stack
+
+    def _pane_empty_state(self, icon_name: str, title: str, subtitle: str,
+                          cta: str, on_cta) -> QWidget:
+        """A centred empty-state for a side pane: soft icon, title, one line of
+        guidance, and a single call-to-action button. Replaces the old blank
+        area + floating toolbar + stray scrollbar groove."""
+        t = self._t
+        w = bare_widget()
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(22, 22, 22, 22)
+        outer.addStretch(1)
+        badge = QLabel()
+        badge.setFixedSize(46, 46)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setPixmap(icons.pixmap(icon_name, t["text_muted"], 22))
+        badge.setStyleSheet(f"background:{t['surface2']}; border-radius:12px;")
+        outer.addWidget(badge, alignment=Qt.AlignmentFlag.AlignHCenter)
+        outer.addSpacing(12)
+        ttl = label(title, 13.5, t["text"], 600)
+        ttl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        outer.addWidget(ttl)
+        outer.addSpacing(3)
+        sub = label(subtitle, 12, t["text_muted"])
+        sub.setWordWrap(True)
+        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        outer.addWidget(sub)
+        outer.addSpacing(14)
+        btn = PillButton(cta, t, "ghost", "plus", small=True)
+        btn.clicked.connect(lambda: on_cta())
+        outer.addWidget(btn, alignment=Qt.AlignmentFlag.AlignHCenter)
+        outer.addStretch(1)
         return w
+
+    def _sync_layers_pane_state(self) -> None:
+        """Show the real Layers content only when there's something to show;
+        otherwise the clean empty-state. Called on every layer-list change."""
+        stack = getattr(self, "_layers_stack", None)
+        if stack is not None:
+            stack.setCurrentIndex(0 if len(list(self._layers)) else 1)
 
     def _on_layers_changed(self) -> None:
         """The one generic subscriber to every LayerList mutation — kept
@@ -809,6 +862,7 @@ class WorkspaceScreen(QWidget):
         _layer_controls_container: that would sever an in-progress Slider
         drag whose Slider lives inside that very container."""
         self._refresh_layers_list()
+        self._sync_layers_pane_state()
         self._update_legend()
 
     def _refresh_layers_list(self) -> None:
