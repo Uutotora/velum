@@ -469,6 +469,34 @@ def test_canvas_bar_has_undo_and_redo_buttons(app, segment, projects, toasts, tm
     assert "redo" in ws._vbar_buttons
 
 
+# ── image contrast limits ─────────────────────────────────────────────────────
+def test_auto_contrast_sets_percentile_limits(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    img = ws._layers.by_kind("image")[0]
+    img.contrast_limits = (0.0, 255.0)
+    ws._auto_contrast(img)
+    lo, hi = img.contrast_limits
+    assert hi > lo
+    # a 1–99 percentile stretch sits strictly inside the full 0..255 range for
+    # a random image (never both exactly 0 and 255)
+    assert not (lo == 0.0 and hi == 255.0)
+
+
+def test_set_contrast_moves_a_limit_without_crossing(app, segment, projects, toasts, tmp_path, storage):
+    from studio.components import Badge
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    img = ws._layers.by_kind("image")[0]
+    img.contrast_limits = (0.0, 255.0)
+    # drive the low limit above the current high -> it must clamp just below hi
+    ws._set_contrast(img, "lo", 1.0, 0.0, 255.0, Badge("", theme.DARK))
+    lo, hi = img.contrast_limits
+    assert lo < hi
+
+
 # ── Layers-pane empty state ───────────────────────────────────────────────────
 def test_layers_pane_shows_empty_state_when_no_image_loaded(app, segment, projects, toasts, tmp_path, storage):
     project = projects.store.create("Empty", settings=ProjectSettings(engine="cellseg1"))

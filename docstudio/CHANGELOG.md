@@ -5,6 +5,19 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — Segment: editable image contrast (min/max sliders + Auto) — napari parity
+
+The image layer's contrast was a read-only "lo – hi" badge. It's now editable,
+like napari: a **min** and a **max** slider (each mapping 0..1 across the
+image's own data range, kept from crossing) plus an **Auto** button that
+stretches to the 1–99 percentile (falling back to full min/max on a flat
+image). The renderer already honoured `contrast_limits`, so moving a slider
+re-renders live. Auto rebuilds the controls so the sliders jump to the new
+limits. Tests cover the percentile auto-stretch and the no-cross clamp. Full
+suite green.
+
+---
+
 ## 2026-07-21 — Segment: single-key tool shortcuts + a de-duplicated canvas tool strip (napari parity)
 
 - **Tool shortcuts.** With the canvas focused: B paint, E erase, F fill, G

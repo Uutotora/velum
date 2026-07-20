@@ -1121,8 +1121,28 @@ class WorkspaceScreen(QWidget):
         gsl.changed.connect(lambda val, ly=layer, bd=gamma_badge: self._set_image_gamma(ly, val, bd))
         v.addWidget(gsl)
 
+        # Contrast limits: min/max sliders + an Auto (1–99 percentile) button,
+        # replacing the old read-only "lo – hi" badge -- napari's editable
+        # contrast. Sliders map 0..1 across the image's own data range.
         lo, hi = layer.contrast_limits
-        v.addWidget(FieldRow("contrast", Badge(f"{lo:.0f} – {hi:.0f}", t), t))
+        dmin = float(layer.data.min()) if layer.data.size else 0.0
+        dmax = float(layer.data.max()) if layer.data.size else 255.0
+        drange = (dmax - dmin) or 1.0
+        auto_btn = PillButton("Auto", t, "ghost", None, small=True)
+        auto_btn.clicked.connect(lambda _=False, ly=layer: self._auto_contrast(ly))
+        v.addWidget(FieldRow("contrast", auto_btn, t))
+        lo_badge = Badge(f"{lo:.0f}", t)
+        v.addWidget(FieldRow("min", lo_badge, t))
+        lo_sl = Slider(t, min(1.0, max(0.0, (lo - dmin) / drange)), t["primary"])
+        lo_sl.changed.connect(lambda val, ly=layer, bd=lo_badge:
+                              self._set_contrast(ly, "lo", val, dmin, drange, bd))
+        v.addWidget(lo_sl)
+        hi_badge = Badge(f"{hi:.0f}", t)
+        v.addWidget(FieldRow("max", hi_badge, t))
+        hi_sl = Slider(t, min(1.0, max(0.0, (hi - dmin) / drange)), t["primary"])
+        hi_sl.changed.connect(lambda val, ly=layer, bd=hi_badge:
+                              self._set_contrast(ly, "hi", val, dmin, drange, bd))
+        v.addWidget(hi_sl)
         v.addStretch(1)
         return w
 
@@ -1286,6 +1306,36 @@ class WorkspaceScreen(QWidget):
         layer.gamma = gamma
         badge.setText(f"{gamma:.2f}")
         self._layers.notify()
+
+    def _set_contrast(self, layer: ImageLayer, which: str, value01: float,
+                      dmin: float, drange: float, badge: Badge) -> None:
+        """Move one contrast limit. Slider 0..1 maps across the image's data
+        range; the two limits are kept from crossing."""
+        value = dmin + value01 * drange
+        lo, hi = layer.contrast_limits
+        if which == "lo":
+            lo = min(value, hi - 1e-3)
+        else:
+            hi = max(value, lo + 1e-3)
+        layer.contrast_limits = (lo, hi)
+        badge.setText(f"{value:.0f}")
+        self._layers.notify()
+
+    def _auto_contrast(self, layer: ImageLayer) -> None:
+        """Robust auto-contrast: stretch to the 1–99 percentile (napari's
+        auto-contrast), falling back to full min/max on a flat image. Rebuilds
+        the controls so the min/max sliders jump to the new limits."""
+        data = layer.data
+        if data.size:
+            lo = float(np.percentile(data, 1))
+            hi = float(np.percentile(data, 99))
+            if hi <= lo:
+                lo, hi = float(data.min()), float(data.max())
+            if hi <= lo:
+                hi = lo + 1.0
+            layer.contrast_limits = (lo, hi)
+            self._layers.notify()
+            self._rebuild_layer_controls()
 
     def _set_point_size(self, layer: PointsLayer, value: float, badge: Badge) -> None:
         size = max(2, round(value * 40))
