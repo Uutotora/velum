@@ -469,6 +469,37 @@ def test_canvas_bar_has_undo_and_redo_buttons(app, segment, projects, toasts, tm
     assert "redo" in ws._vbar_buttons
 
 
+# ── sidebar declutter / dedupe ────────────────────────────────────────────────
+def test_transpose_button_has_its_own_key_not_shuffle(app, segment, projects, toasts, tmp_path, storage):
+    """Transpose used the "shuffle" glyph, which also means "shuffle label
+    colours" in the Labels tools -- a duplicated icon. It now has its own
+    'transpose' icon/key."""
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    assert "transpose" in ws._vbar_buttons
+    assert "shuffle" not in ws._vbar_buttons
+
+
+def test_new_label_selects_max_plus_one(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    layer = ws._layers.find("Segmentation")
+    layer.data[5:8, 5:8] = 4  # highest existing id
+    ws._new_label(layer)
+    assert layer.selected_label == 5  # max(4) + 1
+
+
+def test_transform_tool_removed_from_labels_mode_icons():
+    """The Transform tool did nothing the Pan/zoom tool didn't (the canvas
+    treated both identically), so it's gone from the Labels tool row."""
+    from studio.workspace import MODE_ICONS
+    modes = [m for _icon, _tip, m in MODE_ICONS]
+    assert "transform" not in modes
+    assert "pan_zoom" in modes
+
+
 # ── layer panel actions ───────────────────────────────────────────────────────
 def test_add_points_and_shapes_layers(app, segment, projects, toasts, tmp_path, storage):
     project = _make_project(tmp_path, projects, storage)

@@ -84,6 +84,9 @@ PATHS: dict[str, str] = {
     "console":     '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 9l3 3-3 3M13 15h4"/>',
     "undo":        '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12H8"/>',
     "redo":        '<path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h6"/>',
+    # axis-swap (transpose) -- its own glyph so it stops sharing "shuffle",
+    # which also means "shuffle label colours" two toolbars over.
+    "transpose":   '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
 }
 
 

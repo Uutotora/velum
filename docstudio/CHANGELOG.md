@@ -5,6 +5,33 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — Segment sidebar: declutter the Labels controls, dedupe icons, drop the dead Transform tool
+
+Direct feedback: the left panel was too cramped ("слишком кучно"), some icons
+duplicated others, and a tool did nothing.
+
+- **Advanced fold.** The Labels controls were a wall of ten stacked fields.
+  The five less-often-touched ones (blending, direct-colour mode, contour
+  width, n-edit-dim, and the contiguous/preserve/show-selected flags) move
+  into a collapsed "Advanced" accordion; the common ones (tools, opacity,
+  label, palette, brush size) stay visible. napari folds the same knobs a
+  level deeper too.
+- **New label button.** A "+" next to the label stepper selects `max + 1` —
+  napari's increment-selected-label, the fast way to start a fresh instance.
+- **Dead tool removed.** The "Transform" tool did exactly what Pan/zoom did
+  (the canvas treated both modes identically — it never actually transformed),
+  so it's gone from the 8-icon Labels tool row, now 7.
+- **De-duplicated glyph.** The canvas bar's "Transpose" reused the "shuffle"
+  icon, which also means "shuffle label colours" two toolbars over. It has its
+  own `transpose` (axis-swap) glyph now.
+
+Verified with an offscreen render (grouped panel, Advanced collapsed, distinct
+transpose glyph, "+" on the label row) and tests for the New-label max+1
+behaviour, the transpose key rename, and Transform's removal from the tool row.
+Not verified: live accordion expand animation.
+
+---
+
 ## 2026-07-21 — Segment: mask editing gets undo / redo (napari parity)
 
 The canvas edited masks in place with no way back — paint a wrong stroke and

@@ -45,7 +45,7 @@ from studio.components import (
 from studio.canvas import Canvas
 from studio.layer_model import (
     BLENDING_MODES, ImageLayer, IMAGE_COLORMAPS, LabelsLayer, LayerList,
-    PAN_ZOOM, TRANSFORM, PAINT, ERASE, FILL, POLYGON, PICK, PointsLayer, ShapesLayer,
+    PAN_ZOOM, PAINT, ERASE, FILL, POLYGON, PICK, PointsLayer, ShapesLayer,
 )
 from studio.segment_controller import SegmentController, apply_quality_preset
 from studio.log_bus import get_log_bus, emit_prefixed
@@ -55,7 +55,6 @@ LAYER_TYPE_ICON = {"labels": "layers", "shapes": "shapes", "points": "points", "
 # is an action, not a mode — mirrors napari's Mode enum plus that one action.
 MODE_ICONS = [
     ("target", "Pan / zoom", PAN_ZOOM),
-    ("measure", "Transform", TRANSFORM),
     ("brush", "Paint brush", PAINT),
     ("eraser", "Eraser", ERASE),
     ("fill", "Fill bucket", FILL),
@@ -881,10 +880,8 @@ class WorkspaceScreen(QWidget):
             lambda val, ly=layer, bd=opacity_badge: self._set_layer_opacity(ly, val, bd))
         v.addWidget(opacity_slider)
 
-        v.addWidget(FieldRow("blending", SelectBox(
-            layer.blending, t, options=list(BLENDING_MODES),
-            on_select=lambda choice, ly=layer: self._set_layer_blending(ly, choice)), t))
-
+        # label swatch + stepper + a "new label" button (selects max+1 -- the
+        # fast way to start a fresh instance, matching napari's "+")
         labelrow = QHBoxLayout()
         labelrow.setSpacing(8)
         chip = QFrame()
@@ -895,6 +892,8 @@ class WorkspaceScreen(QWidget):
         label_stepper = Stepper(layer.selected_label, t, step=1, minimum=0, maximum=100000)
         label_stepper.changed.connect(lambda val, ly=layer: self._set_selected_label(ly, val))
         labelrow.addWidget(label_stepper)
+        labelrow.addWidget(IconButton("plus", t, 26, "New label (max + 1)",
+                                      lambda ly=layer: self._new_label(ly)))
         v.addWidget(FieldRow("label", self._wrap(labelrow), t))
 
         v.addWidget(GroupLabel("label colours · more choices", t))
@@ -920,24 +919,38 @@ class WorkspaceScreen(QWidget):
         brush_slider.changed.connect(lambda val, ly=layer, bd=brush_badge: self._set_brush_size(ly, val, bd))
         v.addWidget(brush_slider)
 
-        v.addWidget(FieldRow("colour mode", SelectBox(
+        # The less-often-touched knobs (blending, direct-colour mode, contour
+        # outline width, 3-D edit reach, and the fill-behaviour flags) move
+        # into a collapsed "Advanced" section so the pane isn't a dense wall of
+        # ten fields -- the common ones (tools, opacity, label, palette, brush)
+        # stay visible; napari keeps these same knobs one fold deeper too.
+        adv = Accordion("Advanced", t, lead="settings", open_=False)
+        adv.add(FieldRow("blending", SelectBox(
+            layer.blending, t, options=list(BLENDING_MODES),
+            on_select=lambda choice, ly=layer: self._set_layer_blending(ly, choice)), t))
+        adv.add(FieldRow("colour mode", SelectBox(
             "direct" if layer.color_overrides else "auto", t, options=["auto", "direct"],
             on_select=lambda c, ly=layer: self._set_color_mode(ly, c)), t))
-
         contour_stepper = Stepper(layer.contour, t, step=1, minimum=0, maximum=20)
         contour_stepper.changed.connect(lambda val, ly=layer: self._set_layer_int_attr(ly, "contour", val))
-        v.addWidget(FieldRow("contour", contour_stepper, t))
-
+        adv.add(FieldRow("contour", contour_stepper, t))
         dim_stepper = Stepper(layer.n_edit_dimensions, t, step=1, minimum=2, maximum=3)
         dim_stepper.changed.connect(lambda val, ly=layer: self._set_layer_int_attr(ly, "n_edit_dimensions", val))
-        v.addWidget(FieldRow("n edit dim", dim_stepper, t))
-
+        adv.add(FieldRow("n edit dim", dim_stepper, t))
         for name, attr in [("contiguous", "contiguous"), ("preserve labels", "preserve_labels"),
                            ("show selected", "show_selected_label")]:
-            v.addWidget(self._check(name, getattr(layer, attr),
-                                    lambda ly=layer, a=attr: self._toggle_layer_bool(ly, a)))
+            adv.add(self._check(name, getattr(layer, attr),
+                                lambda ly=layer, a=attr: self._toggle_layer_bool(ly, a)))
+        v.addWidget(adv)
         v.addStretch(1)
         return w
+
+    def _new_label(self, layer: LabelsLayer) -> None:
+        """Select the next free label id (max + 1) so a fresh instance can be
+        painted without hunting for an unused number -- napari's "increment
+        selected label". Rebuilds the controls so the stepper + swatch update."""
+        layer.selected_label = layer.max_label + 1
+        self._rebuild_layer_controls()
 
     def _image_controls(self, layer: ImageLayer) -> QWidget:
         t = self._t
@@ -1211,7 +1224,7 @@ class WorkspaceScreen(QWidget):
             ("console", "Toggle console", self._toggle_logs_console),
             ("cube3d", "Toggle 2D / 3D", self._toggle_mip),
             ("refresh", "Roll dimensions", self._roll_channel),
-            ("shuffle", "Transpose", self._toggle_transpose),
+            ("transpose", "Transpose", self._toggle_transpose),
             ("grid", "Grid mode", self._toggle_grid),
             ("home", "Reset view", self._canvas.home),
         ]
@@ -1254,7 +1267,7 @@ class WorkspaceScreen(QWidget):
         if self._canvas is not None:
             self._style_toolbar_button(self._vbar_buttons["cube3d"], "cube3d", self._canvas.mip)
             self._style_toolbar_button(self._vbar_buttons["grid"], "grid", self._canvas.grid)
-            self._style_toolbar_button(self._vbar_buttons["shuffle"], "shuffle", self._canvas.transposed)
+            self._style_toolbar_button(self._vbar_buttons["transpose"], "transpose", self._canvas.transposed)
 
     def _style_toolbar_button(self, btn: QToolButton, icon_name: str, on: bool) -> None:
         t = self._t
