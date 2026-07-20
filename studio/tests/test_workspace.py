@@ -1443,6 +1443,13 @@ def _dispatch_release(widget, pos=(5, 5)):
     QApplication.sendEvent(widget, ev)
 
 
+def _dispatch_press(widget, pos=(5, 5)):
+    ev = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPointF(*pos),
+                     Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                     Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(widget, ev)
+
+
 def _pump_events(app, n=10):
     for _ in range(n):
         app.processEvents()
@@ -1530,6 +1537,9 @@ def test_clicking_an_image_row_does_not_crash_and_switches_image(
     ws._load_project(project)
     target_path = project.image_paths[1]
     row = ws._images_list_layout.itemAt(1).widget()
+    # Image rows are SwipeRows now: a tap is a press then release at the same
+    # spot (no drag). Release-only would be ignored (no drag in progress).
+    _dispatch_press(row)
     _dispatch_release(row)
     _pump_events(app)
     assert ws._current_image_path == target_path
