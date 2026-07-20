@@ -590,3 +590,24 @@ def test_toast_announce_sets_text_and_shows(app, parent):
     assert toast.isVisible()
     assert toast._title.text() == "Project deleted"
     assert "permanently deleted" in toast._subtitle.text()
+
+
+def test_toast_long_subtitle_stays_within_the_cards_own_height(app, parent):
+    """Regression test: the subtitle QLabel used setMaximumWidth(280), not
+    setFixedWidth -- with nothing else in the chain anchoring a width (the
+    whole Toast frame's own size is itself computed via adjustSize()), a
+    word-wrapping label's natural width for Qt's heightForWidth negotiation
+    settled at an arbitrary, too-narrow value (measured against a real
+    toast before the fix: 137px, not the intended 280px cap), undershooting
+    the height the wrapped text actually needed and painting outside the
+    card's own rounded background -- a real bug reported from the actual
+    running app, not offscreen. A subtitle long enough to need 3 lines at
+    137px width (comfortably fewer at a real 280px) reproduces it directly.
+    """
+    toast = overlays.Toast(parent, theme.DARK)
+    toast.announce("Project deleted",
+                   "“Тестовый проект copy” was permanently deleted.")
+    assert toast._subtitle.width() == 280
+    sub_bottom = toast._subtitle.geometry().y() + toast._subtitle.geometry().height()
+    assert sub_bottom <= toast.height(), (
+        f"subtitle bottom edge {sub_bottom} exceeds the toast's own height {toast.height()}")

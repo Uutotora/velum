@@ -703,7 +703,16 @@ class Toast(QFrame):
         col.addWidget(self._title)
         self._subtitle = label("247 cells · F1 0.94 vs ground truth · 3.2 s", 11.5, t["text_muted"])
         self._subtitle.setWordWrap(True)
-        self._subtitle.setMaximumWidth(280)  # wrap long messages instead of clipping/overflowing
+        # setFixedWidth, not setMaximumWidth: a word-wrapping QLabel with no
+        # anchor anywhere in this chain (the whole Toast frame's own size is
+        # itself auto-computed via adjustSize()) has an ambiguous natural
+        # width for Qt's heightForWidth negotiation to resolve -- confirmed
+        # by measuring a real toast with 3-line-wrapping text: the label
+        # settled at 137px wide (not the intended 280px cap), so the height
+        # computed for *that* width undershot what the text actually needed,
+        # and the wrapped tail painted outside the card's own rounded
+        # background. A fixed width removes the ambiguity outright.
+        self._subtitle.setFixedWidth(280)
         col.addWidget(self._subtitle)
         row.addLayout(col)
         self._hide_timer = QTimer(self)

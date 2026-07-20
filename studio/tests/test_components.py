@@ -35,6 +35,58 @@ def _drag(widget, x, y=7):
     widget.mouseMoveEvent(ev)
 
 
+# ── label() ──────────────────────────────────────────────────────────────────
+def test_label_background_is_explicitly_transparent_inside_a_styled_frame(app):
+    """Regression test, from a real bug reported against the actual running
+    app (not offscreen): label()'s own per-instance stylesheet (color/size/
+    weight) didn't mention `background`, relying on the app-wide QLabel{
+    background:transparent} cascade rule (theme.build_qss) -- reliable for
+    a label with no styled ancestor, but a label nested inside a QFrame
+    that has its OWN qualified background-setting stylesheet (any
+    #ObjectName-styled card, any scrim dialog -- overlays.Toast is exactly
+    this shape) resolved its own background via the app-wide QWidget{
+    background:<bg>} rule instead of the more-specific QLabel one, painting
+    an opaque, wrong-coloured box instead of staying transparent over the
+    card's own surface. Reproduced in a minimal isolated repro before this
+    fix (a bare QLabel directly in a styled QWidget was fine; the identical
+    label nested inside a QFrame with its own qualified stylesheet was not)
+    to confirm this is about the *styled-ancestor* context, not label()
+    itself in isolation.
+    """
+    import time
+    from PyQt6.QtWidgets import QFrame, QHBoxLayout, QWidget
+
+    t = theme.DARK
+    app.setStyleSheet(theme.build_qss(t))
+    try:
+        parent = QWidget()
+        parent.resize(400, 200)
+        parent.setStyleSheet(f"background:{t['bg']};")
+        parent.show()
+        card = QFrame(parent)
+        card.setObjectName("RegressionTestCard")
+        card.setStyleSheet(
+            f"QFrame#RegressionTestCard{{background:{t['surface']}; border-radius:8px;}}")
+        row = QHBoxLayout(card)
+        lbl = components.label("Hello", 13, t["text"], 600)
+        row.addWidget(lbl)
+        card.move(10, 10)
+        card.adjustSize()
+        card.show()
+        for _ in range(15):
+            app.processEvents()
+            time.sleep(0.01)
+
+        img = parent.grab().toImage()
+        pt = lbl.mapTo(parent, lbl.rect().topLeft())
+        sample = img.pixelColor(pt.x(), pt.y())
+        assert sample.name() == t["surface"], (
+            f"label sampled {sample.name()!r} at its own top-left corner, expected "
+            f"the card's own surface {t['surface']!r} to show through it")
+    finally:
+        app.setStyleSheet("")  # process-wide QApplication singleton -- don't leak
+
+
 # ── Slider ───────────────────────────────────────────────────────────────────
 def test_slider_default_value_and_clamping(app):
     s = components.Slider(theme.DARK, 0.5)

@@ -96,7 +96,21 @@ def label(text: str, size: float, color: str, weight: int = 400,
           spacing: float = 0.0) -> QLabel:
     lb = QLabel(text)
     ls = f"letter-spacing:{spacing}px;" if spacing else ""
-    lb.setStyleSheet(f"color:{color}; font-size:{size}px; font-weight:{weight}; {ls}")
+    # background:transparent is set explicitly, not left to the app-wide
+    # QLabel{background:transparent} cascade rule (theme.build_qss) -- that
+    # rule is reliable for a QLabel with no instance stylesheet of its own,
+    # but this helper always gives every label an instance-level
+    # setStyleSheet() call (for color/size/weight), and a QLabel nested
+    # inside a QFrame that has its own qualified background-setting
+    # stylesheet (any scrim dialog, Toast, any #ObjectName-styled card) can
+    # then resolve its *own* background to the app-wide QWidget{background:
+    # <bg>} rule instead of the more-specific QLabel one -- confirmed by
+    # reproducing a real user-reported bug (Toast's title/subtitle painting
+    # an opaque `bg`-coloured box instead of staying transparent over the
+    # card's own `surface`) in a minimal, isolated repro, and confirming
+    # this exact one-line fix resolves it there before applying it here.
+    lb.setStyleSheet(f"color:{color}; font-size:{size}px; font-weight:{weight}; "
+                     f"background:transparent; {ls}")
     return lb
 
 

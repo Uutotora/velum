@@ -424,7 +424,16 @@ palette) is real. See `ROADMAP.md`.
     removal (cards, list rows, Home's recent row) ☑ offscreen screenshots,
     both themes, real QSS applied (per this file's own hard-learned
     verification rule — caught 2 real rendering bugs and 2 layout/overflow
-    bugs across the two rounds, not by tests) ☑ `CHANGELOG.md` entries.
+    bugs across the first two rounds, not by tests; a **third** round found
+    the Toast border/overflow bug had survived round two's fix — the earlier
+    fix removed a widget that correlated with the symptom without being its
+    cause — and root-caused it to two separate bugs: `Toast._subtitle`'s
+    `setMaximumWidth` vs `setFixedWidth`, and `components.label()` never
+    setting its own `background`, the latter a systemic gap affecting every
+    label nested inside any styled `QFrame` app-wide, not just Toast. Both
+    now covered by regression tests, each individually confirmed to fail
+    against the pre-fix code — see `CHANGELOG.md`'s dated entry) ☑
+    `CHANGELOG.md` entries.
   - **Known, deliberate gaps** (see the same-dated `CHANGELOG.md` entries for
     the full list): delete/rename from inside an open project (Workspace's
     own breadcrumb — only the grid/list kebab has it today), bulk

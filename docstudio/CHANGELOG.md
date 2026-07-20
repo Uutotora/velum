@@ -5,6 +5,70 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-20 — Toast: the border/overflow bug was never the Undo button
+
+Same-day follow-up to the "Projects tab v2, revised" entry directly below
+this one, which had (reasonably, but wrongly) guessed that the Toast's
+border-not-fully-enclosing bug was caused by the removed Undo action button
+and closed the question by deleting that feature instead of root-causing it.
+The product owner then sent a fresh screenshot of a real, running "Project
+deleted" toast — border still not fully filled, subtitle text still
+overflowing the card — proving the bug lived somewhere else. Two independent
+root causes, found this time by reproducing both offscreen with pixel-level
+measurement before touching any fix:
+
+**Root cause 1 — `Toast._subtitle` used `setMaximumWidth(280)`, not
+`setFixedWidth(280)`.** With nothing else in the widget chain anchoring a
+width, a word-wrapping `QLabel`'s natural width for Qt's `heightForWidth`
+negotiation settled on an arbitrary, too-narrow value (measured on a real
+toast: 137px, not the intended 280px cap) — undersizing the computed height
+and letting wrapped text spill past the card's own rounded background. Fixed
+in `studio/overlays.py` by switching to `setFixedWidth`.
+
+**Root cause 2 — `components.label()` never set its own `background`,** a
+systemic gap in the single most-used text helper in the app. Every label
+gets its own instance-level `setStyleSheet()` call (for color/size/weight),
+which mattered because a `QLabel` with no instance stylesheet of its own
+falls back cleanly to the app-wide `QLabel{background:transparent}` cascade
+rule (`theme.build_qss`) — but one with *any* instance stylesheet, nested
+inside a `QFrame` that has its own qualified background-setting stylesheet
+(any `#ObjectName`-styled card or scrim dialog — `Toast`'s `#Toast` selector
+is exactly this shape), instead resolved its background via the more-generic
+app-wide `QWidget{background:<bg>}` rule, painting an opaque, wrong-coloured
+box instead of staying transparent over the card's own surface. Confirmed by
+isolated reproduction (a bare label directly in a styled `QWidget` rendered
+fine; the identical label nested inside a styled `QFrame` did not), then by
+precise pixel sampling of a real `Toast` showing the exact wrong colour
+(`bg` `#0d0f13` where `surface` `#15181e` was expected). Fixed by adding
+`background:transparent;` directly into `label()`'s own generated
+stylesheet string — one line, but it reaches every label in the app nested
+inside a styled frame, including the Project Settings dialog's Danger Zone
+card (`project_dialogs.py`'s `#DangerZone` `QFrame`), a second real instance
+of the identical shape, re-screenshotted and confirmed clean in both themes
+alongside Toast.
+
+Two regression tests added, each individually confirmed to fail against the
+pre-fix code before being trusted (house discipline, not skipped this time):
+`test_toast_long_subtitle_stays_within_the_cards_own_height` (`studio/tests/
+test_overlays.py`, failed pre-fix with `assert 137 == 280`) and
+`test_label_background_is_explicitly_transparent_inside_a_styled_frame`
+(`studio/tests/test_components.py`, failed pre-fix with `assert '#0d0f13' ==
+'#15181e'`). Full suite re-run clean after both fixes: 715 passed, 0 failed.
+Re-verified visually offscreen in both themes: the grid, the card kebab
+menu, Settings (General + Danger Zone), the nested delete-confirm dialog,
+and the post-delete Toast itself with both a short Cyrillic project name
+(matching the exact real-world report) and a long English one long enough to
+wrap the subtitle across three lines.
+
+The meta-lesson, now twice-confirmed this same day: a plausible-looking fix
+that isn't independently reproduced and measured is still a guess, and
+offscreen screenshots only catch what you think to screenshot — this bug
+survived a "declared done" round specifically because the earlier fix
+correlated with the symptom (both touched the same widget) without being
+its cause.
+
+---
+
 ## 2026-07-20 — Projects tab v2, revised: real usage reverts Trash/Undo, cards lose their cover art
 
 Same-day follow-up to the "Projects tab v2" entry directly below this one.
