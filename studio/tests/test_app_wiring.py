@@ -810,6 +810,17 @@ def test_load_fonts_returns_family(app):
     assert isinstance(app_mod.load_fonts(), str) and app_mod.load_fonts()
 
 
+def test_load_icon_loads_the_bundled_app_icon(app):
+    """The Dock tile for the running app (macOS shows QApplication's
+    windowIcon there for an unbundled process -- see main()'s own comment).
+    Not a null/fallback QIcon, and exposes its real 1024x1024 source so Qt
+    can generate crisp icons at whatever size the OS actually requests."""
+    from PyQt6.QtCore import QSize
+    icon = app_mod.load_icon()
+    assert not icon.isNull()
+    assert QSize(1024, 1024) in icon.availableSizes()
+
+
 # ── cross-tab: a Segment-tab run must show up on Dashboard, same session ──────
 def test_predicting_in_workspace_shows_up_on_the_dashboard(
         app, empty_controller, train_controller, assistant_controller, tmp_path, monkeypatch):

@@ -34,7 +34,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtGui import QFontDatabase, QFont, QRegion, QPainterPath, QShortcut, QKeySequence
+from PyQt6.QtGui import QFontDatabase, QFont, QIcon, QRegion, QPainterPath, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QApplication,
 )
@@ -63,6 +63,7 @@ from studio.command_registry import Command
 _log = logging.getLogger("studio.app")
 
 _FONT_DIR = Path(__file__).parent / "fonts"
+_ICON_PATH = Path(__file__).parent / "assets" / "icon.png"
 _CORNER_RADIUS = 12
 
 # (key, icon, label, section). assistant/logs toggle overlays; the rest switch
@@ -90,6 +91,17 @@ def load_fonts() -> str:
             if fams:
                 family = fams[0]
     return family
+
+
+def load_icon() -> QIcon:
+    """The bundled app icon -- macOS uses QApplication's windowIcon as the
+    Dock tile for the running (unbundled -- run_studio.sh launches the
+    interpreter directly, no .app yet, see docstudio/BACKLOG.md's
+    "Packaging" entry) process. Returns a null QIcon (Qt's own, safe
+    default -- no Dock tile override) if the asset is missing, matching
+    load_fonts()'s degrade-quietly-if-missing pattern rather than raising.
+    """
+    return QIcon(str(_ICON_PATH)) if _ICON_PATH.exists() else QIcon()
 
 
 class StudioWindow(QMainWindow):
@@ -524,9 +536,11 @@ def main() -> None:
     install_handler()
     _log.info("CellSeg1 Studio starting…")
     app = QApplication.instance() or QApplication(sys.argv)
+    app.setWindowIcon(load_icon())
     family = load_fonts()
     app.setFont(QFont(family, 10))
     win = StudioWindow(theme_name="dark")
+    win.setWindowIcon(app.windowIcon())
     win.show()
     win.raise_()
     win.activateWindow()

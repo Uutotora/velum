@@ -5,6 +5,36 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-20 — A real app icon: the macOS Dock tile, not embedded in the UI
+
+Product owner supplied a logo (a blue-to-purple glowing organic blob, on
+brand with the app's own iris-indigo primary colour) with one explicit
+constraint: it's for the **Dock icon** specifically, not for embedding
+anywhere inside the app's own UI (no sidebar wordmark replacement, nothing
+"sucked into" a screen) — an initial assumption about where it was headed
+was corrected before any wiring work started.
+
+Added `studio/assets/icon.png` (1024×1024 RGBA, the source resolution app
+icons are conventionally authored at, for crisp scaling to whatever size
+the OS actually requests — verified the alpha channel is genuinely
+transparent at the corners, not a baked-in grey backdrop, before trusting
+it). `studio/app.py` gained `load_icon()` (mirrors `load_fonts()`'s own
+missing-asset-degrades-quietly pattern — a null `QIcon`, not a raise, if the
+file isn't there) and wired it into `main()`: `QApplication.setWindowIcon()`
+right after constructing `app`, which is what macOS actually uses as the
+Dock tile for an unbundled running process (`run_studio.sh` launches the
+interpreter directly — there's no `.app` bundle yet, see `docstudio/
+BACKLOG.md`'s "Packaging" entry, which this same source image would feed
+into whenever that's built). `StudioWindow` also gets it via
+`setWindowIcon()` for the window/Cmd+Tab-switcher icon.
+
+One regression test, confirmed to fail when the asset is (temporarily)
+missing. Full suite: 736 passed, 0 failed. Verified offscreen: the icon
+loads non-null, exposes its full 1024×1024 source, and still reads cleanly
+at a realistic 128px Dock-tile size.
+
+---
+
 ## 2026-07-20 — NewProjectDialog centred on the sidebar too, not just the content area
 
 Third fresh report the same day against the same "no project" work.

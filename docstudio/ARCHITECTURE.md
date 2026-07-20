@@ -122,6 +122,8 @@ motion.py         Small motion helpers: fade_in (screen switches),
                   QSS has no transform/transition, so this animates a
                   QGraphicsDropShadowEffect instead). Self-contained.
 fonts/            Figtree (SIL OFL), registered at startup.
+assets/           icon.png — the app icon (Dock tile), set via
+                  QApplication.setWindowIcon() in app.py's main().
 tests/            Studio's own test suite (run `pytest studio/tests`).
 ```
 
