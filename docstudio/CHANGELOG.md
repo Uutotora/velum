@@ -5,6 +5,28 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-20 — App icon: fixed padding to match the macOS icon-grid convention
+
+Same-day follow-up: reported directly against a real Dock screenshot next
+to the icon's actual neighbours (Finder, Notes, Safari, App Store, ...) —
+the icon read visibly larger than every other Dock icon around it.
+
+Root cause: the previous pass scaled the cropped glyph to fill ~94% of the
+1024×1024 canvas, versus the documented macOS Big Sur+ icon-grid convention
+of ~80.5% (an ~824px glyph inside the 1024px canvas — the ~10%-per-side
+transparent margin every stock macOS icon actually has, which is *why*
+icons with completely different glyph shapes still read as the same visual
+size sitting in a Dock row). Not a subjective "looks a bit big" call — a
+concrete, checkable ratio that was simply wrong. Fixed by rescaling to the
+824/1024 target and re-centring on a fresh transparent canvas; verified by
+compositing the old and new icon side by side at a realistic 96px Dock tile
+size before trusting it, not just re-eyeballing the full-resolution source.
+
+No code changes — `studio/assets/icon.png` swapped again, `load_icon()`
+unchanged. Full suite: 736 passed, 0 failed (asset-only change).
+
+---
+
 ## 2026-07-20 — App icon replaced with a proper macOS-style rounded-square version
 
 Same-day follow-up: product owner supplied a second, better logo (the same
