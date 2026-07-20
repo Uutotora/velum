@@ -164,14 +164,29 @@ class ProjectController:
             )
             self.store.save(project, touch=False)
 
+    # Display label -> sort key, each already in the right order (name is
+    # the one ascending case; everything else is "biggest/newest first").
+    # A dict (not a bare set of strings) so the toolbar's SelectBox options
+    # and the controller's accepted sort= values can never drift apart --
+    # SORT_OPTIONS is the single source both read from.
+    SORT_OPTIONS: dict[str, str] = {
+        "Last modified": "modified",
+        "Name (A–Z)": "name",
+        "Date created": "created",
+        "Most cells": "cells",
+    }
+
     # ── queries ──────────────────────────────────────────────────────────────
     def list_projects(self, query: str = "", favorites_only: bool = False,
-                       engines: Optional[set[str]] = None) -> list[Project]:
-        """Projects matching ``query`` (name/description/tags/engine), newest first.
+                       engines: Optional[set[str]] = None,
+                       sort: str = "modified") -> list[Project]:
+        """Projects matching ``query`` (name/description/tags/engine).
 
         ``engines``, when non-empty, restricts to projects whose engine key is
         in the set (the Projects tab's "Filter" popover) — composes with
-        ``query``/``favorites_only``.
+        ``query``/``favorites_only``. ``sort`` is one of ``SORT_OPTIONS``'s
+        values (default ``"modified"``, matching the store's own newest-first
+        order — the only one that needs no re-sort).
         """
         projects = self.store.list()
         if favorites_only:
@@ -185,6 +200,12 @@ class ProjectController:
                             ENGINE_LABELS.get(p.engine, ""), *p.tags]
                 return any(q in h.lower() for h in haystack)
             projects = [p for p in projects if matches(p)]
+        if sort == "name":
+            projects = sorted(projects, key=lambda p: p.name.lower())
+        elif sort == "created":
+            projects = sorted(projects, key=lambda p: p.created_at, reverse=True)
+        elif sort == "cells":
+            projects = sorted(projects, key=lambda p: p.stats.n_cells, reverse=True)
         return projects
 
     def recent(self, limit: int = 4) -> list[Project]:

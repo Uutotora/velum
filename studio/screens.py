@@ -364,6 +364,7 @@ class ProjectsScreen(QWidget):
         self._query = ""
         self._scope = "all"
         self._engines: set[str] = set()
+        self._sort = "modified"
         self._view = "grid"
         self._trash_dialog: Optional[TrashDialog] = None
 
@@ -468,6 +469,21 @@ class ProjectsScreen(QWidget):
         self._filter_btn.clicked.connect(self._open_filter_menu)
         row.addWidget(self._filter_btn)
 
+        sort_labels = list(project_controller.ProjectController.SORT_OPTIONS.keys())
+        self._sort_box = SelectBox(sort_labels[0], t, options=sort_labels, on_select=self._on_sort_changed)
+        self._sort_box.setFixedHeight(H)
+        # SelectBox's own value label (_ElidingLabel) uses a horizontally
+        # "Ignored" size policy -- right for its original fixed-width-panel
+        # use (Segment inspector rows), but it means SelectBox's *own*
+        # sizeHint doesn't reserve room for its text, so a bare
+        # setFixedHeight() alone collapsed this to just the chevron in a
+        # toolbar with room to spare (confirmed by screenshot: no visible
+        # label text at all). 152px comfortably fits the longest option,
+        # "Last modified" (measured ~107px of text + margins/chevron).
+        self._sort_box.setMinimumWidth(152)
+        self._sort_box.setToolTip("Sort by")
+        row.addWidget(self._sort_box)
+
         self._view_seg = SegControl(["", ""], t, 0, icons_=["grid", "list"])
         self._view_seg.setFixedHeight(H)
         self._view_seg.changed.connect(self._on_view_changed)
@@ -500,6 +516,10 @@ class ProjectsScreen(QWidget):
         self._view = "grid" if idx == 0 else "list"
         self._grid_host.setVisible(self._view == "grid")
         self._list_host.setVisible(self._view == "list")
+
+    def _on_sort_changed(self, label: str) -> None:
+        self._sort = project_controller.ProjectController.SORT_OPTIONS[label]
+        self._populate()
 
     def _open_filter_menu(self) -> None:
         """A checkable engine multi-select, anchored under the Filter button.
@@ -607,7 +627,7 @@ class ProjectsScreen(QWidget):
             return []  # no multi-user/sharing backend yet — always empty, honestly
         return self._controller.list_projects(
             query=self._query, favorites_only=(self._scope == "favorites"),
-            engines=self._engines)
+            engines=self._engines, sort=self._sort)
 
     def _empty_message(self, has_cards: bool) -> str:
         if has_cards:
@@ -725,7 +745,11 @@ class ProjectsScreen(QWidget):
 
         body = QWidget()
         b = QVBoxLayout(body)
-        b.setContentsMargins(15, 14, 15, 15)
+        # 14 on every side (DESIGN.md's rhythm) -- was an asymmetric
+        # (15, 14, 15, 15), off the rhythm and not matching any sibling
+        # card's own padding (HomeScreen's _card()/_quick_card() both use a
+        # uniform value on all sides), found during a visual audit.
+        b.setContentsMargins(14, 14, 14, 14)
         b.setSpacing(3)
         b.addWidget(label(p.name, 14.5, t["text"], 600, -0.2))
         desc = label(p.description, 12, t["text_muted"])

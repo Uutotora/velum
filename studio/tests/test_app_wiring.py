@@ -321,6 +321,39 @@ def test_projects_screen_view_toggle_switches_grid_and_list(app, controller):
     assert not scr._list_host.isHidden()
 
 
+def test_projects_screen_sort_box_defaults_to_last_modified(app, controller):
+    scr = _projects_screen(controller)
+    assert scr._sort == "modified"
+    assert scr._sort_box.text() == "Last modified"
+
+
+def test_projects_screen_sort_by_name_reorders_the_grid(app, controller):
+    """The card at each grid position must follow the chosen sort order --
+    checks the actual built grid, not just the controller call underneath
+    it (that algorithm is already covered in test_project_controller.py).
+    """
+    scr = _projects_screen(controller)
+    scr._on_sort_changed("Name (A–Z)")
+    assert scr._sort == "name"
+
+    expected_names = [p.name for p in controller.list_projects(sort="name")]
+    shown_names = []
+    for i in range(len(expected_names)):
+        card = scr._grid.itemAtPosition(i // 3, i % 3).widget()
+        # card's own layout: [0]=cover wrap, [1]=body; body's own layout's
+        # [0] is the name label (_card()'s construction order) -- verified
+        # directly against a real card before trusting this in a test.
+        body = card.layout().itemAt(1).widget()
+        name_label = body.layout().itemAt(0).widget()
+        shown_names.append(name_label.text())
+    assert shown_names == expected_names
+
+
+def test_projects_screen_sort_box_options_match_the_controller(app, controller):
+    scr = _projects_screen(controller)
+    assert scr._sort_box._options == list(project_controller.ProjectController.SORT_OPTIONS.keys())
+
+
 def test_projects_screen_toolbar_controls_share_one_height(app, controller):
     """Regression test: the search box, the All/Favorites/Shared segmented
 
@@ -334,6 +367,7 @@ def test_projects_screen_toolbar_controls_share_one_height(app, controller):
     H = scr._TOOLBAR_H
     assert scr._scope_seg.height() == H
     assert scr._filter_btn.height() == H
+    assert scr._sort_box.height() == H
     assert scr._view_seg.height() == H
     assert scr._trash_btn.height() == H
 

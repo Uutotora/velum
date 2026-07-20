@@ -146,6 +146,49 @@ def test_engines_filter_combines_with_query_and_favorites(store):
     assert {p.name for p in result} == {"Fluorescence Nuclei — DAPI"}
 
 
+# ── sort ─────────────────────────────────────────────────────────────────────
+def test_sort_default_matches_explicit_modified(store):
+    ctrl = ProjectController(store)
+    assert ctrl.list_projects() == ctrl.list_projects(sort="modified")
+
+
+def test_sort_by_name_is_alphabetical(store):
+    ctrl = ProjectController(store)
+    names = [p.name for p in ctrl.list_projects(sort="name")]
+    assert names == sorted(names, key=str.lower)
+
+
+def test_sort_by_cells_is_descending(store):
+    ctrl = ProjectController(store)
+    cells = [p.stats.n_cells for p in ctrl.list_projects(sort="cells")]
+    assert cells == sorted(cells, reverse=True)
+    assert cells[0] > cells[-1]  # not a no-op on this seed data
+
+
+def test_sort_by_created_matches_the_seed_stagger(store):
+    ctrl = ProjectController(store)
+    # _seed_sample_projects stamps created_at == updated_at per project, so
+    # "created" and "modified" land in the same order for a freshly-seeded
+    # store -- newest (index 0 in _SEED_PROJECTS) first.
+    assert ([p.name for p in ctrl.list_projects(sort="created")]
+            == [p.name for p in ctrl.list_projects(sort="modified")])
+    assert ctrl.list_projects(sort="created")[0].name == "Fluorescence Nuclei — DAPI"
+
+
+def test_sort_options_are_all_accepted_and_keep_every_project(store):
+    ctrl = ProjectController(store)
+    for value in ProjectController.SORT_OPTIONS.values():
+        assert len(ctrl.list_projects(sort=value)) == 6
+
+
+def test_sort_combines_with_favorites_filter(store):
+    ctrl = ProjectController(store)
+    result = ctrl.list_projects(favorites_only=True, sort="name")
+    names = [p.name for p in result]
+    assert names == sorted(names, key=str.lower)
+    assert names and all(p.favorite for p in result)
+
+
 # ── recent / summary ───────────────────────────────────────────────────────────
 def test_recent_respects_limit(store):
     ctrl = ProjectController(store)
