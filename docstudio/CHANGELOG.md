@@ -5,6 +5,30 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — Segment: the three panes are now resizable and collapsible (product-standard layout)
+
+Direct feedback: the side panels were a locked, un-hideable rail ("нельзя её
+растягивать и скрывать, что неправильно" / "нельзя скрывать правую панель") —
+not how real tools behave.
+
+- The old fixed 240 / canvas / 320 layout is now a `QSplitter`: drag either
+  handle to rebalance (panels clamp to sensible min/max so nothing collapses
+  to an unreadable sliver), and the canvas never collapses.
+- Two topbar toggles — a `panel_left` button by the breadcrumb and a
+  `panel_right` button past Run — hide/show each side pane, handing the
+  reclaimed width to the canvas. They tint active while their pane is visible.
+  Toggle logic keys off `isHidden()` so it's correct whether or not the window
+  is realised.
+
+First step of the larger Segment design overhaul the same feedback asked for
+(empty-state/stray-line cleanup, swipe-to-delete image rows, typography, and
+the remaining napari-parity items are tracked as follow-ups). Verified with an
+offscreen render (both toggles present + active) and tests for the splitter
+shape (3 panes, canvas non-collapsible) and each toggle's hide/restore. Not
+verified: live handle-drag resizing.
+
+---
+
 ## 2026-07-21 — Segment sidebar: declutter the Labels controls, dedupe icons, drop the dead Transform tool
 
 Direct feedback: the left panel was too cramped ("слишком кучно"), some icons

@@ -31,6 +31,7 @@ from PyQt6.QtGui import QImage, QPixmap, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout,
     QStackedWidget, QToolButton, QLineEdit, QSizePolicy, QScrollArea, QFileDialog,
+    QSplitter,
 )
 
 from studio import icons
@@ -155,13 +156,32 @@ class WorkspaceScreen(QWidget):
         self._topbar_widget = self._topbar()
         outer.addWidget(self._topbar_widget)
 
-        main = QWidget()
-        row = QHBoxLayout(main)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(0)
-        row.addWidget(self._left_panel())
-        row.addWidget(self._viewport(), 1)
-        row.addWidget(self._inspector())
+        # Resizable three-pane body: drag either handle to rebalance, and each
+        # side pane can be collapsed to give the canvas the full width (the
+        # topbar's two panel toggles do this). The canvas itself is never
+        # collapsible. This replaces the old fixed 240/‑/320 rail layout.
+        self._left_panel_w = self._left_panel()
+        self._inspector_w = self._inspector()
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setObjectName("BodySplitter")
+        splitter.setChildrenCollapsible(True)
+        splitter.setHandleWidth(6)
+        splitter.setStyleSheet(
+            "QSplitter#BodySplitter::handle{background:transparent;}"
+            f"QSplitter#BodySplitter::handle:hover{{background:{t['primary_weak']};}}")
+        splitter.addWidget(self._left_panel_w)
+        splitter.addWidget(self._viewport())
+        splitter.addWidget(self._inspector_w)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
+        splitter.setCollapsible(1, False)  # the canvas always stays visible
+        splitter.setSizes([240, 900, 340])
+        self._body_splitter = splitter
+        main = splitter
+        # Both panels start visible -> their topbar toggles start "on".
+        self._style_panel_toggle(self._toggle_left_btn, "panel_left", True)
+        self._style_panel_toggle(self._toggle_right_btn, "panel_right", True)
 
         # Two full alternatives for the body, not one body with an empty
         # state layered into a corner of it -- see _no_project_view()'s own
@@ -349,8 +369,13 @@ class WorkspaceScreen(QWidget):
         bar.setStyleSheet(f"background:{t['surface']};")
         bar.setFixedHeight(52)
         row = QHBoxLayout(bar)
-        row.setContentsMargins(18, 0, 18, 0)
+        row.setContentsMargins(14, 0, 14, 0)
         row.setSpacing(8)
+
+        # ── left-panel toggle ─────────────────────────────────────────────────
+        self._toggle_left_btn = IconButton("panel_left", t, 30, "Hide / show the Images · Layers panel",
+                                            self._toggle_left_panel)
+        row.addWidget(self._toggle_left_btn)
 
         # ── breadcrumb (left): Projects › name ────────────────────────────────
         # "Projects" is a real link back to the tab, styled like Label Studio's
@@ -395,6 +420,10 @@ class WorkspaceScreen(QWidget):
         self._run_btn_topbar = PillButton("Run", t, "primary", "run", small=True)
         self._run_btn_topbar.clicked.connect(self._start_predict)
         row.addWidget(self._run_btn_topbar)
+        # ── right-panel (inspector) toggle ────────────────────────────────────
+        self._toggle_right_btn = IconButton("panel_right", t, 30, "Hide / show the Segment · Results panel",
+                                             self._toggle_inspector)
+        row.addWidget(self._toggle_right_btn)
         bottom = QFrame()
         bottom.setFixedHeight(1)
         bottom.setStyleSheet(f"background:{t['border']};")
@@ -406,11 +435,39 @@ class WorkspaceScreen(QWidget):
         wl.addWidget(bottom)
         return wrap
 
+    def _toggle_left_panel(self) -> None:
+        """Collapse / restore the Images·Layers panel (topbar toggle). The
+        splitter hands the reclaimed width to the canvas; re-showing restores
+        a sensible width. Button tints active while the panel is visible."""
+        vis = self._left_panel_w.isHidden()  # currently hidden -> show it (works offscreen too)
+        self._left_panel_w.setVisible(vis)
+        self._style_panel_toggle(self._toggle_left_btn, "panel_left", vis)
+
+    def _toggle_inspector(self) -> None:
+        vis = self._inspector_w.isHidden()
+        self._inspector_w.setVisible(vis)
+        self._style_panel_toggle(self._toggle_right_btn, "panel_right", vis)
+
+    def _style_panel_toggle(self, btn: QToolButton, icon_name: str, on: bool) -> None:
+        t = self._t
+        if on:
+            btn.setStyleSheet(f"QToolButton{{background:{t['primary_weak']}; border-radius:8px;}}")
+            btn.setIcon(icons.icon(icon_name, t["primary"], 16))
+        else:
+            btn.setStyleSheet(
+                f"QToolButton{{background:transparent; border:1px solid transparent; border-radius:8px;}}"
+                f"QToolButton:hover{{background:{t['surface2']}; border-color:{t['border']};}}")
+            btn.setIcon(icons.icon(icon_name, t["text_muted"], 16))
+
     # ── left: Images | Layers ────────────────────────────────────────────────
     def _left_panel(self) -> QWidget:
         t = self._t
         panel = QFrame()
-        panel.setFixedWidth(240)
+        # Resizable (drag the splitter handle) + collapsible, so a wide image
+        # gets the whole canvas -- not a locked 240px rail. Min keeps the tabs
+        # legible; the splitter owns the actual width.
+        panel.setMinimumWidth(210)
+        panel.setMaximumWidth(460)
         panel.setStyleSheet(f"background:{t['inset']}; border-right:1px solid {t['border']};")
         v = QVBoxLayout(panel)
         v.setContentsMargins(0, 0, 0, 0)
@@ -1362,7 +1419,8 @@ class WorkspaceScreen(QWidget):
     def _inspector(self) -> QWidget:
         t = self._t
         panel = QFrame()
-        panel.setFixedWidth(320)
+        panel.setMinimumWidth(300)
+        panel.setMaximumWidth(520)
         panel.setStyleSheet(f"background:{t['surface']}; border-left:1px solid {t['border']};")
         v = QVBoxLayout(panel)
         v.setContentsMargins(0, 0, 0, 0)

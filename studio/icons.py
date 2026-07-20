@@ -87,6 +87,9 @@ PATHS: dict[str, str] = {
     # axis-swap (transpose) -- its own glyph so it stops sharing "shuffle",
     # which also means "shuffle label colours" two toolbars over.
     "transpose":   '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
+    # sidebar toggles -- a framed panel with one column marked (left/right)
+    "panel_left":  '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="M5.5 9h1.5M5.5 12h1.5"/>',
+    "panel_right": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/><path d="M17 9h1.5M17 12h1.5"/>',
 }
 
 

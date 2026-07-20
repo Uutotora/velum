@@ -469,6 +469,39 @@ def test_canvas_bar_has_undo_and_redo_buttons(app, segment, projects, toasts, tm
     assert "redo" in ws._vbar_buttons
 
 
+# ── resizable / collapsible panels ────────────────────────────────────────────
+def test_body_is_a_resizable_splitter_with_three_panes(app, segment, projects, toasts, tmp_path, storage):
+    from PyQt6.QtWidgets import QSplitter
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    assert isinstance(ws._body_splitter, QSplitter)
+    assert ws._body_splitter.count() == 3  # left | canvas | inspector
+    assert not ws._body_splitter.isCollapsible(1)  # canvas never collapses
+
+
+def test_left_panel_toggle_hides_and_restores_it(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    assert not ws._left_panel_w.isHidden()
+    ws._toggle_left_panel()
+    assert ws._left_panel_w.isHidden()
+    ws._toggle_left_panel()
+    assert not ws._left_panel_w.isHidden()
+
+
+def test_inspector_toggle_hides_and_restores_it(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    assert not ws._inspector_w.isHidden()
+    ws._toggle_inspector()
+    assert ws._inspector_w.isHidden()
+    ws._toggle_inspector()
+    assert not ws._inspector_w.isHidden()
+
+
 # ── sidebar declutter / dedupe ────────────────────────────────────────────────
 def test_transpose_button_has_its_own_key_not_shuffle(app, segment, projects, toasts, tmp_path, storage):
     """Transpose used the "shuffle" glyph, which also means "shuffle label
