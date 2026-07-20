@@ -657,6 +657,35 @@ def test_navigate_home_skips_the_whole_screen_fade_other_screens_still_get_one(
     assert isinstance(win._screens["projects"].graphicsEffect(), QGraphicsOpacityEffect)
 
 
+def test_new_project_dialog_scopes_to_the_stack_not_the_whole_window(
+        app, empty_controller, train_controller, assistant_controller):
+    """Regression test: NewProjectDialog used to be parented directly to
+    the whole StudioWindow, so its scrim covered (and its panel centred
+    against) the sidebar too, not just the content area -- reported
+    directly against a screenshot ("окно надо центровать не по всему
+    приложению а по центру области с эмодзи" -- centre the window not
+    against the whole app but against the centre of the [content] area):
+    the panel ended up noticeably left-of-centre relative to the actual
+    page content behind it, with the sidebar fully undimmed the whole time
+    despite the scrim technically covering it too. Fixed by parenting
+    NewProjectDialog to win._stack (exactly the content area to the right
+    of the sidebar) instead of the window -- matching how
+    ConfirmDialog/ProjectSettingsDialog already behave, each parented to
+    its own screen, itself always exactly the stack's bounds."""
+    win = app_mod.StudioWindow(theme_name="dark", project_controller=empty_controller,
+                                train_controller=train_controller,
+                                assistant_controller=assistant_controller)
+    assert win._new_project_dialog.parentWidget() is win._stack
+    win.navigate("workspace")
+    win._new_project_dialog.open()
+    stack_top_left_in_window = win._stack.mapTo(win, win._stack.rect().topLeft())
+    dialog_top_left_in_window = win._new_project_dialog.mapTo(win, win._new_project_dialog.rect().topLeft())
+    assert dialog_top_left_in_window == stack_top_left_in_window
+    assert win._new_project_dialog.width() == win._stack.width()
+    assert win._new_project_dialog.width() < win.width(), (
+        "dialog must be narrower than the full window -- it should exclude the sidebar")
+
+
 def test_creating_a_project_via_dialog_shows_up_immediately(app, empty_controller, train_controller, assistant_controller):
     """End-to-end regression for the exact bug reported: create -> navigate
     away and back -> the new project is there without restarting the app."""

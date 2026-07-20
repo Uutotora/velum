@@ -5,6 +5,47 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-20 — NewProjectDialog centred on the sidebar too, not just the content area
+
+Third fresh report the same day against the same "no project" work.
+Screenshot: `NewProjectDialog`'s panel sitting noticeably left of where it
+should be, with the sidebar still fully bright/undimmed behind the scrim.
+Direct feedback: "окно надо центровать не по всему приложению а по центру
+области с эмодзи" (the window needs to be centred not against the whole
+app, but against the centre of the [content] area).
+
+Root cause: `NewProjectDialog` is one shared instance, triggered from every
+screen (Home, Projects, Guide, and now Workspace's own no-project view), so
+it was parented directly to the whole `StudioWindow` — its scrim and its
+panel's centring both measured against the *full* window width, sidebar
+included, rather than just the content area to the sidebar's right.
+`ConfirmDialog`/`ProjectSettingsDialog` never had this problem: both are
+parented to whichever *screen* opened them, and a screen's own bounds are
+already exactly the content area (screens live inside `StudioWindow._stack`,
+to the right of the sidebar) — `NewProjectDialog` was the one dialog that
+couldn't do the same, since no single screen owns it.
+
+Fixed by parenting it to `StudioWindow._stack` (the `QStackedWidget` all
+screens live in) instead of the window itself — required moving `self._stack
+= QStackedWidget()`'s construction earlier in `app.py._build_ui()`, ahead of
+`NewProjectDialog`, but no change to `NewProjectDialog`'s own `place()`
+logic: `self.parentWidget()` now simply *is* the content area, so the
+existing `setGeometry(0, 0, p.width(), p.height())` does the right thing
+automatically. Verified this doesn't fight `QStackedWidget`'s own page
+management (a raw, non-`addWidget`-added child floats and raises normally,
+same established pattern as `workspace.py`'s own floating viewport chrome)
+and survives `toggle_theme()`'s full `_build_ui()` teardown/rebuild (which
+already destroys and recreates `NewProjectDialog` on every toggle, so
+reparenting introduced no new lifecycle coupling).
+
+One regression test (`test_app_wiring.py`), confirmed to fail against the
+pre-fix parenting. Full suite: 735 passed, 0 failed. Verified offscreen in
+both themes and across a theme toggle: sidebar now stays fully undimmed,
+panel centres within the content area exactly like every other dialog in
+the app already did.
+
+---
+
 ## 2026-07-20 — Two more rounds on Segment's "no project" state: the topbar, and every scrim dialog in the app
 
 Same-day follow-up to the "Home motion polish + Segment's 'no project'

@@ -467,16 +467,21 @@ palette) is real. See `ROADMAP.md`.
   панели... убрать все") into the real fix: the whole three-panel body and
   a new full-screen "no project" view are two complete alternatives in one
   `QStackedWidget`, not a message layered into a still-broken layout.
-  **Revised twice more the same day, both from real usage again:** (1) the
-  topbar (breadcrumb + Export/Run) stayed visible above the new no-project
-  view — hidden outright now, not just its two buttons disabled, since the
-  view's own "Open a Project" action already covers what the breadcrumb was
-  for. (2) `NewProjectDialog`'s scrim turned out to be a pre-existing,
-  app-wide bug (present in `ConfirmDialog`/`ProjectSettingsDialog`/
-  `CommandPalette` too, not new to this work) — `rgba(8,10,20,0.34)` was
-  tuned for light theme and nearly invisible against dark theme's own `bg`;
-  fixed everywhere at once with a new `theme.SCRIM` constant. See
-  `CHANGELOG.md`'s dated entries for both.
+  **Revised three more times the same day, all from real usage again:** (1)
+  the topbar (breadcrumb + Export/Run) stayed visible above the new
+  no-project view — hidden outright now, not just its two buttons disabled,
+  since the view's own "Open a Project" action already covers what the
+  breadcrumb was for. (2) `NewProjectDialog`'s scrim turned out to be a
+  pre-existing, app-wide bug (present in `ConfirmDialog`/
+  `ProjectSettingsDialog`/`CommandPalette` too, not new to this work) —
+  `rgba(8,10,20,0.34)` was tuned for light theme and nearly invisible
+  against dark theme's own `bg`; fixed everywhere at once with a new
+  `theme.SCRIM` constant. (3) `NewProjectDialog`'s panel also centred
+  against the *whole window*, sidebar included, instead of just the content
+  area — the one dialog that couldn't be parented to a single screen (it's
+  shared across several), now parented to `StudioWindow._stack` (the
+  content area exactly) instead. See `CHANGELOG.md`'s dated entries for all
+  three.
   **Known gap, deliberately not audited this pass:** whether Models & Train
   / Dashboard have equally bad "nothing here yet" states — only Home and
   Segment were reported and fixed.

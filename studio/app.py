@@ -162,12 +162,22 @@ class StudioWindow(QMainWindow):
         self._sidebar.open_guide.connect(lambda: self.navigate("guide"))
         row.addWidget(self._sidebar)
 
+        # Constructed (not yet populated with pages -- that happens below,
+        # after _screens exists) before NewProjectDialog specifically so it
+        # can be that dialog's parent: NewProjectDialog is one shared
+        # instance triggered from every screen, so it must scrim/centre
+        # over whatever's currently showing in *this* stack, not over the
+        # whole window including the sidebar (ConfirmDialog/
+        # ProjectSettingsDialog already get this for free, being parented to
+        # their own screen -- itself always exactly the stack's bounds --
+        # rather than the window).
+        self._stack = QStackedWidget()
+
         self._new_project_dialog = NewProjectDialog(
-            self, t, self._projects.store, on_created=self._on_project_created)
+            self._stack, t, self._projects.store, on_created=self._on_project_created)
         # built before _screens: Models & Train / Dashboard announce through it
         self._toast = Toast(self, t)
 
-        self._stack = QStackedWidget()
         self._screens = {
             "home": HomeScreen(t, self._projects, self.navigate, self._open_project,
                                self._new_project_dialog.open),
