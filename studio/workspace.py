@@ -142,7 +142,8 @@ class WorkspaceScreen(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        outer.addWidget(self._topbar())
+        self._topbar_widget = self._topbar()
+        outer.addWidget(self._topbar_widget)
 
         main = QWidget()
         row = QHBoxLayout(main)
@@ -223,8 +224,18 @@ class WorkspaceScreen(QWidget):
         self._project = project
         self.set_active_project(project)
         self._body_stack.setCurrentIndex(0 if project else 1)
-        self._run_btn_topbar.setEnabled(project is not None)
-        self._export_btn_topbar.setEnabled(project is not None)
+        # The whole topbar, not just Export/Run disabled inside it -- the
+        # breadcrumb ("No project selected"), engine chip ("No project") and
+        # both buttons are all meaningless with nothing open, and the
+        # no-project view (_body_stack index 1) already has its own "Open a
+        # Project" action, making the breadcrumb's "Projects" link
+        # redundant too. Safe to hide outright, not just grey out:
+        # _start_predict/_export_csv already guard their own preconditions
+        # with a toast regardless of what triggers them (see app.py's
+        # command-palette comment on the identical Run/Export commands
+        # there), so hiding their one topbar entry point removes a redundant
+        # UI-level guard, not the real one.
+        self._topbar_widget.setVisible(project is not None)
         self._layers.clear()
         self._current_image_path = None
         self._current_image_array = None

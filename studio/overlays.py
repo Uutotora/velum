@@ -393,7 +393,7 @@ class CommandPalette(QWidget):
         self._visible: list[Command] = []     # flattened, in on-screen order
         self._rows: list[_PaletteRow] = []     # parallel to _visible
         self._selected = 0
-        self.setStyleSheet("background:rgba(8,10,20,0.34);")
+        self.setStyleSheet(f"background:{theme.SCRIM};")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 96, 0, 0)

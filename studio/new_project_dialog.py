@@ -123,7 +123,7 @@ class NewProjectDialog(QWidget):
         self._on_created = on_created
         self._reset()
 
-        self.setStyleSheet("background:rgba(8,10,20,0.34);")
+        self.setStyleSheet(f"background:{theme.SCRIM};")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 80, 0, 0)

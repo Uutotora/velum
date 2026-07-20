@@ -32,6 +32,21 @@ MONO = '"SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace'
 # Radii (px) — small controls → cards.
 R_SM, R_MD, R_LG, R_XL = 7, 10, 14, 18
 
+# The one scrim colour every full-window modal (NewProjectDialog,
+# ConfirmDialog, ProjectSettingsDialog, CommandPalette) dims its backdrop
+# with -- deliberately fixed/theme-independent (a scrim's whole job is to
+# read as "darker than whatever's behind it," in either theme), not a LIGHT/
+# DARK dict key. The previous value, rgba(8,10,20,0.34), was tuned against
+# light theme's white backdrop (a clearly visible dim there) but never
+# re-checked against dark theme, where bg itself is #0d0f13 -- nearly the
+# same RGB as the scrim's own (8,10,20), so compositing barely changed
+# anything (confirmed by pixel-sampling a real dialog: #101318 -> #0e1017,
+# a few units of drift, not a visible dim) -- a real modal read as a
+# randomly-placed box on an undimmed page, not an overlay. Pure black at a
+# higher alpha darkens *any* backdrop by a consistent, visible fraction
+# regardless of how dark that backdrop already is.
+SCRIM = "rgba(0,0,0,0.45)"
+
 
 # ── Token palettes ───────────────────────────────────────────────────────────
 # Every semantic token exists in both palettes with the *same key*, so widgets

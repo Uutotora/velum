@@ -187,19 +187,25 @@ def test_no_project_view_new_project_button_calls_on_new_project(app, segment, p
     assert seen == [True]
 
 
-def test_run_and_export_disabled_without_a_project_enabled_once_one_is_open(
+def test_topbar_hidden_without_a_project_shown_once_one_is_open(
         app, segment, projects, toasts, tmp_path, storage):
-    """Export/Run sit in the topbar regardless of project state (unlike the
-    rest of the body, the breadcrumb itself stays put) -- but neither does
-    anything meaningful with no project open, so both must be disabled
-    rather than sitting there clickable-but-useless."""
+    """Regression test, round 2: the first fix merely disabled Export/Run
+    inside the topbar while leaving the whole bar (breadcrumb saying "No
+    project selected", an engine chip saying "No project") visible with no
+    project open -- direct feedback ("почему верхняя панель осталась? если
+    проект не выбран то она не нужна" -- why did the top panel stay? if no
+    project is selected it isn't needed) said the greyed-out buttons weren't
+    enough, the whole bar is redundant once the no-project view has its own
+    "Open a Project" action. The bar must be hidden outright, not just
+    disabled inside; _start_predict/_export_csv's own internal
+    precondition guards (a toast, not a crash -- see app.py's identical
+    command-palette comment) are what actually makes hiding safe rather
+    than merely disabling."""
     ws = _ws(app, segment, projects, toasts)
-    assert not ws._run_btn_topbar.isEnabled()
-    assert not ws._export_btn_topbar.isEnabled()
+    assert ws._topbar_widget.isHidden()
     project = _make_project(tmp_path, projects, storage, n_images=1)
     ws._load_project(project)
-    assert ws._run_btn_topbar.isEnabled()
-    assert ws._export_btn_topbar.isEnabled()
+    assert not ws._topbar_widget.isHidden()
 
 
 # ── project / image loading ──────────────────────────────────────────────────

@@ -5,6 +5,74 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-20 — Two more rounds on Segment's "no project" state: the topbar, and every scrim dialog in the app
+
+Same-day follow-up to the "Home motion polish + Segment's 'no project'
+state" entry directly below. Two fresh, specific reports against the
+just-shipped fix, both real:
+
+**1. The topbar stayed visible with no project open.** The previous fix
+replaced the three-panel body with a full-screen empty state but left
+`WorkspaceScreen`'s topbar untouched above it -- breadcrumb reading "No
+project selected," an engine chip reading "No project," Export/Run
+disabled but still sitting there. Reported directly: "почему верхняя
+панель осталась? если проект не выбран то она не нужна" (why did the top
+panel stay? if no project is selected it isn't needed). Correct once
+stated plainly: the no-project view already has its own "Open a Project"
+action, making the breadcrumb's "Projects" link redundant, and nothing
+else in the bar means anything without a project either. Fixed by hiding
+the whole bar (`WorkspaceScreen._topbar_widget.setVisible(project is not
+None)`) instead of disabling two buttons inside it -- safe to hide
+outright, not just greyed out, because `_start_predict`/`_export_csv`
+already guard their own preconditions with a toast regardless of what
+triggers them (the command palette lists the identical Run/Export/Save
+commands unconditionally for exactly this reason, per `app.py`'s own
+existing comment there).
+
+**2. "куда сьехало окно при создании проекта?" (where did the window slide
+off to when creating a project?)** -- a screenshot of `NewProjectDialog`
+showing its panel oddly placed near the top of the screen with the sidebar
+and topbar still fully bright behind it, no visible dimming. Reproduced
+offscreen and pixel-sampled before touching anything (a real regression
+would be too easy to misdiagnose as "reparent/geometry bug" from the
+screenshot alone): the dialog's own geometry was exactly correct (0, 0,
+1320, 860 -- the full window), and reproducing the identical click from
+Home (a trigger point untouched by any of today's changes) showed the
+identical bug, proving this was pre-existing, not a regression from the
+topbar/body-stack work, just newly surfaced by testing the "New Project"
+button this session added to the no-project view. Root cause: every
+scrim-backed modal in the app (`NewProjectDialog`, `ConfirmDialog`,
+`ProjectSettingsDialog`, `CommandPalette` -- all four found by grepping for
+the literal) used the identical hardcoded `rgba(8,10,20,0.34)`, a value
+clearly tuned against light theme's white backdrop (a strong, obvious dim
+there) but never re-checked against dark theme, where that RGB nearly
+matches dark theme's own `bg` (`#0d0f13`) -- compositing barely moved
+anything (confirmed by pixel-sampling a real dialog: sidebar `#101318` ->
+`#0e1017`, a few units of drift, not a visible dim). Fixed with a new
+theme-independent `theme.SCRIM = "rgba(0,0,0,0.45)"` constant (pure black,
+higher alpha -- darkens *any* backdrop by a consistent proportion
+regardless of how dark it already is, unlike a colour tuned to one theme's
+lightness) referenced from all four call sites, replacing each one's own
+copy of the old literal. Re-sampled the same sidebar pixel after the fix:
+`#101318` -> `#090b0d`, a real, clearly visible ~45% darkening. Nested
+modals (Settings -> Delete confirmation) now compose with a proper visual
+depth hierarchy as a side effect, not just the single-dialog case.
+
+Seven new regression tests: one for the topbar-hide (confirmed to fail
+against the pre-fix code), and six for the scrim -- a computed-luminance
+contrast check (`test_theme.py`) parametrized over both themes' `bg`/
+`surface`/`surface2` tokens, asserting the scrim darkens each by at least
+30% in relative luminance. Run against the pre-fix literal, exactly the
+three dark-theme cases failed (bg 10%, surface 19%, surface2 23% actual
+darkening -- all well under the bug's own real-world symptom) while all
+three light-theme cases already passed, precisely confirming the
+diagnosis: light theme was always fine, only dark theme was broken. Full
+suite: 734 passed, 0 failed. Verified offscreen in both themes: Segment
+with no project (topbar gone), `NewProjectDialog` from both Segment and
+Home, and the nested Settings -> Delete-confirmation flow.
+
+---
+
 ## 2026-07-20 — Home motion polish + Segment's "no project" state, corrected same-day
 
 Two product-feel gaps reported directly against the real running app.

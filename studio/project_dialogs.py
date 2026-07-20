@@ -25,6 +25,7 @@ from typing import Callable, Optional
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget, QFrame, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit
 
+from studio import theme
 from studio.components import GroupLabel, IconButton, PillButton, hline, label, soft_shadow
 
 
@@ -42,7 +43,7 @@ class ConfirmDialog(QWidget):
         super().__init__(parent)
         self._t = t
         self._on_confirm = on_confirm
-        self.setStyleSheet("background:rgba(8,10,20,0.34);")
+        self.setStyleSheet(f"background:{theme.SCRIM};")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 140, 0, 0)
@@ -144,7 +145,7 @@ class ProjectSettingsDialog(QWidget):
         self._project = project
         self._on_saved = on_saved
         self._on_delete = on_delete
-        self.setStyleSheet("background:rgba(8,10,20,0.34);")
+        self.setStyleSheet(f"background:{theme.SCRIM};")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 90, 0, 0)
