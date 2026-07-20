@@ -21,7 +21,7 @@ workspace = pytest.importorskip("studio.workspace")
 
 from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtGui import QMouseEvent
-from PyQt6.QtWidgets import QApplication, QFileDialog, QFrame
+from PyQt6.QtWidgets import QApplication, QFileDialog, QFrame, QLabel
 
 from studio import demo, theme
 from studio.layer_model import ImageLayer, LabelsLayer, PAINT, PAN_ZOOM, PointsLayer, ShapesLayer
@@ -206,6 +206,44 @@ def test_topbar_hidden_without_a_project_shown_once_one_is_open(
     project = _make_project(tmp_path, projects, storage, n_images=1)
     ws._load_project(project)
     assert not ws._topbar_widget.isHidden()
+
+
+def test_topbar_engine_badge_is_a_centred_pill_reflecting_the_engine(
+        app, segment, projects, toasts, tmp_path, storage):
+    """The engine now reads as a standalone rounded badge (EngineChip: pill +
+    engine-hued dot) centred in the topbar, not a square chip beside the name.
+    Rebuilt in place on each project switch, in its own centre holder."""
+    from studio.components import EngineChip
+    project = _make_project(tmp_path, projects, storage, n_images=1)  # cellseg1
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    assert isinstance(ws._engine_badge, EngineChip)
+    # It lives in the dedicated centre holder, flanked by stretches (so it's
+    # centred), not inline with the breadcrumb.
+    assert ws._engine_badge_layout.indexOf(ws._engine_badge) != -1
+    labels = [lb.text() for lb in ws._engine_badge.findChildren(QLabel)]
+    assert any("CellSeg1" in txt for txt in labels)
+
+
+def test_topbar_breadcrumb_shows_only_the_project_name(app, segment, projects, toasts, tmp_path, storage):
+    """The name label carries just the name now -- the "/" separator is its own
+    label between the Projects link and the name, not baked into the name's
+    rich text (which is what let the engine move out to the centre)."""
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    assert ws._crumb_name.text() == project.name
+    assert ws._crumb_sep.text() == "/"
+
+
+def test_topbar_projects_crumb_navigates_back(app, segment, projects, toasts, tmp_path, storage):
+    nav = []
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = WorkspaceScreen(theme.DARK, segment, projects,
+                         lambda a, b: toasts.append((a, b)), on_navigate=nav.append)
+    ws._load_project(project)
+    ws._crumb_projects.mouseReleaseEvent(None)
+    assert nav == ["projects"]
 
 
 # ── project / image loading ──────────────────────────────────────────────────

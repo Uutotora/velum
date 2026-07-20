@@ -5,6 +5,31 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — Segment topbar: engine moves to a centred rounded badge; breadcrumb ancestor gets a real hover
+
+Direct feedback on the workspace topbar: the engine sat in a square-ish chip
+crammed next to the project name, and the "Projects" breadcrumb ancestor
+didn't feel interactive.
+
+- **Engine badge, centred.** The engine is now an `EngineChip` (rounded pill
+  with an engine-hued dot, same hue the Projects-tab card uses) centred in the
+  bar between two equal stretches, in its own holder that's rebuilt in place on
+  each project switch. It reads as a standalone status badge for the whole
+  workspace rather than part of the title. The old inline `Chip` next to the
+  name is gone.
+- **Breadcrumb hover.** "Projects" brightens from muted to full text colour on
+  hover (Label-Studio-style ancestor link) and keeps the pointer cursor + click
+  back to the Projects tab. The "/" separator is now its own label between the
+  link and the name, instead of being baked into the name's rich text — which
+  is what freed the engine to move to the centre.
+
+Verified with an offscreen render of the Segment screen (badge centred, dot
+present, breadcrumb split) and tests covering the badge type/placement, the
+name/separator split, and the breadcrumb navigation. Not verified: the live
+hover colour transition (needs a real pointer).
+
+---
+
 ## 2026-07-21 — Segment: images are copied into the project on import; unreadable files no longer storm the log
 
 Reported against a real project: opening it threw "Can't load image / Cannot

@@ -38,7 +38,7 @@ from studio import theme, demo
 from studio.project import ENGINE_LABELS, ENGINE_KIND, Project, ProjectSettings
 from studio.paint import nuclei_pixmap
 from studio.components import (
-    Chip, Badge, PillButton, IconButton, SelectBox, Toggle, Slider, Stepper,
+    Chip, Badge, EngineChip, PillButton, IconButton, SelectBox, Toggle, Slider, Stepper,
     SegControl, StatTile, FieldRow, GroupLabel, Accordion, SmoothScrollArea,
     hline, label, bare_widget,
 )
@@ -80,6 +80,10 @@ _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".npy")
 # not per-instance random hues, so GT and predictions read as visually
 # distinct roles instead of competing for the same rainbow.
 _GT_COLOR = (0, 255, 89)
+# One dot hue per engine for the centred topbar badge — matches the Projects
+# tab's card badge (screens.py's _ENGINE_DOT) so an engine reads the same
+# colour everywhere it appears.
+_ENGINE_DOT = {"cellseg1": theme.VIZ[0], "cellpose": theme.VIZ[1], "sam2": theme.VIZ[5]}
 
 
 def _scroll(inner: QWidget) -> QScrollArea:
@@ -208,16 +212,20 @@ class WorkspaceScreen(QWidget):
         else:
             name, engine_key = project.name, project.engine
             engine_label = ENGINE_LABELS.get(engine_key, engine_key)
-        self._crumb_name.setText(
-            f"<span style='color:{t['border_strong']}'>&nbsp;/&nbsp;</span>"
-            f"<span style='color:{t['text']}'>{html.escape(name)}</span>")
-        kind = ENGINE_KIND.get(engine_key, "muted") if engine_key else "muted"
-        idx = self._chip_row.indexOf(self._engine_chip)
-        self._chip_row.removeWidget(self._engine_chip)
-        self._engine_chip.setParent(None)
-        self._engine_chip.deleteLater()
-        self._engine_chip = Chip(engine_label, t, kind)
-        self._chip_row.insertWidget(idx, self._engine_chip)
+        self._crumb_name.setText(html.escape(name))
+        old = self._engine_badge
+        self._engine_badge = self._make_engine_badge(engine_key, engine_label)
+        self._engine_badge_layout.addWidget(self._engine_badge)
+        self._engine_badge_layout.removeWidget(old)
+        old.setParent(None)
+        old.deleteLater()
+
+    def _make_engine_badge(self, engine_key: Optional[str], engine_label: str) -> QWidget:
+        """The centred topbar engine badge: an EngineChip (rounded pill + hued
+        dot) when a project is open, greyed with a muted dot when none is."""
+        t = self._t
+        dot = _ENGINE_DOT.get(engine_key, t["text_muted"]) if engine_key else t["text_muted"]
+        return EngineChip(engine_label, dot, bg=t["surface2"], fg=t["text_subtle"], border=t["border"])
 
     def _go_to_projects(self) -> None:
         """The breadcrumb's "Projects" segment — a real link back to the
@@ -335,21 +343,45 @@ class WorkspaceScreen(QWidget):
         bar.setFixedHeight(52)
         row = QHBoxLayout(bar)
         row.setContentsMargins(18, 0, 18, 0)
-        row.setSpacing(12)
+        row.setSpacing(8)
+
+        # ── breadcrumb (left): Projects › name ────────────────────────────────
+        # "Projects" is a real link back to the tab, styled like Label Studio's
+        # breadcrumb ancestor: muted at rest, brightening on hover (QSS has no
+        # :hover for a bare QLabel's colour that survives our re-styling, so the
+        # enter/leave handlers set it directly).
         self._crumb_projects = QLabel("Projects")
-        self._crumb_projects.setStyleSheet(
-            f"font-size:13px; font-weight:600; color:{t['text_muted']};")
+        self._crumb_base_css = f"font-size:13px; font-weight:600; color:{t['text_muted']};"
+        self._crumb_hot_css = f"font-size:13px; font-weight:600; color:{t['text']};"
+        self._crumb_projects.setStyleSheet(self._crumb_base_css)
         self._crumb_projects.setCursor(Qt.CursorShape.PointingHandCursor)
         self._crumb_projects.setToolTip("Back to Projects")
+        self._crumb_projects.enterEvent = lambda e: self._crumb_projects.setStyleSheet(self._crumb_hot_css)
+        self._crumb_projects.leaveEvent = lambda e: self._crumb_projects.setStyleSheet(self._crumb_base_css)
         self._crumb_projects.mouseReleaseEvent = lambda e: self._go_to_projects()
         row.addWidget(self._crumb_projects)
+        self._crumb_sep = QLabel("/")
+        self._crumb_sep.setStyleSheet(f"font-size:13px; color:{t['border_strong']};")
+        row.addWidget(self._crumb_sep)
         self._crumb_name = QLabel()
-        self._crumb_name.setStyleSheet("font-size:13px; font-weight:600;")
+        self._crumb_name.setStyleSheet(f"font-size:13px; font-weight:600; color:{t['text']};")
         row.addWidget(self._crumb_name)
-        self._chip_row = row
-        self._engine_chip = Chip("", t, "muted")
-        row.addWidget(self._engine_chip)
+
+        # ── engine badge (centre): a rounded pill with an engine-hued dot ──────
+        # Centred between two equal stretches instead of sitting in a square
+        # next to the name -- the engine is a property of the whole workspace,
+        # so it reads as a standalone status badge, not part of the title.
         row.addStretch(1)
+        self._engine_badge_holder = QWidget()
+        self._engine_badge_layout = QHBoxLayout(self._engine_badge_holder)
+        self._engine_badge_layout.setContentsMargins(0, 0, 0, 0)
+        self._engine_badge_layout.setSpacing(0)
+        self._engine_badge = self._make_engine_badge(None, "No project")
+        self._engine_badge_layout.addWidget(self._engine_badge)
+        row.addWidget(self._engine_badge_holder)
+        row.addStretch(1)
+
+        # ── actions (right) ───────────────────────────────────────────────────
         self._export_btn_topbar = PillButton("Export", t, "ghost", "export", small=True)
         self._export_btn_topbar.clicked.connect(self._export_csv)
         row.addWidget(self._export_btn_topbar)
