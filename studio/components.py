@@ -300,7 +300,7 @@ class SelectBox(QFrame):
             ic.setPixmap(icons.pixmap(lead_icon, lead_color or t["primary"], 14))
             row.addWidget(ic)
         self._val = _ElidingLabel(text)
-        self._val.setStyleSheet(f"color:{t['text']}; font-size:12.5px; font-weight:600;")
+        self._val.setStyleSheet(f"color:{t['text']}; font-size:12.5px; font-weight:600; background:transparent;")
         row.addWidget(self._val, 1)
         chev = QLabel()
         chev.setPixmap(icons.pixmap("chevron_down", t["text_muted"], 13))
@@ -597,9 +597,9 @@ class StatTile(QFrame):
         lay.setSpacing(2)
         v = QLabel(f"{value}<span style='font-size:11px;color:{t['text_muted']}'> {unit}</span>" if unit else value)
         col = t["success"] if ok else t["text"]
-        v.setStyleSheet(f"color:{col}; font-family:{theme.MONO}; font-size:17px; font-weight:600; letter-spacing:-0.5px;")
+        v.setStyleSheet(f"color:{col}; font-family:{theme.MONO}; font-size:17px; font-weight:600; letter-spacing:-0.5px; background:transparent;")
         c = _ElidingLabel(caption)
-        c.setStyleSheet(f"color:{t['text_muted']}; font-size:10px; font-weight:600; letter-spacing:0.1px;")
+        c.setStyleSheet(f"color:{t['text_muted']}; font-size:10px; font-weight:600; letter-spacing:0.1px; background:transparent;")
         lay.addWidget(v)
         lay.addWidget(c)
 
@@ -613,7 +613,14 @@ class FieldRow(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(10)
         lb = QLabel(name)
-        lb.setStyleSheet(f"color:{t['text_subtle']}; font-size:12.5px; font-weight:500;")
+        # background:transparent is mandatory, not decorative -- a QLabel with
+        # its own instance stylesheet nested inside a styled ancestor otherwise
+        # resolves its background via the app-wide QWidget{background:bg} rule
+        # and paints an opaque bg-coloured box over the panel's own `inset`
+        # tone, whose edges read as a faint border ruled around the text (a
+        # real user report: "линии... как будто границы расчерчены"). See the
+        # label() helper's comment for the full mechanism.
+        lb.setStyleSheet(f"color:{t['text_subtle']}; font-size:12.5px; font-weight:500; background:transparent;")
         row.addWidget(lb)
         row.addStretch(1)
         row.addWidget(control)
@@ -624,8 +631,10 @@ class GroupLabel(QLabel):
 
     def __init__(self, text: str, t: dict):
         super().__init__(text.upper())
+        # background:transparent -- see FieldRow's comment (same opaque-box bug).
         self.setStyleSheet(
-            f"color:{t['text_muted']}; font-size:10.5px; font-weight:600; letter-spacing:0.6px;")
+            f"color:{t['text_muted']}; font-size:10.5px; font-weight:600; letter-spacing:0.6px;"
+            f" background:transparent;")
 
 
 class WavingEmoji(QWidget):
@@ -742,7 +751,7 @@ class Accordion(QFrame):
             title_lb.setStyleSheet(
                 f"color:{t['text_subtle']}; font-size:11.5px; font-weight:600; letter-spacing:0.5px;")
         else:
-            title_lb.setStyleSheet(f"color:{t['text']}; font-size:13px; font-weight:600;")
+            title_lb.setStyleSheet(f"color:{t['text']}; font-size:13px; font-weight:600; background:transparent;")
         self._chev = QLabel()
         self._chev.setPixmap(icons.pixmap("chevron" if not open_ else "chevron_down", t["text_muted"], 14))
         hr.addWidget(licon)
@@ -880,7 +889,7 @@ class Sidebar(QFrame):
         lay.addWidget(appearance)
 
         ver = QLabel("v0.9.0 · Studio")
-        ver.setStyleSheet(f"color:{t['text_muted']}; font-size:10.5px; padding:6px 10px 0; font-family:{theme.MONO};")
+        ver.setStyleSheet(f"color:{t['text_muted']}; font-size:10.5px; padding:6px 10px 0; font-family:{theme.MONO}; background:transparent;")
         lay.addWidget(ver)
 
     def _section(self, text: str) -> QLabel:

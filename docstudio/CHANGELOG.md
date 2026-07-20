@@ -5,6 +5,32 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — Fix the faint "ruled border" boxes around panel text/labels
+
+Reported against both Segment side panels: text (section headings, field
+labels, the breadcrumb, layer/image names, GT metrics) had a faint rectangle
+ruled around it — "линии... как будто границы расчерчены".
+
+Root cause is the exact opaque-box bug the `label()` helper already documents,
+just in the labels that *don't* go through it. A `QLabel` given its own
+instance stylesheet (colour/size) but no `background` resolves its background
+via the app-wide `QWidget{background:bg}` rule instead of `QLabel{background:
+transparent}` once it's nested inside a styled ancestor — so it paints an
+opaque `bg`-toned box. On a panel toned `inset`/`surface` (both a shade off
+`bg`), that box's edges read as a border ruled around the text. `bg`=#0d0f13
+vs `inset`=#101318 vs `surface`=#15181e in dark, so it's a real, checkable
+tone gap, not a guess.
+
+Fixed by adding `background:transparent` to every such label: the shared
+`FieldRow` name label and `GroupLabel`, `SelectBox`'s value, `StatTile`'s
+value/caption, the `Accordion` title, the sidebar version, and the Segment
+inline labels (breadcrumb name/separator, layer-controls titles, image/layer
+row names, GT metric values). Regression tests assert `FieldRow`/`GroupLabel`
+carry the transparent background. Verified with an offscreen render (boxes
+gone); full suite green.
+
+---
+
 ## 2026-07-21 — Segment: drag a layer up/down to reorder it (napari parity)
 
 `LayerList.move` existed but nothing drove it. Layer rows are draggable now:

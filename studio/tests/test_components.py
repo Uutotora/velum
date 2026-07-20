@@ -355,3 +355,20 @@ def test_swiperow_offset_is_clamped_to_reveal_width(app):
     _press(row, 200)
     _drag(row, -400)     # yank way past the reveal width
     assert row._offset == -80  # clamped to reveal, not unbounded
+
+
+# ── FieldRow / GroupLabel labels must be transparent (no bg-box border) ────────
+def test_fieldrow_label_background_is_transparent(app):
+    """A FieldRow's name label sits on a panel toned `inset`/`surface`; without
+    an explicit transparent background it paints an opaque `bg`-coloured box
+    whose edges read as a faint border ruled around the text (real report:
+    "линии... как будто границы расчерчены")."""
+    from PyQt6.QtWidgets import QLabel
+    fr = components.FieldRow("opacity", QLabel("ctrl"), theme.DARK)
+    name_lbl = next(l for l in fr.findChildren(QLabel) if l.text() == "opacity")
+    assert "background:transparent" in name_lbl.styleSheet().replace(" ", "")
+
+
+def test_grouplabel_background_is_transparent(app):
+    gl = components.GroupLabel("engine", theme.DARK)
+    assert "background:transparent" in gl.styleSheet().replace(" ", "")

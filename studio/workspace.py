@@ -384,8 +384,8 @@ class WorkspaceScreen(QWidget):
         # :hover for a bare QLabel's colour that survives our re-styling, so the
         # enter/leave handlers set it directly).
         self._crumb_projects = QLabel("Projects")
-        self._crumb_base_css = f"font-size:13px; font-weight:600; color:{t['text_muted']};"
-        self._crumb_hot_css = f"font-size:13px; font-weight:600; color:{t['text']};"
+        self._crumb_base_css = f"font-size:13px; font-weight:600; color:{t['text_muted']}; background:transparent;"
+        self._crumb_hot_css = f"font-size:13px; font-weight:600; color:{t['text']}; background:transparent;"
         self._crumb_projects.setStyleSheet(self._crumb_base_css)
         self._crumb_projects.setCursor(Qt.CursorShape.PointingHandCursor)
         self._crumb_projects.setToolTip("Back to Projects")
@@ -394,10 +394,10 @@ class WorkspaceScreen(QWidget):
         self._crumb_projects.mouseReleaseEvent = lambda e: self._go_to_projects()
         row.addWidget(self._crumb_projects)
         self._crumb_sep = QLabel("/")
-        self._crumb_sep.setStyleSheet(f"font-size:13px; color:{t['border_strong']};")
+        self._crumb_sep.setStyleSheet(f"font-size:13px; color:{t['border_strong']}; background:transparent;")
         row.addWidget(self._crumb_sep)
         self._crumb_name = QLabel()
-        self._crumb_name.setStyleSheet(f"font-size:13px; font-weight:600; color:{t['text']};")
+        self._crumb_name.setStyleSheet(f"font-size:13px; font-weight:600; color:{t['text']}; background:transparent;")
         row.addWidget(self._crumb_name)
 
         # ── engine badge (centre): a rounded pill with an engine-hued dot ──────
@@ -620,7 +620,7 @@ class WorkspaceScreen(QWidget):
         col = QVBoxLayout()
         col.setSpacing(1)
         fnl = QLabel(Path(path).name)
-        fnl.setStyleSheet(f"color:{t['text']}; font-family:{theme.MONO}; font-size:12px; font-weight:600;")
+        fnl.setStyleSheet(f"color:{t['text']}; font-family:{theme.MONO}; font-size:12px; font-weight:600; background:transparent;")
         col.addWidget(fnl)
         col.addWidget(label(status, 10.5, t["text_muted"]))
         lay.addLayout(col, 1)
@@ -904,7 +904,7 @@ class WorkspaceScreen(QWidget):
         lay.addWidget(ty)
         name, count, _visible = layer.to_summary()
         nm = QLabel(name)
-        nm.setStyleSheet(f"color:{t['text']}; font-size:12.5px; font-weight:600;")
+        nm.setStyleSheet(f"color:{t['text']}; font-size:12.5px; font-weight:600; background:transparent;")
         lay.addWidget(nm, 1)
         lay.addWidget(label(count, 10.5, t["text_muted"]))
         # Drag a row up/down to reorder (z-order = list order); a plain click
@@ -1010,7 +1010,7 @@ class WorkspaceScreen(QWidget):
         v.setSpacing(11)
 
         title = QLabel(f"● {html.escape(layer.name)} · labels")
-        title.setStyleSheet(f"color:{t['text_muted']}; font-size:10.5px; font-weight:600; letter-spacing:0.6px;")
+        title.setStyleSheet(f"color:{t['text_muted']}; font-size:10.5px; font-weight:600; letter-spacing:0.6px; background:transparent;")
         v.addWidget(title)
 
         tools = QGridLayout()
@@ -1123,7 +1123,7 @@ class WorkspaceScreen(QWidget):
         v.setContentsMargins(12, 12, 12, 12)
         v.setSpacing(11)
         title = QLabel(f"● {html.escape(layer.name)} · image")
-        title.setStyleSheet(f"color:{t['text_muted']}; font-size:10.5px; font-weight:600; letter-spacing:0.6px;")
+        title.setStyleSheet(f"color:{t['text_muted']}; font-size:10.5px; font-weight:600; letter-spacing:0.6px; background:transparent;")
         v.addWidget(title)
 
         opacity_badge = Badge(f"{layer.opacity:.2f}", t)
@@ -1177,7 +1177,7 @@ class WorkspaceScreen(QWidget):
         v.setContentsMargins(12, 12, 12, 12)
         v.setSpacing(11)
         title = QLabel(f"● {html.escape(layer.name)} · points")
-        title.setStyleSheet(f"color:{t['text_muted']}; font-size:10.5px; font-weight:600; letter-spacing:0.6px;")
+        title.setStyleSheet(f"color:{t['text_muted']}; font-size:10.5px; font-weight:600; letter-spacing:0.6px; background:transparent;")
         v.addWidget(title)
         v.addWidget(FieldRow("count", Badge(str(len(layer.points)), t), t))
 
@@ -1206,7 +1206,7 @@ class WorkspaceScreen(QWidget):
         v.setContentsMargins(12, 12, 12, 12)
         v.setSpacing(11)
         title = QLabel(f"● {html.escape(layer.name)} · shapes")
-        title.setStyleSheet(f"color:{t['text_muted']}; font-size:10.5px; font-weight:600; letter-spacing:0.6px;")
+        title.setStyleSheet(f"color:{t['text_muted']}; font-size:10.5px; font-weight:600; letter-spacing:0.6px; background:transparent;")
         v.addWidget(title)
         v.addWidget(FieldRow("count", Badge(str(len(layer.shapes)), t), t))
 
@@ -2189,7 +2189,7 @@ class WorkspaceScreen(QWidget):
         if self._gt_metrics:
             for name, value in self._format_gt_metrics(self._gt_metrics):
                 mv = QLabel(value)
-                mv.setStyleSheet(f"color:{t['success']}; font-family:{theme.MONO}; font-size:12.5px; font-weight:600;")
+                mv.setStyleSheet(f"color:{t['success']}; font-family:{theme.MONO}; font-size:12.5px; font-weight:600; background:transparent;")
                 acc.add(FieldRow(name, mv, t))
         else:
             note = label("Pick a ground-truth mask to evaluate against.", 11, t["text_muted"])
@@ -2376,7 +2376,7 @@ class WorkspaceScreen(QWidget):
         if self._bench_rows:
             for name, val in self._bench_rows:
                 mv = QLabel(val)
-                mv.setStyleSheet(f"color:{t['text_subtle']}; font-family:{theme.MONO}; font-size:12.5px; font-weight:600;")
+                mv.setStyleSheet(f"color:{t['text_subtle']}; font-family:{theme.MONO}; font-size:12.5px; font-weight:600; background:transparent;")
                 acc.add(FieldRow(name, mv, t))
         else:
             note = label("Runs every available engine against this project's ground-truth masks.",
