@@ -284,7 +284,7 @@ def _pump(app, timeout=2):
 
 def _commands(calls):
     return [
-        Command(id="run", label="Run segmentation", section="Segment", icon="run",
+        Command(id="run", label="Run segmentation", section="Segment", icon="run", emoji="▶️",
                 handler=lambda: calls.append("run")),
         Command(id="batch", label="Run batch prediction", section="Segment", icon="batch",
                 handler=lambda: calls.append("batch")),
@@ -299,6 +299,67 @@ def _palette(parent, calls):
     p = overlays.CommandPalette(parent, theme.DARK, get_commands=lambda: _commands(calls))
     p.setParent(parent)
     return p
+
+
+# ── Raycast-style redesign: no ESC chip, emoji rows, a dynamic footer ──────
+def test_no_esc_chip_anywhere_in_the_input_row(parent, app):
+    """Direct feedback: the ESC chip in the search row was unwanted --
+    closing on Escape is a universal enough convention not to need a
+    permanent on-screen reminder (Raycast itself doesn't show one)."""
+    calls = []
+    palette = _palette(parent, calls)
+    input_row = palette.findChild(QWidget, "PaletteInputRow")
+    labels = [w.text() for w in input_row.findChildren(QLabel)]
+    assert "ESC" not in labels
+
+
+def test_row_shows_the_command_emoji_when_present(parent, app):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    run_row = next(r for r in palette._rows if r.cmd.id == "run")
+    assert run_row._icon.text() == "▶️"
+
+
+def test_row_falls_back_to_the_icon_pixmap_without_an_emoji(parent, app):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    batch_row = next(r for r in palette._rows if r.cmd.id == "batch")
+    assert batch_row._icon.text() == ""
+    assert not batch_row._icon.pixmap().isNull()
+
+
+def test_footer_shows_the_selected_commands_own_label_and_enter_hint(parent, app):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    assert palette._selected == 0
+    assert palette._foot_action_lbl.text() == "Run segmentation"
+    assert palette._foot_hint_lbl.text() == "⏎"
+
+    palette._move_selection(1)
+    assert palette._foot_action_lbl.text() == "Run batch prediction"
+
+
+def test_footer_omits_the_enter_hint_for_a_disabled_selected_command(parent, app):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    disabled_idx = next(i for i, c in enumerate(palette._visible) if c.id == "disabled")
+    palette._selected = disabled_idx
+    palette._apply_selection_styles()
+    assert palette._foot_action_lbl.text() == "Stop training"
+    assert palette._foot_hint_lbl.text() == ""
+
+
+def test_footer_clears_when_nothing_matches(parent, app):
+    calls = []
+    palette = _palette(parent, calls)
+    palette.open()
+    palette.input.setText("xyzxyz")
+    assert palette._foot_action_lbl.text() == ""
+    assert palette._foot_hint_lbl.text() == ""
 
 
 def test_open_builds_rows_grouped_by_section_with_empty_query(parent, app):

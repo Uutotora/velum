@@ -21,6 +21,7 @@ class Command:
     label: str
     section: str
     icon: str = "run"
+    emoji: str = ""                 # a Raycast-style leading glyph; falls back to `icon` if empty
     hint: str = ""
     keywords: str = ""              # extra searchable text, never displayed
     handler: Callable[[], None] = field(default=lambda: None)

@@ -27,7 +27,7 @@ from typing import Callable
 from PyQt6.QtCore import Qt, QEvent, QSize, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QLineEdit,
-    QTextEdit, QFileDialog, QScrollArea,
+    QTextEdit, QFileDialog, QScrollArea, QGraphicsOpacityEffect,
 )
 
 from studio import icons
@@ -283,10 +283,14 @@ def _clear_layout(layout) -> None:
 
 
 class _PaletteRow(QFrame):
-    """One command row: icon + label + an optional trailing hint (usually a
-    keyboard shortcut). ``set_selected`` restyles cheaply in place (no
-    rebuild) so arrow-key navigation stays instant and never disturbs the
-    scroll position the way a full re-render would.
+    """One command row, Raycast-style: a leading emoji (falling back to the
+    existing line-icon set when a command has none) + label + an optional
+    trailing hint, highlighted as a rounded "pill" (inset from the panel's
+    edges by the results layout's own margins — see ``_build_panel``) when
+    selected, rather than a flat edge-to-edge wash. ``set_selected``
+    restyles cheaply in place (no rebuild) so arrow-key navigation stays
+    instant and never disturbs the scroll position the way a full
+    re-render would.
     """
 
     def __init__(self, t: dict, cmd: Command, on_activate: Callable[[Command], None]):
@@ -295,9 +299,12 @@ class _PaletteRow(QFrame):
         self.cmd = cmd
         self.setObjectName("PaletteRow")   # background-only rule -- see EngineChip's comment
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(17, 10, 17, 10)
-        lay.setSpacing(12)
-        self._icon = QLabel()
+        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(11)
+        self._icon = QLabel(cmd.emoji)
+        self._icon.setFixedWidth(20)
+        self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon.setStyleSheet("font-size:15px; background:transparent;")
         lay.addWidget(self._icon)
         self._text = QLabel(cmd.label)
         self._text.setStyleSheet("background:transparent;")
@@ -315,21 +322,29 @@ class _PaletteRow(QFrame):
             # the same convention Accordion's header row already uses for
             # exactly this "make a plain QFrame clickable" need.
             self.mousePressEvent = lambda e: on_activate(cmd)
+        else:
+            # A real dimming, not just a muted text colour -- covers the
+            # emoji glyph too, which (unlike the line-art icon set) can't be
+            # recoloured via a stylesheet `color:` property (emoji render
+            # with their own fixed colours regardless of CSS).
+            effect = QGraphicsOpacityEffect(self)
+            effect.setOpacity(0.4)
+            self.setGraphicsEffect(effect)
         self.set_selected(False)
 
     def set_selected(self, selected: bool) -> None:
         t = self._t
         if not self.cmd.enabled:
-            bg, text_color, icon_color, hover = "transparent", t["text_muted"], t["text_muted"], ""
+            bg, text_color, icon_color = "transparent", t["text_muted"], t["text_muted"]
         elif selected:
             bg, text_color, icon_color = t["primary_weak"], t["text"], t["primary"]
-            hover = f"QFrame:hover{{background:{t['primary_weak']};}}"
         else:
             bg, text_color, icon_color = "transparent", t["text_subtle"], t["text_muted"]
-            hover = f"QFrame:hover{{background:{t['primary_weak']};}}"
-        self.setStyleSheet(f"QFrame#PaletteRow{{background:{bg};}}" + hover)
-        self._text.setStyleSheet(f"color:{text_color}; font-size:13.5px; background:transparent;")
-        self._icon.setPixmap(icons.pixmap(self.cmd.icon, icon_color, 16))
+        hover = f"QFrame:hover{{background:{t['primary_weak']};}}" if self.cmd.enabled else ""
+        self.setStyleSheet(f"QFrame#PaletteRow{{background:{bg}; border-radius:8px;}}" + hover)
+        self._text.setStyleSheet(f"color:{text_color}; font-size:13px; background:transparent;")
+        if not self.cmd.emoji:
+            self._icon.setPixmap(icons.pixmap(self.cmd.icon, icon_color, 16))
 
 
 class _BoundedScrollArea(QScrollArea):
@@ -425,23 +440,22 @@ class CommandPalette(QWidget):
         # CommandPalette was still 100% static content at the time and never
         # got a real screenshot pass, so this instance went undiscovered
         # until the palette actually rendered live content here.
+        # Raycast-style search row: a plain magnifying glass, no visible
+        # field boundary (the row IS the field), no ESC chip -- closing on
+        # Escape is a universal-enough convention not to need a permanent
+        # on-screen reminder, and Raycast itself doesn't show one either.
         inp_wrap = bare_widget()
         inp_wrap.setObjectName("PaletteInputRow")
         ir = QHBoxLayout(inp_wrap)
-        ir.setContentsMargins(17, 15, 17, 15)
+        ir.setContentsMargins(16, 13, 16, 13)
         ir.setSpacing(11)
         ic = QLabel()
-        ic.setPixmap(icons.pixmap("diagnose", t["text_muted"], 17))
+        ic.setPixmap(icons.pixmap("search", t["text_muted"], 17))
         ir.addWidget(ic)
         self.input = QLineEdit()
         self.input.setPlaceholderText("Search actions, projects, engines…")
         self.input.setStyleSheet("QLineEdit{border:none; background:transparent; font-size:15px;}")
         ir.addWidget(self.input, 1)
-        esc = QLabel("ESC")
-        esc.setStyleSheet(
-            f"color:{t['text_muted']}; font-family:{theme.MONO}; font-size:10.5px;"
-            f"border:1px solid {t['border']}; border-radius:5px; padding:2px 6px;")
-        ir.addWidget(esc)
         v.addWidget(inp_wrap)
         v.addWidget(hline(t))
 
@@ -458,8 +472,14 @@ class CommandPalette(QWidget):
         self._results_container = bare_widget()
         self._results_container.setStyleSheet(f"background:{t['surface']};")
         self._results_layout = QVBoxLayout(self._results_container)
-        self._results_layout.setContentsMargins(0, 6, 0, 6)
-        self._results_layout.setSpacing(0)
+        # Horizontal inset (not 0) -- Raycast's rows sit inset from the
+        # panel's own edges, so a selected row's rounded "pill" highlight
+        # (_PaletteRow.set_selected) reads as a distinct rounded shape
+        # rather than a hard-edged rectangle flush with the panel border.
+        # A little vertical breathing room between rows too, now that each
+        # has its own rounded corners.
+        self._results_layout.setContentsMargins(8, 8, 8, 8)
+        self._results_layout.setSpacing(2)
         self._results_area = _BoundedScrollArea(self._MAX_RESULTS_HEIGHT)
         self._results_area.setWidgetResizable(True)
         self._results_area.setFrameShape(QFrame.Shape.NoFrame)
@@ -468,14 +488,27 @@ class CommandPalette(QWidget):
         self._results_area.setWidget(self._results_container)
         v.addWidget(self._results_area)
 
+        # Raycast-style footer: app branding on the left, the *currently
+        # selected* command's own label + a "⏎" hint on the right (updated
+        # live by _update_footer_action) -- tells you what Enter actually
+        # does, rather than a generic "↑↓ navigate / ⏎ run / esc close"
+        # legend that never changes and states the merely-mechanical.
         foot = bare_widget()   # see inp_wrap's comment above -- same bug, same fix
         foot.setObjectName("PaletteFootRow")
         fr = QHBoxLayout(foot)
-        fr.setContentsMargins(17, 10, 17, 10)
-        fr.setSpacing(16)
-        for k, act in [("↑↓", "navigate"), ("⏎", "run"), ("esc", "close")]:
-            fr.addWidget(label(f"<span style='font-family:{theme.MONO}'>{k}</span> {act}", 11, t["text_muted"]))
+        fr.setContentsMargins(16, 9, 14, 9)
+        fr.setSpacing(8)
+        brand_ic = QLabel()
+        brand_ic.setPixmap(icons.pixmap("spark", t["text_muted"], 13))
+        fr.addWidget(brand_ic)
+        fr.addWidget(label("CellSeg1 Studio", 11, t["text_muted"], 600))
         fr.addStretch(1)
+        self._foot_action_lbl = label("", 11, t["text_subtle"], 600)
+        fr.addWidget(self._foot_action_lbl)
+        self._foot_hint_lbl = QLabel()
+        self._foot_hint_lbl.setStyleSheet(
+            f"color:{t['text_muted']}; font-family:{theme.MONO}; font-size:11px; background:transparent;")
+        fr.addWidget(self._foot_hint_lbl)
         v.addWidget(hline(t))
         v.addWidget(foot)
         return panel
@@ -496,7 +529,11 @@ class CommandPalette(QWidget):
         else:
             for section, cmds in group_by_section(self._commands):
                 header = label(section.upper(), 10.5, self._t["text_muted"], 600, 0.6)
-                header.setContentsMargins(17, 12, 17, 5)
+                # 10px, not the old 17px: _results_layout's own 8px inset
+                # (_build_panel) + this margin should land the header text
+                # roughly under each row's own text (10px row margin + 8px
+                # container inset), not indented further than it.
+                header.setContentsMargins(10, 12, 10, 5)
                 self._results_layout.addWidget(header)
                 for cmd in cmds:
                     self._visible.append(cmd)
@@ -558,6 +595,16 @@ class CommandPalette(QWidget):
     def _apply_selection_styles(self) -> None:
         for i, row in enumerate(self._rows):
             row.set_selected(i == self._selected)
+        self._update_footer_action()
+
+    def _update_footer_action(self) -> None:
+        if 0 <= self._selected < len(self._visible):
+            cmd = self._visible[self._selected]
+            self._foot_action_lbl.setText(cmd.label)
+            self._foot_hint_lbl.setText("⏎" if cmd.enabled else "")
+        else:
+            self._foot_action_lbl.setText("")
+            self._foot_hint_lbl.setText("")
 
     def _scroll_to_selected(self) -> None:
         if 0 <= self._selected < len(self._rows):

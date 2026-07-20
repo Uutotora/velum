@@ -5,6 +5,70 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-20 — Follow-up #2: a real visual pass, Raycast as the reference
+
+Direct feedback again after the sizing fix: still not right — the search
+row read as too wide/undefined, the whole thing didn't read as a *real*
+launcher the way Spotlight/Raycast do, and "why is there an ESC button" (a
+fair question — no real launcher shows one). Named reference this time:
+Raycast specifically, plus "emoji... for quick navigation." A design pass,
+not another layout bug.
+
+**Changes, all in `_PaletteRow`/`_build_panel` (`overlays.py`) and
+`_build_commands()` (`app.py`):**
+
+- **The ESC chip is gone.** Closing on Escape is a universal enough
+  convention that no real launcher spells it out on-screen; Raycast
+  doesn't either.
+- **Every command now carries an emoji** (`Command.emoji`, new field) —
+  🏠 Home, 🔬 Segment, 🧠 Models & Train, ▶️ Run segmentation, 🎯 Benchmark,
+  🩺 Diagnose, 🌞/🌙 the *destination* theme, and so on for all ~30 —
+  rendered in `_PaletteRow` in place of the existing line-icon set (which
+  still renders as a fallback for any command with no emoji, so the field
+  is additive, not a breaking change to `Command`'s shape). Emoji are real
+  colour glyphs a stylesheet `color:` can't recolour, so a disabled row
+  now dims via a real `QGraphicsOpacityEffect` on the whole row instead of
+  just muting the text colour — covers the glyph too.
+- **Rows read as a real Raycast-style list**: tighter padding (10/8px, was
+  17/10), inset 8px from the panel's own edges (was flush), each row's own
+  selected-state highlight now a rounded 8px "pill" rather than a flat
+  edge-to-edge wash — the shape reads as a distinct rounded rectangle
+  instead of a hard-edged bar. Section headers' own margin was tightened
+  to match (10px, was 17px) so header text lands under row text instead of
+  indented further than it.
+- **The footer is now dynamic, not a static legend.** Instead of a fixed
+  "↑↓ navigate · ⏎ run · esc close" that never changes and states the
+  merely mechanical, the right side now shows the *currently selected
+  command's own label* plus a "⏎" hint (blank if the row is disabled) —
+  updated live on every arrow-key move and every re-render, telling you
+  what Enter actually does rather than just that it does something. The
+  left side keeps a small app mark + "CellSeg1 Studio" for context, the
+  same "own branding, not a generic legend" idea Raycast's own footer uses
+  (its own extension name + primary action, not a fixed instructions bar).
+
+**Verified:** 661 `studio/tests` (up from 655) — 7 new cases (no ESC chip
+anywhere in the input row; a command with an emoji renders it; a command
+without one falls back to the icon pixmap; the footer tracks the selected
+row's label + hint across a move; the hint is blank for a disabled
+selection; the footer clears when nothing matches) plus the existing
+`_commands()` test fixture extended with one real emoji to exercise both
+the emoji and fallback paths side by side. Full repo `tests/` (445)
+untouched. The throwaway python3.10 light-group check (592 passed/22
+skipped) green. Fresh offscreen screenshots in both themes, with and
+without an active project (so both the enabled, full-colour-emoji state
+and the dimmed/disabled state were actually checked, not assumed),
+confirm the header-alignment fix and the overall look side by side
+against the north-star mockup screenshot this whole thread started from.
+
+**Not verified:** how this reads on a real, non-offscreen display, incl.
+actual emoji glyph rendering/alignment across different OS font stacks
+(offscreen Qt uses whatever emoji font resolution this sandbox has, which
+may render individual glyphs slightly differently than a real user's
+machine); real Ollama/Custom-API server interaction (unchanged from prior
+entries).
+
+---
+
 ## 2026-07-20 — Follow-up: the palette read as bloated, and it genuinely was
 
 Direct feedback right after the ship below: the palette looked worse than

@@ -291,14 +291,18 @@ class StudioWindow(QMainWindow):
         # the sidebar's own list; "assistant"/"logs" already toggle their
         # drawer via navigate() itself, same as a sidebar click would.
         _SHORTCUT_HINTS = {"assistant": "⌘T", "logs": "⌘L"}
+        _NAV_EMOJI = {
+            "home": "🏠", "projects": "🗂️", "workspace": "🔬", "train": "🧠",
+            "dashboard": "📊", "assistant": "💬", "logs": "📜",
+        }
         for key, icon_name, nav_label, _section in _NAV:
             commands.append(Command(
                 id=f"nav.{key}", label=f"Go to {nav_label}", section="Navigate",
-                icon=icon_name, hint=_SHORTCUT_HINTS.get(key, ""),
+                icon=icon_name, emoji=_NAV_EMOJI.get(key, ""), hint=_SHORTCUT_HINTS.get(key, ""),
                 handler=lambda k=key: self.navigate(k)))
         commands.append(Command(
             id="nav.guide", label="Go to Guide & Docs", section="Navigate",
-            icon="guide", handler=lambda: self.navigate("guide")))
+            icon="guide", emoji="📘", handler=lambda: self.navigate("guide")))
 
         # Segment -- Run/Save/Export are always listed (greyed out with no
         # active project) since _start_predict/_save_masks/etc. already
@@ -307,15 +311,15 @@ class StudioWindow(QMainWindow):
         # to compare "current" against.
         commands += [
             Command(id="segment.run", label="Run segmentation", section="Segment",
-                    icon="run", handler=ws.rerun_predict, enabled=project is not None),
+                    icon="run", emoji="▶️", handler=ws.rerun_predict, enabled=project is not None),
             Command(id="segment.batch", label="Run batch prediction", section="Segment",
-                    icon="batch", handler=ws.run_batch, enabled=project is not None),
+                    icon="batch", emoji="🗃️", handler=ws.run_batch, enabled=project is not None),
             Command(id="segment.benchmark", label="Run benchmark vs. ground truth", section="Segment",
-                    icon="chart", handler=ws.run_benchmark, enabled=project is not None),
+                    icon="chart", emoji="🎯", handler=ws.run_benchmark, enabled=project is not None),
             Command(id="segment.save", label="Save masks", section="Segment",
-                    icon="save", handler=ws.save_masks, enabled=project is not None),
+                    icon="save", emoji="💾", handler=ws.save_masks, enabled=project is not None),
             Command(id="segment.export_csv", label="Export measurements → CSV", section="Segment",
-                    icon="csv", handler=ws.export_measurements, enabled=project is not None),
+                    icon="csv", emoji="📤", handler=ws.export_measurements, enabled=project is not None),
         ]
         if project is not None:
             current_engine = project.settings.engine
@@ -330,44 +334,46 @@ class StudioWindow(QMainWindow):
                     keywords = "zstack timelapse z-stack" if key == "sam2" else ""
                     commands.append(Command(
                         id=f"segment.engine.{key}", label=f"Switch engine → {short_label}",
-                        section="Segment", icon="workspace", keywords=keywords,
+                        section="Segment", icon="workspace", emoji="🔁", keywords=keywords,
                         handler=lambda k=key: ws.switch_engine(k)))
             current_preset = project.settings.quality_preset
             for name in QUALITY_PRESET_NAMES:
                 if name != current_preset:
                     commands.append(Command(
                         id=f"segment.preset.{name}", label=f"Apply preset → {name}",
-                        section="Segment", icon="chart",
+                        section="Segment", icon="chart", emoji="🎛️",
                         handler=lambda n=name: ws.apply_preset(n)))
 
         # Models & Train
         is_training = self._train.is_training()
         commands += [
             Command(id="train.start", label="Start training", section="Models & Train",
-                    icon="models", handler=train_screen.start_training, enabled=not is_training),
+                    icon="models", emoji="🎓", handler=train_screen.start_training,
+                    enabled=not is_training),
             Command(id="train.stop", label="Stop training", section="Models & Train",
-                    icon="close", handler=train_screen.stop_training, enabled=is_training),
+                    icon="close", emoji="⏹️", handler=train_screen.stop_training,
+                    enabled=is_training),
             Command(id="train.import", label="Import a trained model…", section="Models & Train",
-                    icon="folder", handler=train_screen.import_model),
+                    icon="folder", emoji="📥", handler=train_screen.import_model),
         ]
 
         # Dashboard
         commands.append(Command(
             id="dashboard.aim", label="Open in Aim", section="Dashboard",
-            icon="chart", handler=dashboard_screen.open_in_aim))
+            icon="chart", emoji="📈", handler=dashboard_screen.open_in_aim))
 
         # Assistant -- opens the drawer, then acts, so the effect is visible
         # immediately rather than happening silently behind a closed panel.
         commands.append(Command(
             id="assistant.diagnose", label="Diagnose current result", section="Assistant",
-            icon="diagnose", handler=self._cmd_diagnose))
+            icon="diagnose", emoji="🩺", handler=self._cmd_diagnose))
         current_backend = self._assistant_controller.settings.backend
         for idx, key in enumerate(BACKENDS):
             if key != current_backend:
                 commands.append(Command(
                     id=f"assistant.backend.{key}",
                     label=f"Switch Assistant backend → {BACKEND_LABELS[key]}",
-                    section="Assistant", icon="assistant",
+                    section="Assistant", icon="assistant", emoji="🤖",
                     handler=lambda i=idx: self._cmd_switch_backend(i)))
 
         # Appearance -- names the concrete destination, not a generic toggle,
@@ -375,28 +381,29 @@ class StudioWindow(QMainWindow):
         other_theme = "Light" if self._theme_name == "dark" else "Dark"
         commands.append(Command(
             id="appearance.theme", label=f"Switch to {other_theme} theme", section="Appearance",
-            icon="sun" if other_theme == "Light" else "moon", handler=self.toggle_theme))
+            icon="sun" if other_theme == "Light" else "moon",
+            emoji="🌞" if other_theme == "Light" else "🌙", handler=self.toggle_theme))
 
         # Projects
         commands.append(Command(
             id="projects.new", label="New Project…", section="Projects",
-            icon="plus", handler=self._new_project_dialog.open))
+            icon="plus", emoji="➕", handler=self._new_project_dialog.open))
         commands.append(Command(
             id="projects.sample", label="Open Sample", section="Projects",
-            icon="chart", handler=self._cmd_open_sample))
+            icon="chart", emoji="🧪", handler=self._cmd_open_sample))
 
         # Help -- mirrors Home's own Resources links exactly (see
         # screens.py's HomeScreen._resources_card), including the
         # already-established redundancy against "Go to Assistant" above.
         commands += [
             Command(id="help.docs", label="Documentation", section="Help",
-                    icon="guide", handler=lambda: self.navigate("guide")),
+                    icon="guide", emoji="📖", handler=lambda: self.navigate("guide")),
             Command(id="help.getting_started", label="Getting started guide", section="Help",
-                    icon="guide", handler=lambda: self.navigate("guide:getting-started")),
+                    icon="guide", emoji="🚀", handler=lambda: self.navigate("guide:getting-started")),
             Command(id="help.ask_assistant", label="Ask the Assistant", section="Help",
-                    icon="assistant", handler=lambda: self.navigate("assistant")),
+                    icon="assistant", emoji="💬", handler=lambda: self.navigate("assistant")),
             Command(id="help.github", label="GitHub", section="Help",
-                    icon="settings", handler=screens._open_github),
+                    icon="settings", emoji="🐙", handler=screens._open_github),
         ]
         return commands
 
