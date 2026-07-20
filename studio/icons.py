@@ -82,6 +82,8 @@ PATHS: dict[str, str] = {
     "target":      '<path d="M13 3l3 3-3 3M11 21l-3-3 3-3M3 11l3-3 3 3M21 13l-3 3-3-3M6 12h12M12 6v12"/>',
     "trash":       '<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/>',
     "console":     '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 9l3 3-3 3M13 15h4"/>',
+    "undo":        '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12H8"/>',
+    "redo":        '<path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h6"/>',
 }
 
 

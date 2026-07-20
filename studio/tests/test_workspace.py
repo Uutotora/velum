@@ -436,6 +436,39 @@ def test_images_drop_adds_only_local_image_files(app, segment, projects, toasts,
     assert Path(added).name == Path(new_img).name
 
 
+# ── undo / redo wiring ────────────────────────────────────────────────────────
+def test_workspace_undo_redo_revert_and_reapply_a_mask_edit(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    target = ws._canvas.edit_target()
+    target.begin_edit()
+    target.paint(10, 10, label=5)
+    assert target.max_label == 5
+    ws._undo()
+    assert target.max_label == 0
+    ws._redo()
+    assert target.max_label == 5
+
+
+def test_workspace_undo_is_a_safe_noop_with_empty_history(
+        app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._undo()  # nothing painted yet -- must not raise
+    ws._redo()
+
+
+def test_canvas_bar_has_undo_and_redo_buttons(app, segment, projects, toasts, tmp_path, storage):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    assert "undo" in ws._vbar_buttons
+    assert "redo" in ws._vbar_buttons
+
+
 # ── layer panel actions ───────────────────────────────────────────────────────
 def test_add_points_and_shapes_layers(app, segment, projects, toasts, tmp_path, storage):
     project = _make_project(tmp_path, projects, storage)

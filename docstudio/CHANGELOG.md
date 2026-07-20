@@ -5,6 +5,33 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — Segment: mask editing gets undo / redo (napari parity)
+
+The canvas edited masks in place with no way back — paint a wrong stroke and
+it was permanent. Direct feedback flagged the missing undo/redo outright.
+
+- `LabelsLayer` now keeps a bounded per-layer edit history (`begin_edit()` +
+  `undo()`/`redo()`/`can_undo`/`can_redo`), snapshotting `data` before a
+  mutation. The canvas calls `begin_edit()` once at the *start* of a stroke —
+  a whole paint/erase drag, or one fill/polygon commit — so a single undo
+  reverts the whole stroke, not one brush dab, and a fresh edit invalidates
+  the redo branch like every editor. History is capped (24 steps) to stay
+  memory-bounded on volumes.
+- Canvas `undo()`/`redo()` operate on the active Labels layer, repaint, and
+  report; they no-op safely with an empty history or no labels layer.
+- Wired to ⌘Z / ⇧⌘Z (Ctrl+Z / Ctrl+Y off macOS, via `QKeySequence.StandardKey`
+  so it's per-platform correct) and two new buttons at the head of the canvas
+  bar (new `undo`/`redo` icons). Picking a colour makes no history entry.
+
+Verified: offscreen render shows the two buttons in the canvas bar; tests
+cover the model history (undo/redo/no-op/redo-invalidation/cap/one-step-stroke),
+the canvas wiring through real mouse drags (paint stroke + fill are single undo
+steps; pick creates none), and the workspace shortcut delegation. Not verified:
+the live ⌘Z keypress against a real focused window (headless can't press keys),
+but the same handler the shortcut calls is exercised directly.
+
+---
+
 ## 2026-07-21 — Segment topbar: engine moves to a centred rounded badge; breadcrumb ancestor gets a real hover
 
 Direct feedback on the workspace topbar: the engine sat in a square-ish chip

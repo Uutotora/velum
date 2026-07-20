@@ -130,6 +130,13 @@ class LabelsLayer(Layer):
         kw.setdefault("opacity", 0.7)
         super().__init__(name, **kw)
         self.data = np.ascontiguousarray(data).astype(np.int32)
+        # Bounded edit history for undo/redo (napari's Labels has this; the
+        # Studio canvas edited masks in place with no way back). Snapshots are
+        # full-plane copies -- simple and correct; the cap keeps memory bounded
+        # for large volumes. See begin_edit()/undo()/redo() below.
+        self._undo_stack: list[np.ndarray] = []
+        self._redo_stack: list[np.ndarray] = []
+        self._history_limit = 24
         self.selected_label = 1
         self.brush_size = 10
         self.contiguous = True
@@ -196,6 +203,44 @@ class LabelsLayer(Layer):
         rainbow)."""
         ids = np.unique(self.data)
         self.color_overrides = {int(i): rgb for i in ids if i > 0}
+
+    # ── undo / redo history ──────────────────────────────────────────────────
+    def begin_edit(self) -> None:
+        """Snapshot ``data`` before a mutation so it can be undone. Call once
+        per *stroke* -- a whole paint/erase drag, or one fill/polygon action --
+        not per brush dab, or the history fills with near-identical frames.
+        Starting a fresh edit invalidates any redo branch, exactly like napari
+        and every other editor."""
+        self._undo_stack.append(self.data.copy())
+        if len(self._undo_stack) > self._history_limit:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo_stack)
+
+    @property
+    def can_redo(self) -> bool:
+        return bool(self._redo_stack)
+
+    def undo(self) -> bool:
+        """Revert to the previous snapshot. Returns False (a no-op) when there
+        is nothing to undo, so callers can gate a toolbar button on it."""
+        if not self._undo_stack:
+            return False
+        self._redo_stack.append(self.data.copy())
+        self.data = self._undo_stack.pop()
+        return True
+
+    def redo(self) -> bool:
+        """Re-apply the last undone snapshot. False when the redo branch is
+        empty (nothing undone, or a new edit cleared it)."""
+        if not self._redo_stack:
+            return False
+        self._undo_stack.append(self.data.copy())
+        self.data = self._redo_stack.pop()
+        return True
 
     # ── editing ──────────────────────────────────────────────────────────────
     def _edit_planes(self, z: Optional[int]) -> list[np.ndarray]:

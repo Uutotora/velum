@@ -632,3 +632,42 @@ def test_render_labels_show_selected_label_hides_others():
     _rgb, alpha = _render_labels(layer, data)
     assert alpha[0, 0] > 0
     assert alpha[0, 1] == 0
+
+
+# ── undo / redo wiring (begin_edit at stroke start + canvas delegation) ────────
+def test_paint_stroke_is_undoable_via_canvas(app):
+    c, layers, *_ = _make_canvas(app)
+    c.set_mode(PAINT)
+    _press(c, QPoint(20, 20))
+    _move(c, QPoint(24, 20))
+    _release(c, QPoint(24, 20))
+    assert layers[1].max_label == 1
+    assert c.undo() is True
+    assert layers[1].max_label == 0  # whole stroke reverted
+    assert c.redo() is True
+    assert layers[1].max_label == 1  # and re-applied
+
+
+def test_fill_click_is_a_single_undo_step(app):
+    c, layers, *_ = _make_canvas(app)
+    layers[1].data[10:20, 10:20] = 2
+    layers[1].selected_label = 9
+    c.set_mode(FILL)
+    _press(c, QPoint(15, 15))
+    assert (layers[1].data[10:20, 10:20] == 9).all()
+    assert c.undo() is True
+    assert (layers[1].data[10:20, 10:20] == 2).all()  # back to the pre-fill label
+
+
+def test_canvas_undo_redo_noop_without_labels_layer(app):
+    c, layers, *_ = _make_canvas(app, with_labels=False)
+    assert c.undo() is False
+    assert c.redo() is False
+
+
+def test_pick_does_not_create_an_undo_step(app):
+    c, layers, *_ = _make_canvas(app)
+    layers[1].data[20, 20] = 4
+    c.set_mode(PICK)
+    _press(c, QPoint(20, 20))
+    assert not layers[1].can_undo  # picking a colour edits nothing

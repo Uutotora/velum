@@ -325,3 +325,62 @@ def test_layer_list_clear_resets_everything():
     assert len(layers) == 0
     assert layers.selected_index is None
     assert layers.current_z == 0
+
+
+# ── LabelsLayer undo / redo history ───────────────────────────────────────────
+def test_labels_undo_restores_pre_edit_data():
+    layer = LabelsLayer("L", np.zeros((20, 20), dtype=np.int32))
+    assert not layer.can_undo and not layer.can_redo
+    layer.begin_edit()
+    layer.paint(10, 10, label=3)
+    assert layer.data.max() == 3
+    assert layer.can_undo
+    assert layer.undo() is True
+    assert layer.data.max() == 0  # back to the pre-paint snapshot
+    assert layer.can_redo
+
+
+def test_labels_redo_reapplies_undone_edit():
+    layer = LabelsLayer("L", np.zeros((20, 20), dtype=np.int32))
+    layer.begin_edit()
+    layer.paint(10, 10, label=7)
+    layer.undo()
+    assert layer.data.max() == 0
+    assert layer.redo() is True
+    assert layer.data.max() == 7
+    assert not layer.can_redo
+
+
+def test_labels_undo_redo_are_noops_when_empty():
+    layer = LabelsLayer("L", np.zeros((5, 5), dtype=np.int32))
+    assert layer.undo() is False
+    assert layer.redo() is False
+
+
+def test_labels_new_edit_clears_the_redo_branch():
+    layer = LabelsLayer("L", np.zeros((10, 10), dtype=np.int32))
+    layer.begin_edit(); layer.paint(2, 2, label=1)
+    layer.undo()
+    assert layer.can_redo
+    layer.begin_edit(); layer.paint(8, 8, label=2)  # a fresh edit
+    assert not layer.can_redo  # redo branch invalidated, like every editor
+
+
+def test_labels_undo_history_is_bounded():
+    layer = LabelsLayer("L", np.zeros((6, 6), dtype=np.int32))
+    for i in range(layer._history_limit + 10):
+        layer.begin_edit()
+        layer.paint(3, 3, label=i + 1)
+    assert len(layer._undo_stack) == layer._history_limit  # capped, not unbounded
+
+
+def test_labels_multi_dab_stroke_is_one_undo_step():
+    """A paint drag calls paint() many times but begin_edit() once at stroke
+    start -- so a single undo reverts the whole stroke, not one dab."""
+    layer = LabelsLayer("L", np.zeros((30, 30), dtype=np.int32))
+    layer.begin_edit()
+    for c in range(5, 25):
+        layer.paint(15, c, label=4)  # many dabs, no further begin_edit
+    assert layer.data.max() == 4
+    layer.undo()
+    assert layer.data.max() == 0  # the entire stroke gone in one undo

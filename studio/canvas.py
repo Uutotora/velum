@@ -105,6 +105,26 @@ class Canvas(QWidget):
         labels = self.layers.by_kind("labels")
         return labels[0] if labels else None
 
+    def undo(self) -> bool:
+        """Undo the last edit on the target Labels layer; repaint + report.
+        Returns False (no-op) with nothing to undo, so a button can gate on it."""
+        target = self.edit_target()
+        if target is None or not target.undo():
+            return False
+        self.layers.notify()
+        self.update()
+        self._status("Undo")
+        return True
+
+    def redo(self) -> bool:
+        target = self.edit_target()
+        if target is None or not target.redo():
+            return False
+        self.layers.notify()
+        self.update()
+        self._status("Redo")
+        return True
+
     def set_mode(self, mode: str) -> None:
         self.mode = mode
         self._polygon_pts = []
@@ -545,16 +565,19 @@ class Canvas(QWidget):
             return
 
         if self.mode == PAINT:
+            target.begin_edit()  # snapshot once at stroke start (drag paints many dabs)
             self._painting = True
             target.paint(row, col, z)
             self._paint_last = (row, col)
             self.layers.notify()
         elif self.mode == ERASE:
+            target.begin_edit()
             self._painting = True
             target.erase(row, col, z)
             self._paint_last = (row, col)
             self.layers.notify()
         elif self.mode == FILL:
+            target.begin_edit()
             target.fill(row, col, z)
             self.layers.notify()
         elif self.mode == PICK:
@@ -577,6 +600,7 @@ class Canvas(QWidget):
             target = self.edit_target()
             if target is not None:
                 z = self.layers.current_z if self.layers.n_planes > 1 else None
+                target.begin_edit()  # one undo step for the whole polygon commit
                 target.polygon_fill(self._polygon_pts, z)
                 self.layers.notify()
             self._polygon_pts = []

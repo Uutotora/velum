@@ -27,7 +27,7 @@ from typing import Optional
 
 import numpy as np
 from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtGui import QImage, QPixmap, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout,
     QStackedWidget, QToolButton, QLineEdit, QSizePolicy, QScrollArea, QFileDialog,
@@ -183,6 +183,14 @@ class WorkspaceScreen(QWidget):
         self._bench_row_signal.connect(self._on_bench_row)
         self._bench_log_signal.connect(self._on_predict_log)
         self._bench_done_signal.connect(self._on_bench_done)
+
+        # Undo / redo for mask edits. StandardKey resolves per-platform (⌘Z /
+        # ⇧⌘Z on macOS, Ctrl+Z / Ctrl+Y elsewhere); the handlers are no-ops
+        # with an empty history, so the shortcuts are always safe to fire.
+        self._undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        self._undo_shortcut.activated.connect(self._undo)
+        self._redo_shortcut = QShortcut(QKeySequence.StandardKey.Redo, self)
+        self._redo_shortcut.activated.connect(self._redo)
 
         self._load_project(None)  # establish the empty state now everything exists
 
@@ -797,6 +805,16 @@ class WorkspaceScreen(QWidget):
             target.shuffle_colors()
             self._layers.notify()
 
+    def _undo(self) -> None:
+        """Undo the last mask edit (paint/erase/fill/polygon) — ⌘Z / Ctrl+Z and
+        the canvas bar's undo button. A no-op with nothing to undo."""
+        if self._canvas is not None and self._canvas.undo():
+            self._update_legend()
+
+    def _redo(self) -> None:
+        if self._canvas is not None and self._canvas.redo():
+            self._update_legend()
+
     # ── layer controls (dispatch by kind) ────────────────────────────────────
     def _rebuild_layer_controls(self) -> None:
         layout = self._layer_controls_layout
@@ -1188,6 +1206,8 @@ class WorkspaceScreen(QWidget):
         vl.setContentsMargins(5, 5, 5, 5)
         vl.setSpacing(3)
         vbar_defs = [
+            ("undo", "Undo  ⌘Z", self._undo),
+            ("redo", "Redo  ⇧⌘Z", self._redo),
             ("console", "Toggle console", self._toggle_logs_console),
             ("cube3d", "Toggle 2D / 3D", self._toggle_mip),
             ("refresh", "Roll dimensions", self._roll_channel),
