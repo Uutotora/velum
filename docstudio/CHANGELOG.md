@@ -5,6 +5,49 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-20 — App icon replaced with a proper macOS-style rounded-square version
+
+Same-day follow-up: product owner supplied a second, better logo (the same
+blob glyph, now presented as a proper macOS-style rounded-square icon —
+blue-to-purple gradient background, soft drop shadow, the kind Apple's own
+Human Interface Guidelines icon templates produce) and asked for it in place
+of the first.
+
+The source PNG wasn't ready to use as-is: it was flat RGB (no alpha
+channel), the actual icon content — the rounded square — sat on a plain
+light-grey mockup/presentation backdrop that needed removing, not keeping.
+Naive colour-keying (treat anything close to the background colour as
+transparent) would have been wrong here specifically: the icon's own glyph
+is a *white* blob, close enough in colour to the light-grey backdrop that a
+flat threshold would have punched a hole through it. Used flood-fill /
+connected-component labelling instead (`scipy.ndimage.label`): only
+background-coloured pixels *connected to the image's own border* count as
+background, so the enclosed white glyph — never touching the border — stays
+opaque regardless of its own colour, while the true backdrop, wherever it
+reads similarly, is correctly removed.
+
+First attempt at the cutout left a faint light halo around the icon's edge
+against a dark backdrop — the anti-aliased transition band between icon and
+original backdrop is a real colour *blend*, and treating those pixels as
+fully opaque kept their too-light blended colour. Fixed by eroding the
+foreground mask a further ~16px past the hard edge (discarding the
+ambiguous blended band entirely, which a smooth, large-radius glyph like
+this one can easily afford to lose without visibly changing shape) before
+a small Gaussian blur for the actual anti-aliasing — checked at 2x zoom on
+a dark backdrop specifically (where any residual light fringe would be most
+visible) before trusting it. Final result centred onto a clean, transparent
+1024×1024 canvas (the standard icon-authoring resolution — a non-square
+crop can subtly squish when scaled to fill a square Dock tile slot).
+
+No code changes needed beyond replacing `studio/assets/icon.png` itself —
+`load_icon()` from the previous entry already does the rest. Verified
+offscreen: loads non-null at 1024×1024, and a small (256px) preview
+composited over both a dark and a light backdrop shows no fringing or
+artifacts. Full suite: 736 passed, 0 failed (unchanged from the previous
+entry — this is an asset swap, not a logic change).
+
+---
+
 ## 2026-07-20 — A real app icon: the macOS Dock tile, not embedded in the UI
 
 Product owner supplied a logo (a blue-to-purple glowing organic blob, on
