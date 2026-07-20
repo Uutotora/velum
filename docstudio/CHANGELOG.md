@@ -5,6 +5,46 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — Home: recent-projects entrance animation only plays on a real change, and carries no shadows
+
+Reported again, directly: the recent-projects list on Home animates badly
+every time you open the tab ("плохая анимация очень... каждый раз"). The
+892ccef pass had already dropped the whole-screen fade for Home and scoped
+it to just the recent section, but two things still made it stutter and
+replay:
+
+1. **It re-ran on every single visit.** `refresh()` unconditionally rebuilt
+   the recent section and faded it in, even when you'd tabbed away and back
+   without creating or changing anything — the common case. Now `refresh()`
+   fingerprints the list (`HomeScreen._recent_sig`, built from raw store
+   fields: id/updated_at/n_images/n_cells/engine/name) and returns early on
+   an identical revisit: no rebuild, no fade. Only a genuine change (a new /
+   renamed project, new images or cells, a re-order) re-animates. The very
+   first `navigate("home")` at launch matches the construction snapshot, so
+   it's a calm no-op too.
+
+2. **The fade still composited a drop-shadow per row every frame.** Even
+   scoped, fading a `QGraphicsOpacityEffect` over rows that each carry an
+   `install_hover_lift` `QGraphicsDropShadowEffect` forces Qt to
+   re-rasterise every one of those nested effects on every frame — the same
+   expensive mechanism root-caused for the Projects-grid scroll stutter.
+   Fixed by building the rebuilt rows *without* their hover shadows
+   (`_recent_section(with_hover=False)`), fading the plain rows, then
+   installing the shadows once the fade settles (`_install_recent_hover` via
+   `fade_in`'s new `on_finished` hook). Same visible result, none of the
+   per-frame re-rasterisation.
+
+The waving-hand greeting still plays once per visit (cheap, no nested
+effects). `motion.fade_in` gained an optional, guarded `on_finished`
+callback; no other caller passes it, so their behaviour is byte-for-byte
+unchanged. Verified: full studio suite green (exit 0), plus an offscreen
+render of Home to confirm the recent list still lays out correctly and a
+repeat `navigate("home")` no-ops without a rebuild. Not verified: real
+on-screen frame timing (can't drive the GUI headless) — but the change
+removes work per frame and per visit, so it can only be lighter.
+
+---
+
 ## 2026-07-20 — App icon: fixed padding to match the macOS icon-grid convention
 
 Same-day follow-up: reported directly against a real Dock screenshot next

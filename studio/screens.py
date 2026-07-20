@@ -137,6 +137,22 @@ class HomeScreen(QWidget):
         grid.addLayout(self._aside(), 0)
 
         outer.addWidget(scroll(body))
+        # Snapshot what the recent list currently shows, so the very first
+        # navigate("home") (same content) is a calm no-op instead of an
+        # entrance animation -- refresh() only rebuilds + fades when this
+        # signature actually changes.
+        self._recent_sig = self._current_recent_sig()
+
+    def _current_recent_sig(self) -> tuple:
+        """A cheap fingerprint of the recent-projects list: enough to tell a
+        genuine content change (a new/renamed project, new images or cells, a
+        re-order) from an identical revisit. Built from raw store fields, not
+        the rendered ``when`` string, so it stays stable across visits unless
+        the data really moved."""
+        return tuple(
+            (p.id, p.updated_at, p.stats.n_images, p.stats.n_cells, p.engine, p.name)
+            for p in self._controller.recent(limit=4)
+        )
 
     def refresh(self) -> None:
         """Rebuild the recent-projects list from the store's current state,
@@ -162,22 +178,52 @@ class HomeScreen(QWidget):
         instead of scrolling. Worse, it re-played on *every single visit* to
         an already-built, mostly-unchanged screen, not just the first time —
         reported directly as "recent projects... каждый раз с ужасной
-        анимацией" (shows with a terrible animation every time). Fixed at
-        the source (app.py's navigate() no longer fades "home" at all) and
-        replaced with two smaller, more deliberate cues here: a light fade
-        scoped to just the part that actually changed (the rebuilt recent
-        list -- far fewer nested shadow effects than the whole page), and
-        the waving-hand greeting playing once per visit.
+        анимацией" (shows with a terrible animation every time).
+
+        Two things make it quiet and smooth now:
+
+        1. **It only animates on a real change.** ``_recent_sig`` fingerprints
+           the list; an identical revisit (the common case -- you tab away
+           and back without creating anything) returns early, so the recent
+           section is neither rebuilt nor re-faded. That kills the
+           "every single visit" replay outright.
+
+        2. **When it does change, the fade carries no shadows.** The rebuilt
+           rows are created *without* their hover-lift ``QGraphicsDropShadow``
+           effects (``with_hover=False``); the fade therefore composites plain
+           rows, not ~4 nested shadow effects per frame, and the shadows are
+           installed once, after the fade settles (``_install_recent_hover``
+           via ``fade_in``'s ``on_finished`` hook). Same visible result, none
+           of the per-frame re-rasterisation that made it stutter.
+
+        The waving-hand greeting still plays once per visit (cheap, no nested
+        effects) -- an unconditional, deliberate cue independent of whether
+        the list changed.
         """
+        self._wave.play()
+        sig = self._current_recent_sig()
+        if sig == self._recent_sig:
+            return  # identical list -- don't rebuild or re-animate it
+        self._recent_sig = sig
+
         idx = self._left.indexOf(self._recent_widget)
         old = self._recent_widget
-        self._recent_widget = self._recent_section()
-        self._left.insertWidget(idx, self._recent_widget)
+        new_widget = self._recent_section(with_hover=False)
+        self._recent_widget = new_widget
+        self._left.insertWidget(idx, new_widget)
         self._left.removeWidget(old)
         old.setParent(None)
         old.deleteLater()
-        fade_in(self._recent_widget, 200)
-        self._wave.play()
+        fade_in(new_widget, 220,
+                on_finished=lambda w=new_widget: self._install_recent_hover(w))
+
+    def _install_recent_hover(self, widget: QWidget) -> None:
+        """Give the freshly-faded recent rows their hover-lift shadows, once
+        the entrance fade is done -- deferred so the fade never has to
+        re-rasterise them (see ``refresh``). ``install_hover_lift`` is itself
+        guarded, and ``getattr`` tolerates the widget having been torn down."""
+        for row in getattr(widget, "_rows", ()):  # RRow frames collected below
+            install_hover_lift(row)
 
     def _quick(self) -> QGridLayout:
         t = self._t
@@ -231,7 +277,12 @@ class HomeScreen(QWidget):
         card.mouseReleaseEvent = lambda e, cb=on_click: cb()
         return card
 
-    def _recent_section(self) -> QWidget:
+    def _recent_section(self, with_hover: bool = True) -> QWidget:
+        """``with_hover=False`` builds the rows without their hover-lift
+        shadow effects -- used by ``refresh`` so an entrance fade doesn't have
+        to composite a per-row ``QGraphicsDropShadowEffect`` on every frame;
+        the shadows are installed afterwards via ``_install_recent_hover``.
+        The built rows are collected on ``widget._rows`` for exactly that."""
         t = self._t
         w = QWidget()
         v = QVBoxLayout(w)
@@ -249,11 +300,15 @@ class HomeScreen(QWidget):
         if not recent:
             empty = label("No projects yet — create one to get started.", 12.5, t["text_muted"])
             v.addWidget(empty)
+        rows = []
         for card in recent:
-            v.addWidget(self._recent_row(card))
+            row = self._recent_row(card, with_hover=with_hover)
+            rows.append(row)
+            v.addWidget(row)
+        w._rows = rows
         return w
 
-    def _recent_row(self, p: "project_controller.ProjectCard") -> QFrame:
+    def _recent_row(self, p: "project_controller.ProjectCard", with_hover: bool = True) -> QFrame:
         t = self._t
         row = QFrame()
         row.setObjectName("RRow")
@@ -262,7 +317,8 @@ class HomeScreen(QWidget):
         row.setStyleSheet(
             f"#RRow{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:10px;}}"
             f"#RRow:hover{{border-color:{t['border_strong']};}}")
-        install_hover_lift(row)
+        if with_hover:
+            install_hover_lift(row)
         lay = QHBoxLayout(row)
         lay.setContentsMargins(14, 11, 14, 11)
         lay.setSpacing(14)

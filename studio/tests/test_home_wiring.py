@@ -197,13 +197,45 @@ def test_refresh_fades_only_the_recent_section_not_the_whole_home_screen(app, co
     Fixed by dropping "home" from app.py's generic per-navigation fade_in()
     (see test_app_wiring.py's mirroring test) and instead fading only the
     part that actually changed, here: HomeScreen itself must never carry a
-    graphics effect; only the freshly-rebuilt recent-projects section does.
+    graphics effect; only the freshly-rebuilt recent-projects section does --
+    and only when the list actually changed (a project was created), which
+    this test forces so the fade is exercised at all.
     """
     from PyQt6.QtWidgets import QGraphicsOpacityEffect
     home = _home(app, controller)
+    controller.store.create("Forces A Recent-List Change")
     home.refresh()
     assert home.graphicsEffect() is None
     assert isinstance(home._recent_widget.graphicsEffect(), QGraphicsOpacityEffect)
+
+
+def test_refresh_is_a_noop_when_the_recent_list_is_unchanged(app, controller):
+    """The dominant complaint was that the recent-projects entrance animation
+    replayed on *every* revisit to Home, even when nothing had changed. Now
+    refresh() fingerprints the list (HomeScreen._recent_sig) and, on an
+    identical revisit, neither rebuilds the section (same widget object) nor
+    fades it (no graphics effect). Only a genuine change re-animates."""
+    home = _home(app, controller)
+    before = home._recent_widget
+    home.refresh()  # nothing changed since construction
+    assert home._recent_widget is before          # not rebuilt
+    assert home._recent_widget.graphicsEffect() is None  # not faded
+
+
+def test_refresh_defers_recent_row_hover_shadows_until_the_fade_settles(app, controller):
+    """When refresh() does re-animate, the rebuilt rows are created *without*
+    their hover-lift shadow effects so the fade never has to composite a
+    QGraphicsDropShadowEffect per row on every frame; the shadows arrive only
+    once the fade finishes, via _install_recent_hover(). Assert the two
+    halves directly: right after the (still-running) fade the rows carry no
+    effect, and _install_recent_hover() then gives them one."""
+    home = _home(app, controller)
+    controller.store.create("Another Fresh Project")
+    home.refresh()
+    rows = [f for f in home._recent_widget.findChildren(QFrame) if f.objectName() == "RRow"]
+    assert rows and all(r.graphicsEffect() is None for r in rows)  # deferred
+    home._install_recent_hover(home._recent_widget)
+    assert all(r.graphicsEffect() is not None for r in rows)       # then installed
 
 
 def test_refresh_plays_the_waving_hand_greeting(app, controller):

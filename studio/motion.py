@@ -38,8 +38,16 @@ def _safe_clear_effect(widget) -> None:
         pass  # widget was deleted before the animation finished — nothing to clear
 
 
-def fade_in(widget, duration: int = 240):
-    """Fade a widget from transparent to opaque (used on screen switch)."""
+def fade_in(widget, duration: int = 240, on_finished=None):
+    """Fade a widget from transparent to opaque (used on screen switch).
+
+    ``on_finished`` (optional) runs once the fade settles, *after* the
+    opacity effect is cleared -- the hook HomeScreen uses to install its
+    recent-row hover shadows only once the fade is done, so those nested
+    ``QGraphicsDropShadowEffect``s never have to be re-rasterised on every
+    frame of the fade (see ``HomeScreen.refresh``). Guarded against the same
+    deleted-object hazard as everything else here.
+    """
     try:
         eff = QGraphicsOpacityEffect(widget)
         widget.setGraphicsEffect(eff)
@@ -48,7 +56,16 @@ def fade_in(widget, duration: int = 240):
         anim.setStartValue(0.0)
         anim.setEndValue(1.0)
         anim.setEasingCurve(EASE)
-        anim.finished.connect(lambda: _safe_clear_effect(widget))
+
+        def _done():
+            _safe_clear_effect(widget)
+            if on_finished is not None:
+                try:
+                    on_finished()
+                except RuntimeError:
+                    pass  # target torn down before the fade settled
+
+        anim.finished.connect(_done)
         anim.start()
         widget._fade_anim = anim  # keep a ref alive
         return anim
