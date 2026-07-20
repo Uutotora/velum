@@ -192,3 +192,57 @@ def test_get_active_returns_none_if_project_was_deleted(store):
     ctrl.set_active(p.id)
     store.delete(p.id)
     assert ctrl.get_active() is None
+
+
+# ── trash ────────────────────────────────────────────────────────────────────
+def test_trash_project_removes_it_from_list_projects(store):
+    ctrl = ProjectController(store)
+    p = ctrl.list_projects()[0]
+    ctrl.trash_project(p.id)
+    assert p.id not in [x.id for x in ctrl.list_projects()]
+    assert p.id in [x.id for x in ctrl.list_trashed()]
+
+
+def test_trash_project_clears_active_id_if_it_was_active(store):
+    ctrl = ProjectController(store)
+    p = ctrl.list_projects()[0]
+    ctrl.set_active(p.id)
+    assert ctrl.get_active() is not None
+
+    ctrl.trash_project(p.id)
+
+    assert ctrl.get_active() is None
+
+
+def test_trash_project_leaves_other_active_project_untouched(store):
+    ctrl = ProjectController(store)
+    a, b = ctrl.list_projects()[:2]
+    ctrl.set_active(a.id)
+    ctrl.trash_project(b.id)
+    assert ctrl.get_active().id == a.id
+
+
+def test_restore_project_makes_it_reappear(store):
+    ctrl = ProjectController(store)
+    p = ctrl.list_projects()[0]
+    ctrl.trash_project(p.id)
+    ctrl.restore_project(p.id)
+    assert p.id in [x.id for x in ctrl.list_projects()]
+    assert ctrl.list_trashed() == []
+
+
+def test_delete_project_permanently_removes_files(store):
+    ctrl = ProjectController(store)
+    p = ctrl.list_projects()[0]
+    ctrl.trash_project(p.id)
+    ctrl.delete_project_permanently(p.id)
+    assert not store.exists(p.id)
+    assert p.id not in [x.id for x in ctrl.list_trashed()]
+
+
+def test_delete_project_permanently_clears_active_id(store):
+    ctrl = ProjectController(store)
+    p = ctrl.list_projects()[0]
+    ctrl.set_active(p.id)
+    ctrl.delete_project_permanently(p.id)
+    assert ctrl.get_active() is None

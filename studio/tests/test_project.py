@@ -135,6 +135,81 @@ def test_favorites_toggle_and_filter(tmp_path):
     assert store.favorites() == []
 
 
+# ── trash ────────────────────────────────────────────────────────────────────
+def test_trash_excludes_from_list_recent_and_favorites(tmp_path):
+    store = ProjectStore(tmp_path)
+    a = store.create("A")
+    store.create("B")
+    store.set_favorite(a.id, True)
+
+    store.trash(a.id)
+
+    assert [p.id for p in store.list()] == ["b"]
+    assert store.favorites() == []
+    assert [p.id for p in store.recent(limit=10)] == ["b"]
+    assert store.exists(a.id)  # files stay on disk -- this is a soft delete
+
+
+def test_trash_is_reversible_via_restore(tmp_path):
+    store = ProjectStore(tmp_path)
+    a = store.create("A")
+    store.trash(a.id)
+    assert a.id not in [p.id for p in store.list()]
+
+    store.restore(a.id)
+
+    assert a.id in [p.id for p in store.list()]
+    assert store.load(a.id).trashed_at is None
+    assert not store.load(a.id).is_trashed
+
+
+def test_trashed_lists_only_trashed_newest_trashed_first(tmp_path):
+    store = ProjectStore(tmp_path)
+    a = store.create("A")
+    b = store.create("B")
+    store.create("C")
+    store.trash(a.id)
+    store.trash(b.id)
+    # trash() stamps "now" at second precision -- both calls can tie within
+    # the same wall-clock second, so pin b's trashed_at explicitly later
+    # than a's instead of relying on real elapsed time between the two
+    # calls (same technique test_list_is_ordered_newest_modified_first uses
+    # for updated_at, for the identical reason).
+    proj_b = store.load(b.id)
+    proj_b.trashed_at = "2999-01-01T00:00:00+00:00"
+    store.save(proj_b, touch=False)
+
+    trashed_ids = [p.id for p in store.trashed()]
+    assert set(trashed_ids) == {a.id, b.id}
+    assert trashed_ids[0] == b.id  # pinned later trashed_at sorts first
+    assert "c" not in trashed_ids
+
+
+def test_trash_does_not_bump_updated_at(tmp_path):
+    store = ProjectStore(tmp_path)
+    p = store.create("A")
+    before = store.load(p.id).updated_at
+    store.trash(p.id)
+    assert store.load(p.id).updated_at == before
+
+
+def test_list_include_trashed_returns_everything(tmp_path):
+    store = ProjectStore(tmp_path)
+    a = store.create("A")
+    store.create("B")
+    store.trash(a.id)
+    assert len(store.list()) == 1
+    assert len(store.list(include_trashed=True)) == 2
+
+
+def test_is_trashed_property_reflects_trashed_at(tmp_path):
+    store = ProjectStore(tmp_path)
+    p = store.create("A")
+    assert not p.is_trashed
+    trashed = store.trash(p.id)
+    assert trashed.is_trashed
+
+
 # ── delete ───────────────────────────────────────────────────────────────────
 def test_delete_removes_project_and_is_idempotent(tmp_path):
     store = ProjectStore(tmp_path)

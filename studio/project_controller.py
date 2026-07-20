@@ -202,6 +202,29 @@ class ProjectController:
         project = self.store.load(project_id)
         return self.store.set_favorite(project_id, not project.favorite)
 
+    # ── trash ────────────────────────────────────────────────────────────────
+    def list_trashed(self) -> list[Project]:
+        return self.store.trashed()
+
+    def trash_project(self, project_id: str) -> Project:
+        """Move a project to the trash. Clears it as the active project (shared
+        with the Workspace tab) if it was the one open -- a trashed project
+        must not stay reachable through "reopen the active project"."""
+        project = self.store.trash(project_id)
+        if self._active_id == project_id:
+            self._active_id = None
+        return project
+
+    def restore_project(self, project_id: str) -> Project:
+        return self.store.restore(project_id)
+
+    def delete_project_permanently(self, project_id: str) -> None:
+        """Hard delete -- irreversible. Only ever called from the Trash view
+        ("Delete Forever"), never directly from the Projects grid/list."""
+        self.store.delete(project_id)
+        if self._active_id == project_id:
+            self._active_id = None
+
     # ── active project (shared with the Workspace tab) ────────────────────────
     def set_active(self, project_id: str) -> Project:
         project = self.store.load(project_id)

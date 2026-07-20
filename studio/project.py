@@ -164,6 +164,7 @@ class Project:
     updated_at: str = field(default_factory=_now_iso)
     tags: list[str] = field(default_factory=list)
     favorite: bool = False
+    trashed_at: Optional[str] = None    # ISO-8601 timestamp, or None if not trashed
     image_paths: list[str] = field(default_factory=list)
     settings: ProjectSettings = field(default_factory=ProjectSettings)
     stats: ProjectStats = field(default_factory=ProjectStats)
@@ -174,6 +175,10 @@ class Project:
     def engine(self) -> str:
         """Engine key, surfaced from settings for card display / filtering."""
         return self.settings.engine
+
+    @property
+    def is_trashed(self) -> bool:
+        return self.trashed_at is not None
 
     def touch(self) -> None:
         """Mark as just-modified (drives 'recent' ordering)."""
@@ -276,15 +281,26 @@ class ProjectStore:
         return self._file(project_id).exists()
 
     def delete(self, project_id: str) -> None:
-        """Remove a project and all its artefacts. No-op if already gone."""
+        """Permanently remove a project and all its artefacts. Irreversible --
+        this is the hard delete behind Trash's "Delete Forever", never called
+        directly from the Projects grid/list (see ``trash()``). No-op if
+        already gone.
+        """
         import shutil
         d = self._dir(project_id)
         if d.exists():
             shutil.rmtree(d)
 
     # ── Queries ─────────────────────────────────────────────────────────────
-    def list(self) -> list[Project]:
-        """All projects, newest-modified first. Corrupt files are skipped."""
+    def list(self, *, include_trashed: bool = False) -> list[Project]:
+        """All projects, newest-modified first. Corrupt files are skipped.
+
+        Trashed projects (``trashed_at`` set) are excluded by default -- so
+        every existing caller (``recent()``, ``favorites()``, the Projects
+        tab's search/filter) automatically stops seeing a trashed project
+        with no change of their own. Pass ``include_trashed=True`` for the
+        Trash view itself, or use ``trashed()`` below.
+        """
         out: list[Project] = []
         for child in self.root.iterdir():
             if not child.is_dir():
@@ -293,19 +309,52 @@ class ProjectStore:
             if not f.exists():
                 continue
             try:
-                out.append(Project.from_dict(json.loads(f.read_text(encoding="utf-8"))))
+                project = Project.from_dict(json.loads(f.read_text(encoding="utf-8")))
             except (json.JSONDecodeError, OSError, TypeError):
                 continue  # tolerate a bad file rather than crash the library
+            if project.is_trashed and not include_trashed:
+                continue
+            out.append(project)
         out.sort(key=lambda p: p.updated_at, reverse=True)
         return out
 
     def recent(self, limit: int = 6) -> list[Project]:
-        """The ``limit`` most-recently-modified projects."""
+        """The ``limit`` most-recently-modified, non-trashed projects."""
         return self.list()[:limit]
 
     def favorites(self) -> list[Project]:
-        """Favourited projects, newest-modified first."""
+        """Favourited, non-trashed projects, newest-modified first."""
         return [p for p in self.list() if p.favorite]
+
+    def trashed(self) -> list[Project]:
+        """Trashed projects, most-recently-trashed first."""
+        items = [p for p in self.list(include_trashed=True) if p.is_trashed]
+        items.sort(key=lambda p: p.trashed_at, reverse=True)
+        return items
+
+    def trash(self, project_id: str) -> Project:
+        """Move a project to the trash (soft delete).
+
+        A trashed project is excluded from ``list()``/``recent()``/
+        ``favorites()`` (so it disappears from ordinary browsing) but its
+        files stay on disk until ``restore()`` or a permanent ``delete()`` --
+        chosen over an immediate hard delete because a project can represent
+        real segmentation/training work, and "reversible by default" is
+        safer than a one-way action with no local undo. ``touch=False``:
+        trashing isn't a content edit, so ``updated_at`` (and therefore the
+        project's place if later restored) is left alone.
+        """
+        project = self.load(project_id)
+        project.trashed_at = _now_iso()
+        self.save(project, touch=False)
+        return project
+
+    def restore(self, project_id: str) -> Project:
+        """Move a trashed project back into ordinary browsing."""
+        project = self.load(project_id)
+        project.trashed_at = None
+        self.save(project, touch=False)
+        return project
 
     def set_favorite(self, project_id: str, value: bool) -> Project:
         """Toggle a project's favourite flag and persist it."""
