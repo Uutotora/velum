@@ -1,4 +1,8 @@
-# CellSeg1
+<p align="center">
+  <img src="studio/assets/icon.png" width="120" alt="CellSeg1 app icon">
+</p>
+
+<h1 align="center">CellSeg1</h1>
 
 A desktop app for **cell instance segmentation** in microscopy images, built
 as a [napari](https://napari.org) plugin. Two interchangeable engines produce

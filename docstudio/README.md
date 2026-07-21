@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../studio/assets/icon.png" width="120" alt="CellSeg1 Studio app icon">
+</p>
+
 # CellSeg1 Studio — documentation
 
 Studio is the standalone desktop app for CellSeg1: a self-contained product

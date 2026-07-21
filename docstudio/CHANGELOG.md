@@ -5,6 +5,29 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — New app icon (v2) + show it on GitHub
+
+Replaced the app icon again with the new design (the **Default**, full-colour
+variant — a soft light rounded-square with a teal→blue gradient blob). Removed
+the previous `docs/AppIcon.iconset/`. The full design export now lives properly
+on the branch under `docs/app_icon/`: the raw iOS exports (all variants, 16→1024)
+in `exports/`, plus a ready `AppIcon.iconset/` and a generated `AppIcon.icns`
+for a future `.app` bundle. The running app still loads the single
+`studio/assets/icon.png`. Added the icon to the top of both `README.md` and
+`docstudio/README.md`, centred GitHub-style, so it shows on the repo's front
+page. Verified `load_icon()` picks up the new art.
+
+**macOS padding.** The raw exports are *iOS* icons — the rounded square fills
+the whole canvas edge-to-edge, so dropped straight in it looked oversized in
+the Dock next to system icons (Safari/App Store et al. sit on a grid with a
+transparent margin). Fixed by padding `studio/assets/icon.png` and the macOS
+iconset to the same grid the previous icon used: the art scaled to ~0.772 of
+the canvas and centred on transparent 1024² (measured the old icon's ~0.77
+content ratio and matched it). The `docs/app_icon/exports/` stay full-bleed as
+the untouched design source.
+
+---
+
 ## 2026-07-21 — New app icon
 
 Replaced the Dock/app icon with the new light rounded-square design: swapped

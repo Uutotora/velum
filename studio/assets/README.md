@@ -8,6 +8,12 @@ launches the interpreter directly, no `.app` bundle yet) process. Loaded via
 `load_icon()`, which degrades to a null `QIcon` (Qt's own safe default, no
 Dock override) if the file is missing, rather than raising.
 
-If Studio is later packaged as a real `.app` bundle (see
-`docstudio/BACKLOG.md`'s "Packaging" entry), this same source image is what
-an `.icns` iconset would be generated from.
+This is the **Default** variant of the icon design, **padded to the macOS icon
+grid** — the raw export is a full-bleed iOS icon (rounded square edge-to-edge),
+which looks oversized in the Dock next to system icons, so the art is scaled to
+~0.772 of the canvas and centred on transparent padding. The full source set
+(every iOS variant + a ready `AppIcon.iconset` and generated `AppIcon.icns`)
+and the exact re-padding recipe live in
+[`docs/app_icon/`](../../docs/app_icon/). When Studio is packaged as a real
+`.app` bundle (see `docstudio/BACKLOG.md`'s "Packaging" entry), use that
+`AppIcon.icns`.
