@@ -11,7 +11,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from studio import cell_analytics as ca
+# The analytics view is a Qt widget module (imports PyQt6 at top), so the whole
+# test module skips in the light CI dependency-group that has no PyQt6 --
+# matching test_workspace.py / test_overlays.py rather than dying at collection.
+pytest.importorskip("PyQt6")
+ca = pytest.importorskip("studio.cell_analytics")
 
 
 def _result(n=120):
