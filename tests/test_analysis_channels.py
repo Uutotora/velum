@@ -5,7 +5,7 @@ column per channel and that the default (single-image) behaviour is unchanged.
 """
 import numpy as np
 
-from napari_app import analysis
+from cellseg1_core import analysis
 
 
 def _two_cell_mask():

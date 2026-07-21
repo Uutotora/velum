@@ -15,7 +15,7 @@ lazily, only inside the tab that needs them.
 a navigation sidebar, a stack of screens (Home · Projects · Segment · Models &
 Train · Dashboard), and overlay surfaces (Assistant drawer, Logs console, ⌘K
 command palette, toast). The classic napari-plugin app
-(``napari_app.main`` / ``run_napari.sh`` / ``cellseg1``) is untouched.
+(``cellseg1_core.main`` / ``run_napari.sh`` / ``cellseg1``) is untouched.
 """
 from __future__ import annotations
 

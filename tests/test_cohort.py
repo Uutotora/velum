@@ -1,8 +1,8 @@
-"""Unit tests for napari_app.cohort (batch/population aggregation)."""
+"""Unit tests for cellseg1_core.cohort (batch/population aggregation)."""
 import numpy as np
 
-from napari_app.analysis import compute_measurements
-from napari_app.cohort import (
+from cellseg1_core.analysis import compute_measurements
+from cellseg1_core.cohort import (
     per_cell_long,
     per_image_summary,
     pooled_values,

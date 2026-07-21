@@ -41,7 +41,7 @@ class ModelsScreen(QWidget):
     """Real one-shot LoRA training + model management, bound to a
     ``TrainController`` (``studio/train_controller.py``). Reuses the exact
     training pipeline the classic app's Train tab already uses
-    (``napari_app.core.train_model``), imported lazily inside the controller
+    (``cellseg1_core.train_model``), imported lazily inside the controller
     — this module itself never imports torch.
     """
 

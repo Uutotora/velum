@@ -2,7 +2,7 @@
 
 Uses a *real*, tmp_path-backed AssistantController (Qt-free, its own
 thorough suite lives in test_assistant_controller.py) with only the deepest
-network-touching calls monkeypatched (napari_app.advisor.ollama_*, this
+network-touching calls monkeypatched (cellseg1_core.advisor.ollama_*, this
 module's own custom_api_*) — the same "real controller, fake ML/network
 seam" convention test_workspace.py uses for SegmentController. The Segment
 workspace side is a small fake (_FakeWorkspace) satisfying
@@ -121,7 +121,7 @@ def test_model_accordion_starts_collapsed(app, parent, controller, workspace):
 
 # ── backend switching ───────────────────────────────────────────────────────
 def test_backend_seg_reflects_persisted_backend(app, parent, controller, workspace, monkeypatch):
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: False)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: False)
     controller.settings.backend = "ollama"
     d = _drawer(parent, controller, workspace)
     assert d._backend_seg._btns[1].isChecked()
@@ -157,8 +157,8 @@ def test_run_diagnose_public_alias_delegates(app, parent, controller, workspace)
 
 
 def test_switching_to_ollama_kicks_off_a_status_check(app, parent, controller, workspace, monkeypatch):
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: True)
-    monkeypatch.setattr("napari_app.advisor.ollama_models", lambda: ["llama3.2:3b"])
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: True)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_models", lambda: ["llama3.2:3b"])
     d = _drawer(parent, controller, workspace)
     d._backend_seg._select(1)   # Ollama
     _pump(app, controller)
@@ -254,7 +254,7 @@ def test_send_ignores_empty_input(app, parent, controller, workspace):
 
 # ── chat — a connected (threaded) backend ───────────────────────────────────
 def test_send_ollama_streams_into_the_chat(app, parent, controller, workspace, monkeypatch):
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: False)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: False)
     controller.settings.backend = "ollama"
     controller.settings.ollama_model = "qwen2.5:7b"
 
@@ -263,7 +263,7 @@ def test_send_ollama_streams_into_the_chat(app, parent, controller, workspace, m
         on_token("raising IoU.")
         return "Try raising IoU."
 
-    monkeypatch.setattr("napari_app.advisor.ollama_chat", fake_chat)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_chat", fake_chat)
     d = _drawer(parent, controller, workspace)
     d._input.setText("why merged?")
     d._send()
@@ -274,14 +274,14 @@ def test_send_ollama_streams_into_the_chat(app, parent, controller, workspace, m
 
 
 def test_send_reports_errors_into_the_chat(app, parent, controller, workspace, monkeypatch):
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: False)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: False)
     controller.settings.backend = "ollama"
     controller.settings.ollama_model = "m"
 
     def fake_chat(*a, **k):
         raise RuntimeError("connection refused")
 
-    monkeypatch.setattr("napari_app.advisor.ollama_chat", fake_chat)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_chat", fake_chat)
     d = _drawer(parent, controller, workspace)
     d._input.setText("hi")
     d._send()
@@ -293,7 +293,7 @@ def test_send_reports_errors_into_the_chat(app, parent, controller, workspace, m
 
 def test_send_disabled_while_a_previous_send_is_in_flight(app, parent, controller, workspace, monkeypatch):
     import threading
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: False)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: False)
     controller.settings.backend = "ollama"
     controller.settings.ollama_model = "m"
     release = threading.Event()
@@ -302,7 +302,7 @@ def test_send_disabled_while_a_previous_send_is_in_flight(app, parent, controlle
         release.wait(timeout=5)
         return "done"
 
-    monkeypatch.setattr("napari_app.advisor.ollama_chat", fake_chat)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_chat", fake_chat)
     d = _drawer(parent, controller, workspace)
     d._input.setText("first")
     d._send()
@@ -318,8 +318,8 @@ def test_send_disabled_while_a_previous_send_is_in_flight(app, parent, controlle
 def test_status_dot_pulses_while_checking_and_settles_once_resolved(
         app, parent, controller, workspace, monkeypatch):
     controller.settings.backend = "ollama"
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: True)
-    monkeypatch.setattr("napari_app.advisor.ollama_models", lambda: ["a:1b"])
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: True)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_models", lambda: ["a:1b"])
     d = _drawer(parent, controller, workspace)
     # Constructor kicks off an async check -> starts in the "checking" state
     # (pulsing, a live QGraphicsOpacityEffect) before the result lands.
@@ -344,7 +344,7 @@ def test_manual_refresh_immediately_shows_checking_before_the_result_lands(
         app, parent, controller, workspace, monkeypatch):
     import threading
     controller.settings.backend = "ollama"
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: False)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: False)
     d = _drawer(parent, controller, workspace)
     _pump(app, controller)
     assert d._status_dot.graphicsEffect() is None   # settled: not reachable
@@ -355,7 +355,7 @@ def test_manual_refresh_immediately_shows_checking_before_the_result_lands(
         release.wait(timeout=5)
         return True
 
-    monkeypatch.setattr("napari_app.advisor.ollama_available", slow_available)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", slow_available)
     d._refresh_status()
     assert d._status_dot.graphicsEffect() is not None   # pulsing again, immediately
     release.set()
@@ -365,8 +365,8 @@ def test_manual_refresh_immediately_shows_checking_before_the_result_lands(
 # ── Ollama model management wiring ──────────────────────────────────────────
 def test_ollama_model_select_appears_after_a_refresh(app, parent, controller, workspace, monkeypatch):
     controller.settings.backend = "ollama"
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: True)
-    monkeypatch.setattr("napari_app.advisor.ollama_models", lambda: ["a:1b", "b:2b"])
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: True)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_models", lambda: ["a:1b", "b:2b"])
     d = _drawer(parent, controller, workspace)
     _pump(app, controller)
     selects = d._model_body_wrap.findChildren(SelectBox)
@@ -375,8 +375,8 @@ def test_ollama_model_select_appears_after_a_refresh(app, parent, controller, wo
 
 def test_picking_an_ollama_model_persists_it(app, parent, controller, workspace, monkeypatch):
     controller.settings.backend = "ollama"
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: True)
-    monkeypatch.setattr("napari_app.advisor.ollama_models", lambda: ["a:1b", "b:2b"])
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: True)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_models", lambda: ["a:1b", "b:2b"])
     d = _drawer(parent, controller, workspace)
     _pump(app, controller)
     d._pick_ollama_model("b:2b")
@@ -387,7 +387,7 @@ def test_picking_an_ollama_model_persists_it(app, parent, controller, workspace,
 
 def test_no_models_found_shows_a_hint_not_a_crash(app, parent, controller, workspace, monkeypatch):
     controller.settings.backend = "ollama"
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: False)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: False)
     d = _drawer(parent, controller, workspace)
     _pump(app, controller)
     assert d._found_models == []
@@ -396,7 +396,7 @@ def test_no_models_found_shows_a_hint_not_a_crash(app, parent, controller, works
 def test_download_model_shows_progress_and_completes(app, parent, controller, workspace, monkeypatch):
     import threading
     controller.settings.backend = "ollama"
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: False)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: False)
     started = threading.Event()
     release = threading.Event()
 
@@ -407,7 +407,7 @@ def test_download_model_shows_progress_and_completes(app, parent, controller, wo
         on_progress("done", 1.0)
         return True
 
-    monkeypatch.setattr("napari_app.advisor.ollama_pull", fake_pull)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_pull", fake_pull)
     d = _drawer(parent, controller, workspace)
     _pump(app, controller)
     d._download_model("llama3.2:3b")
@@ -422,7 +422,7 @@ def test_download_model_shows_progress_and_completes(app, parent, controller, wo
 
 
 def test_create_agent_requires_a_base_model_selected(app, parent, controller, workspace, monkeypatch):
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: False)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: False)
     controller.settings.backend = "ollama"
     controller.settings.ollama_model = ""
     d = _drawer(parent, controller, workspace)
@@ -433,13 +433,13 @@ def test_create_agent_requires_a_base_model_selected(app, parent, controller, wo
 def test_create_agent_flow_completes(app, parent, controller, workspace, monkeypatch):
     controller.settings.backend = "ollama"
     controller.settings.ollama_model = "qwen2.5:7b"
-    monkeypatch.setattr("napari_app.advisor.ollama_available", lambda: False)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: False)
 
     def fake_create(base_model, on_status):
         on_status("baking…")
         return True
 
-    monkeypatch.setattr("napari_app.advisor.ollama_create_agent", fake_create)
+    monkeypatch.setattr("cellseg1_core.advisor.ollama_create_agent", fake_create)
     d = _drawer(parent, controller, workspace)
     d._create_agent()
     _pump(app, controller)

@@ -1,9 +1,9 @@
-"""Pure-logic guards on the packaging metadata (pyproject.toml + napari.yaml).
+"""Pure-logic guards on the packaging metadata (pyproject.toml).
 
-These catch the ways packaging silently rots: a py-module dropped from the
-flat layout, an entry point pointing at a moved file, or a napari manifest that
-references a function that no longer exists. Uses only stdlib ``tomllib``
-(py3.11+) so it runs in the light CI test group without torch/napari/pyyaml.
+These catch the ways packaging silently rots: a py-module dropped from the flat
+layout, or a console entry point pointing at a moved file. Uses only stdlib
+``tomllib`` (py3.11+) so it runs in the light CI test group without
+torch/PyQt6/pyyaml.
 """
 import tomllib
 from pathlib import Path
@@ -26,8 +26,11 @@ def test_pyproject_exists_and_names_project():
 def test_core_runtime_deps_declared():
     deps = _load()["project"]["dependencies"]
     names = {d.split(">")[0].split("=")[0].split("<")[0].strip().lower() for d in deps}
-    for required in {"torch", "napari", "pyqt6", "cellpose", "numpy"}:
+    for required in {"torch", "pyqt6", "cellpose", "numpy"}:
         assert required in names, f"missing runtime dep: {required}"
+    # napari was removed when Studio dropped the napari plugin — it must NOT
+    # come back as a runtime dep (Studio has its own Qt canvas + layer model).
+    assert "napari" not in names, "napari must not be a runtime dependency"
 
 
 def test_test_group_is_light():
@@ -38,28 +41,31 @@ def test_test_group_is_light():
     assert "torch" not in text and "napari" not in text
 
 
-def test_console_script_entry_point_resolves():
+def test_console_script_entry_points_launch_studio():
     scripts = _load()["project"]["scripts"]
-    target = scripts["cellseg1"]
-    assert target == "napari_app.main:main"
-    module_path = REPO / "napari_app" / "main.py"
+    # Both launchers start the Studio app; the module + main() must exist.
+    for name in ("cellseg1", "cellseg1-studio"):
+        assert scripts[name] == "studio.app:main", f"{name} must launch studio.app:main"
+    module_path = REPO / "studio" / "app.py"
     assert module_path.exists()
     assert "def main(" in module_path.read_text()
 
 
-def test_napari_manifest_entry_point_and_file():
-    eps = _load()["project"]["entry-points"]["napari.manifest"]
-    # e.g. "napari_app:napari.yaml"
-    pkg, _, manifest_name = eps["cellseg1"].partition(":")
-    manifest = REPO / pkg / manifest_name
-    assert manifest.exists(), f"manifest missing: {manifest}"
-    text = manifest.read_text()
-    assert "name: cellseg1" in text
-    # the python_name the manifest points at must exist as a real function
-    assert "napari_app._npe2:make_predict_widget" in text
-    npe2_mod = REPO / "napari_app" / "_npe2.py"
-    assert npe2_mod.exists()
-    assert "def make_predict_widget(" in npe2_mod.read_text()
+def test_no_napari_plugin_manifest():
+    """Studio is a standalone app, not a napari plugin — there must be no
+    napari.manifest entry point and no napari_app package left behind."""
+    data = _load()
+    entry_points = data["project"].get("entry-points", {})
+    assert "napari.manifest" not in entry_points
+    assert not (REPO / "napari_app").exists(), "napari_app/ must be fully removed"
+
+
+def test_ml_core_package_is_shipped():
+    """The engine-agnostic ML core Studio imports must be a packaged module."""
+    include = " ".join(_load()["tool"]["setuptools"]["packages"]["find"]["include"])
+    assert "cellseg1_core*" in include
+    assert (REPO / "cellseg1_core" / "predict_controller.py").exists()
+    assert (REPO / "cellseg1_core" / "engine_registry.py").exists()
 
 
 def test_declared_py_modules_all_exist():

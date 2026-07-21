@@ -1,7 +1,7 @@
 """CellSeg1 Studio — the real, central log stream.
 
 Every tab already produces real operational log lines: the reused
-``napari_app.core.predict_controller.PredictController``'s ``on_log``
+``cellseg1_core.predict_controller.PredictController``'s ``on_log``
 callback (segmentation runs, batch, benchmark), ``train_model``'s progress
 lines, the Assistant's backend/connection events. Before this module,
 each screen only skimmed those strings for a ``[ERROR]``/``[HINT]`` toast
@@ -195,7 +195,7 @@ _PREFIX_LEVELS = (
 def emit_prefixed(bus: LogBus, message: str, source: str) -> LogRecord:
     """Route one of the ML core's existing ``on_log(msg)`` strings.
 
-    ``napari_app.core.predict_controller``/``train_model`` (reused unmodified
+    ``cellseg1_core.predict_controller``/``train_model`` (reused unmodified
     by ``segment_controller``/``train_controller``) already format lines with
     a fixed, code-authored ``[ERROR]``/``[WARN]``/``[HINT]``/``[INFO]``
     prefix convention (checked case-sensitively on purpose — this is not

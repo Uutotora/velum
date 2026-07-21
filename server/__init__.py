@@ -1,7 +1,7 @@
 """CellSeg1 Server — the multi-user backend foundation.
 
-This package is the **server-side** contour the desktop apps (`napari_app/`,
-`studio/`) never had: user accounts, organizations, role-based access control,
+This package is the **server-side** contour the `studio/` desktop app never
+had: user accounts, organizations, role-based access control,
 and the Label-Studio-shaped domain model (Organization → Project → Task →
 Annotation → Review) persisted in a real database instead of per-machine JSON
 files.

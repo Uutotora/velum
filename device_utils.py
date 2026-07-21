@@ -1,7 +1,7 @@
 """Shared, Qt-free compute-device capability check.
 
-Every "is CUDA available" call site in this repo (napari_app/widgets/shell.py,
-predict_widget.py, train_widget.py, studio/hardware.py) used to ask only
+Every "is CUDA available" call site in this repo (set_environment.py,
+studio/hardware.py) used to ask only
 ``torch.cuda.is_available()``. That call answers "is a CUDA device present",
 not "will this torch build actually run on it" -- and those two questions
 diverge for real hardware. Confirmed on a Linux box with a GTX 1070 (Pascal,

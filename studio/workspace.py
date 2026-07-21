@@ -5,7 +5,7 @@ napari-Labels-faithful) driving our own **Canvas** (``studio/canvas.py`` —
 not embedded napari), and the **inspector** (Segment settings · Results).
 Real segmentation is reused from the classic app via ``SegmentController``
 (``studio/segment_controller.py``), which wraps
-``napari_app.core.predict_controller.PredictController`` unmodified.
+``cellseg1_core.predict_controller.PredictController`` unmodified.
 
 Every reactive region rebuilds its own small container on demand rather than
 tearing down the whole screen (unlike ``ModelsScreen``/``DashboardScreen``,
