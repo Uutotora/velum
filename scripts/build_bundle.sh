@@ -48,7 +48,7 @@ COMMON=(
 if [ "$OS" = "Darwin" ]; then
   echo "==> macOS build"
   pyinstaller "${COMMON[@]}" \
-    --icon "docs/app_icon/AppIcon.icns" \
+    --icon "${REPO}/docs/app_icon/AppIcon.icns" \
     --osx-bundle-identifier "com.cellseg1.studio" \
     studio/app.py
   APP="$DIST/$NAME.app"
