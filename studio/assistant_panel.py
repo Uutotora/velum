@@ -289,7 +289,7 @@ class ChangeCard(QFrame):
         # radius natively), so an unscoped QFrame{...} rule set here also
         # matches this card's own title/detail QLabels, giving each one its
         # own small bordered box around just its own text. Exactly the
-        # rendering-bug family docstudio/CHANGELOG.md's 2026-07-08 "Guide &
+        # rendering-bug family docs/velum/CHANGELOG.md's 2026-07-08 "Guide &
         # Docs" entry already root-caused and named ("even a bare type
         # selector like QFrame{…} cascades") — reproduced here despite that
         # lesson being on record, caught by an actual offscreen screenshot,
@@ -446,7 +446,7 @@ class AssistantDrawer(QFrame):
         # its own left edge (confirmed by pixel-sampling: exactly the
         # border colour, exactly the empty-state's own x-offset and height,
         # gone the moment this selector was scoped) -- the same rendering-
-        # bug family docstudio/CHANGELOG.md's 2026-07-08 entries already
+        # bug family docs/velum/CHANGELOG.md's 2026-07-08 entries already
         # named twice, just leaking `border` instead of `background`.
         self.setObjectName("AssistantDrawer")
         self.setStyleSheet(

@@ -14,7 +14,7 @@ version of this tab had a soft-delete Trash-with-Undo flow; real usage in
 the actual running app (not just offscreen screenshots) surfaced both a
 rendering bug in the Trash dialog and, more fundamentally, that it was more
 machinery than this product needs -- reverted in favour of this simpler,
-Label-Studio-shaped design. See docstudio/CHANGELOG.md's dated entry for
+Label-Studio-shaped design. See docs/velum/CHANGELOG.md's dated entry for
 the full story.
 """
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """Velum — the Segment workspace's own layer model.
 
-Studio does not embed napari (see ``docstudio/ARCHITECTURE.md``'s "Segment tab
+Studio does not embed napari (see ``docs/velum/ARCHITECTURE.md``'s "Segment tab
 specifically" section) — this is our **own** evented layer list, built to
 reproduce napari's *interaction model* for a ``Labels`` layer 1:1 (same mode
 names, same properties, same defaults — verified against the installed

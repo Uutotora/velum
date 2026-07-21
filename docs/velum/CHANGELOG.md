@@ -25,7 +25,7 @@ of the three engines — that's its method name, not the product).
 
 ## 2026-07-21 — Downloadable releases: PyInstaller bundle + DMG/tar.gz CI
 
-Wire up a self-contained distributable (docstudio/PACKAGING.md Mode 2):
+Wire up a self-contained distributable (docs/velum/PACKAGING.md Mode 2):
 `scripts/build_bundle.sh` builds a PyInstaller bundle — a macOS `.app` + `.dmg`,
 or a Linux dist folder + `.tar.gz` — bundling Python/torch/PyQt6/the app + small
 LoRA checkpoints (the ~2.5 GB SAM backbone downloads on first use).
@@ -44,7 +44,7 @@ on the branch under `docs/app_icon/`: the raw iOS exports (all variants, 16→10
 in `exports/`, plus a ready `AppIcon.iconset/` and a generated `AppIcon.icns`
 for a future `.app` bundle. The running app still loads the single
 `studio/assets/icon.png`. Added the icon to the top of both `README.md` and
-`docstudio/README.md`, centred GitHub-style, so it shows on the repo's front
+`docs/velum/README.md`, centred GitHub-style, so it shows on the repo's front
 page. Verified `load_icon()` picks up the new art.
 
 **Decision: ship it full-bleed for now.** Hand-padding the icon to match the
@@ -54,7 +54,7 @@ treatment), so there's no stable system margin to match by eye (full-bleed read
 "too big", 0.772 "too small", 0.875 "too big" again). Reverted
 `studio/assets/icon.png` and the iconset to the **full-bleed Default** export
 and stopped hand-padding. The proper margin/masking is the OS's job once Studio
-is a real `.app`; wrote **[docstudio/PACKAGING.md](PACKAGING.md)** covering a
+is a real `.app`; wrote **[docs/velum/PACKAGING.md](PACKAGING.md)** covering a
 thin dev-launcher `.app` (build once, then edit code + relaunch to update — no
 rebuild), the agent prompt to build it, the icon options for a real bundle
 (pre-padded `.icns` at ~0.875, or Icon Composer's `.icon` for the full Tahoe
@@ -519,7 +519,7 @@ missing-asset-degrades-quietly pattern — a null `QIcon`, not a raise, if the
 file isn't there) and wired it into `main()`: `QApplication.setWindowIcon()`
 right after constructing `app`, which is what macOS actually uses as the
 Dock tile for an unbundled running process (`run_studio.sh` launches the
-interpreter directly — there's no `.app` bundle yet, see `docstudio/
+interpreter directly — there's no `.app` bundle yet, see `docs/velum/
 BACKLOG.md`'s "Packaging" entry, which this same source image would feed
 into whenever that's built). `StudioWindow` also gets it via
 `setWindowIcon()` for the window/Cmd+Tab-switcher icon.
@@ -789,7 +789,7 @@ and, more fundamentally, direct comparison against Label Studio's own
 reference screenshots (project cards, the overflow menu, Settings > Danger
 Zone) making the case that the whole tab needed to be simpler and closer to
 that reference, not just bug-fixed. This is exactly the kind of gap
-offscreen-only verification can't close — the project's own `docstudio/
+offscreen-only verification can't close — the project's own `docs/velum/
 studio-subproject.md`-equivalent lessons about "always screenshot before
 trusting it" cover rendering bugs found *offscreen*; this is the next tier
 up, bugs and product-shape problems only surfaced by a real person actually
@@ -899,7 +899,7 @@ browse/search/favourite/grid-list. Asked to bring it to "real product" bar
 against Label Studio (the project's own design reference) and general
 product-dashboard practice; this landed as 6 separate commits, each tested
 and screenshotted in both themes before the next one started. Full detail
-lives in the commit messages; this is the roll-up. See `docstudio/
+lives in the commit messages; this is the roll-up. See `docs/velum/
 BACKLOG.md`'s "Projects tab v2" entry for the original analysis this was
 scoped from.
 
@@ -1286,7 +1286,7 @@ suite always has).
 
 The Logs console goes from a hard-coded `demo.LOGS` transcript (7 static
 lines, a close button, nothing else) to Studio's real, central log stream —
-the last unwired P1 item (`docstudio/BACKLOG.md`), leaving only the ⌘K
+the last unwired P1 item (`docs/velum/BACKLOG.md`), leaving only the ⌘K
 command palette.
 
 **New `studio/log_bus.py`** (Qt-free, stdlib only) — the thing every other
@@ -1349,7 +1349,7 @@ can never pile up across repeated toggles. A `QTextEdit` — not one `QLabel`
 per line, the original static version's approach — is the professional
 choice once the stream is unbounded instead of 7 fixed demo lines, and
 matches the classic app's own `widgets/log_window.py` widget choice
-(`docstudio/BACKLOG.md`'s own instruction to "reuse `widgets/log_window.py`
+(`docs/velum/BACKLOG.md`'s own instruction to "reuse `widgets/log_window.py`
 logic"). New toolbar, still inside the unchanged 210px-tall bottom panel: a
 live count badge (`"842 · 3 err · 5 warn"`, omitting a count that's zero),
 a text search box (filters by message or source substring), a level filter
@@ -1540,7 +1540,7 @@ clean" screenshots) constructed widgets *without* ever calling
 background colour at all, so removing that cascade first made the chat
 area render Qt's raw default grey, not the intended `t['bg']` — a second,
 worse-looking regression that only existed in the test harness, not in the
-fix. `docstudio/CHANGELOG.md`'s 2026-07-08 entry already documented this
+fix. `docs/velum/CHANGELOG.md`'s 2026-07-08 entry already documented this
 exact hazard for a different screen (a `styled_app` fixture, reset in
 teardown since `QApplication` is a process-wide singleton) — it just hadn't
 been applied to this round's ad hoc verification scripts.
@@ -1567,7 +1567,7 @@ been applied to this round's ad hoc verification scripts.
    `QFrame` subclass, so the card's own background+border+radius rule
    *also* matched its own title and detail labels, each repainting its
    own small bordered box around just its own text. This is the exact
-   rendering-bug family `docstudio/CHANGELOG.md`'s 2026-07-08 "Guide &
+   rendering-bug family `docs/velum/CHANGELOG.md`'s 2026-07-08 "Guide &
    Docs" entry already named and root-caused once ("even a bare type
    selector like `QFrame{…}` cascades") — reproduced again in new code
    despite that lesson being on record, caught only by an actual
@@ -1610,7 +1610,7 @@ fully filled"), no keyboard shortcut to open it, and a blunt overall verdict
   `#15181e`: a real fill, confirmed present by direct pixel sampling, just
   with so little contrast against its surroundings that it read as a hollow
   outline rather than a card — the same *category* of token mistake as
-  `docstudio/CHANGELOG.md`'s 2026-07-08 "it all looks like one dark canvas"
+  `docs/velum/CHANGELOG.md`'s 2026-07-08 "it all looks like one dark canvas"
   entry (`inset` used where `surface2`, "elevated fill," was called for),
   just a different instance of it. Fixed at the component level:
   `components.Accordion` gained an additive `fill: str = "inset"` parameter
@@ -2179,7 +2179,7 @@ field to the chosen file's name and clearing the warning after.
 
 ## 2026-07-09 — Models & Train and Dashboard tabs wired end to end (P1 done)
 
-Both `docstudio/BACKLOG.md` P1 items in one pass — real one-shot LoRA
+Both `docs/velum/BACKLOG.md` P1 items in one pass — real one-shot LoRA
 training and real experiment tracking, reusing the classic app's proven
 pipeline exactly as `ARCHITECTURE.md` prescribes, with no change to the
 mockup's look.
@@ -2447,7 +2447,7 @@ triggered it for the user.
 Took the P2 backlog item "Guide & Docs screen (currently a no-op sidebar
 item)" end to end. Home's "Documentation" and "Getting started guide"
 resource links used to shell out to `QDesktopServices.openUrl()` on raw
-`.md` files — `README.md`, and, worse, `docstudio/OVERVIEW.md`, an internal
+`.md` files — `README.md`, and, worse, `docs/velum/OVERVIEW.md`, an internal
 agent-facing dev doc with no business being shown to a microscopist. Neither
 that nor the sidebar's "Guide & Docs" row (a literal no-op,
 `open_guide.connect(lambda: None)`) held up as a real product surface.
@@ -2729,7 +2729,7 @@ alone this round):
   Sample" opens an existing project if one exists, or opens the dialog when
   the store is empty; "Ask the Assistant" opens the Assistant drawer;
   "Documentation"/"Getting started guide" open real local docs
-  (`README.md` / `docstudio/OVERVIEW.md`) and "GitHub" opens the real origin
+  (`README.md` / `docs/velum/OVERVIEW.md`) and "GitHub" opens the real origin
   remote (read from `git remote get-url origin` at runtime, converted to an
   `https://` URL — never a hard-coded/guessed link, and it degrades to a
   no-op if there's no remote).
@@ -2875,7 +2875,7 @@ there's a clean, consistent target to wire functionality against, tab by tab.
   (the UI-kit atoms + sidebar), `paint.py` (a QPainter nuclei stand-in for the
   canvas / card covers / thumbnails).
 - **Rounded window corners** (12px rounded mask) on the frameless window.
-- **`docstudio/`** — this doc set (OVERVIEW, DESIGN, ARCHITECTURE, BACKLOG,
+- **`docs/velum/`** — this doc set (OVERVIEW, DESIGN, ARCHITECTURE, BACKLOG,
   ROADMAP, CHANGELOG, AGENT_PROMPT) driving the tab-by-tab plan.
 
 Verified: full pure-logic suite green; the app boots offscreen and navigates

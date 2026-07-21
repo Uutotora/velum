@@ -3,7 +3,7 @@
 Qt-free glue between a ``Project``'s settings (``studio/project.py``) and the
 real segmentation pipeline — reuses the classic app's proven ML core
 (``cellseg1_core.predict_controller.PredictController``, ``analysis``,
-``benchmark``, ``cohort``) exactly as ``docstudio/ARCHITECTURE.md`` prescribes
+``benchmark``, ``cohort``) exactly as ``docs/velum/ARCHITECTURE.md`` prescribes
 for this tab, imported lazily so this module itself never pulls in torch.
 
 Mirrors ``studio/train_controller.py``'s shape: plain data in, plain

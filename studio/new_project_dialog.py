@@ -3,7 +3,7 @@
 A frameless, scrim-backed modal (same construction as ``overlays.
 CommandPalette``: full-window overlay, click-outside-to-close, Escape via the
 window's shortcut) implementing the Label Studio 3-step pattern
-``docstudio/BACKLOG.md`` calls for: name & description -> import images ->
+``docs/velum/BACKLOG.md`` calls for: name & description -> import images ->
 pick an engine. The final step writes through the real ``ProjectStore``
 (``studio/project.py``). Image files are only ever collected as paths (drag
 &drop or a native file picker) — never opened, decoded or previewed — so this

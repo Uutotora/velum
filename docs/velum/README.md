@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../studio/assets/icon.png" width="120" alt="Velum app icon">
+  <img src="../../studio/assets/icon.png" width="120" alt="Velum app icon">
 </p>
 
 # Velum — documentation
@@ -11,8 +11,9 @@ napari; see `ARCHITECTURE.md`). It replaces the "napari plugin in a dock"
 experience. (The Python package is still named `studio/`; "Velum" is the
 product name.)
 
-This folder is Studio's own doc set — separate from the repo-wide `docs/`
-(which covers the whole CellSeg1 project). Read in this order:
+This is Velum's own doc set (`docs/velum/`) — the app-specific subset of the
+repo-wide `docs/` (which also carries the project-wide BACKLOG/AUDIT/CHANGELOG;
+see [`../README.md`](../README.md) for the map). Read in this order:
 
 1. **[OVERVIEW.md](OVERVIEW.md)** — what Studio is, where it stands (Phase 0 +
    1 done, Phase 2 in progress — see `ROADMAP.md`), how to run it, and the
@@ -44,17 +45,16 @@ This folder is Studio's own doc set — separate from the repo-wide `docs/`
 - The goal now is **polish & platform** (P2): theme persistence, onboarding,
   a Settings screen, native rounded corners, packaging — tracked in
   `BACKLOG.md`.
-- The **classic app is untouched** (`napari_app/main.py`, `run_napari.sh`, the
-  `cellseg1` command) — launch it any time to use the fully-functional (if
-  less polished) product.
-- **Studio lives on its own branch and is never merged into `main`** (which
-  holds the classic app + other critical work). All Studio work happens on the
-  Studio branch.
+- **Velum is THE product.** The old `napari_app/` plugin UI has been deleted;
+  its engine-agnostic ML core moved to `cellseg1_core/` (Qt-free, no napari),
+  which Velum imports as its backend. There is no separate "classic app" any
+  more — this is it.
 
 ## Run it
 
 ```bash
-bash run_studio.sh          # or:  python -m studio.app
+bash run_studio.sh          # or:  velum  /  cellseg1  (after pip install -e .)
 ```
 
-No GPU, no weights, no napari needed — it's design only.
+Real inference needs SAM weights + deps — see `scripts/setup.sh`. The UI itself
+launches on PyQt6 alone.

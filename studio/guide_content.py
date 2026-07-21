@@ -8,7 +8,7 @@ only data source.
 
 Written for the product's actual audience: microscopists and cell biologists,
 not ML engineers (see the repo-root ``AGENTS.md``). Every claim here matches
-what's actually wired today (see ``docstudio/BACKLOG.md`` for what isn't yet).
+what's actually wired today (see ``docs/velum/BACKLOG.md`` for what isn't yet).
 
 Each ``Article.blocks`` entry is ``(kind, payload)``, rendered generically by
 ``guide_screen._render_block``:

@@ -78,7 +78,7 @@ def test_faq_has_several_entries_with_real_content():
 
 
 def test_assistant_article_exists_and_names_all_three_real_backends():
-    # The Assistant is wired now (docstudio/BACKLOG.md, 2026-07-18) — it gets
+    # The Assistant is wired now (docs/velum/BACKLOG.md, 2026-07-18) — it gets
     # a real article, and that article must actually match the three
     # backends studio/assistant_controller.py implements (BACKENDS), not an
     # aspirational subset.

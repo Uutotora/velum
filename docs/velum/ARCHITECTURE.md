@@ -46,7 +46,7 @@ project_dialogs.py  ConfirmDialog (generic scrim+panel confirm — used for
                   (soft-delete with Restore/Undo) were built, then reverted
                   the same day after real (non-offscreen) usage found both a
                   rendering bug and that the product didn't want the extra
-                  machinery — see docstudio/CHANGELOG.md's dated entry.
+                  machinery — see docs/velum/CHANGELOG.md's dated entry.
 layer_model.py    Our own evented layer model (Layer/ImageLayer/LabelsLayer/
                   PointsLayer/ShapesLayer/LayerList) — napari-Labels-faithful
                   properties/defaults, plain-callback events (no Qt/psygnal),

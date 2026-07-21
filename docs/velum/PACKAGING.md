@@ -68,7 +68,7 @@ Paste this to an agent (Claude Code / Codex / Cursor) in the repo root:
 >   (ad-hoc sign) so Gatekeeper/Dock behave, and print how to launch it.
 > - Verify it opens (`open "dist/Velum.app"`), confirm the log file
 >   gets written, and tell me exactly what you did and did NOT verify.
-> - Add a short `docstudio/PACKAGING.md` section (or update it) with how to
+> - Add a short `docs/velum/PACKAGING.md` section (or update it) with how to
 >   rebuild and where the log lives. Commit on a branch.
 >
 > Note: the app currently needs a real display + SAM weights to fully run; you
@@ -105,7 +105,7 @@ bash scripts/build_bundle.sh
 #   Linux  -> dist/Velum/     +  dist/Velum-linux-x86_64.tar.gz
 ```
 
-**In CI / Releases** — [`.github/workflows/release.yml`](../.github/workflows/release.yml)
+**In CI / Releases** — [`.github/workflows/release.yml`](../../.github/workflows/release.yml)
 builds both on a version tag and attaches them to the GitHub Release:
 
 ```bash

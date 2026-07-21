@@ -4,8 +4,8 @@ Native reproductions of the mockup, one screen per class, driven by the
 ``components``/``paint`` kits. Home and Projects are wired to the real
 ``ProjectController`` (live projects, search/filter/favourites); the other
 screens still render ``demo.py`` static content pending their own tab in
-``docstudio/BACKLOG.md``. The Workspace is the signature screen (adapted-napari
-layers · canvas · inspector). See ``docstudio/`` for the per-tab wiring plan.
+``docs/velum/BACKLOG.md``. The Workspace is the signature screen (adapted-napari
+layers · canvas · inspector). See ``docs/velum/`` for the per-tab wiring plan.
 """
 from __future__ import annotations
 
@@ -174,7 +174,7 @@ class HomeScreen(QWidget):
         on their shared ancestor forces Qt to re-rasterise every one of
         those nested effects on every frame of the fade -- the same
         composited-effects-are-expensive mechanism already root-caused for
-        the Projects grid's scroll stutter (docstudio/BACKLOG.md's "Projects
+        the Projects grid's scroll stutter (docs/velum/BACKLOG.md's "Projects
         tab v2" entry), just triggered by a repeated opacity animation
         instead of scrolling. Worse, it re-played on *every single visit* to
         an already-built, mostly-unchanged screen, not just the first time —
@@ -343,7 +343,7 @@ class HomeScreen(QWidget):
         tip = QFrame()
         tip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         # Qualified -- see components.EngineChip's comment. This is the
-        # exact instance docstudio/CHANGELOG.md's 2026-07-08 entry already
+        # exact instance docs/velum/CHANGELOG.md's 2026-07-08 entry already
         # found and screenshotted ("the identical double-box on the Tip
         # card's text") but deliberately left unfixed as out of scope for
         # that change -- fixed now.
@@ -384,7 +384,7 @@ class HomeScreen(QWidget):
         c.setFixedWidth(300)
         c.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         # Qualified -- see components.EngineChip's comment. This is the
-        # exact instance docstudio/CHANGELOG.md's 2026-07-08 entry already
+        # exact instance docs/velum/CHANGELOG.md's 2026-07-08 entry already
         # found and screenshotted ("HomeScreen._card()... carry this same
         # *latent, currently invisible* bug") but deliberately left unfixed
         # as out of scope for that change -- fixed now. Shared objectName

@@ -250,7 +250,7 @@ model), reusing only the ML *logic*. Structure derived from Label Studio,
 retuned for microscopy. **Additive + opt-in**: classic `napari_app/main.py` /
 `run_napari.sh` / `cellseg1` stays byte-for-byte unchanged; Studio ships behind
 `run_studio.sh` / `cellseg1-studio`. Now a **top-level `studio/` package** with
-its own docs + tab-by-tab plan in **`docstudio/`** (that's the live source of
+its own docs + tab-by-tab plan in **`docs/velum/`** (that's the live source of
 truth; the bullets below are a historical summary).
 
 - [x] **Own window chrome + transitions** (2026-07-07) — frameless window with

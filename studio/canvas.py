@@ -1,6 +1,6 @@
 """Velum — the Segment workspace's own image canvas.
 
-Not embedded napari (see ``docstudio/ARCHITECTURE.md``) — a self-contained
+Not embedded napari (see ``docs/velum/ARCHITECTURE.md``) — a self-contained
 ``QWidget`` that renders a :class:`studio.layer_model.LayerList` (image +
 labels + points + shapes) with pan/zoom, and turns mouse input into real
 edits on the selected ``LabelsLayer`` (paint/erase/fill/pick/polygon) exactly

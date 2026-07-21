@@ -37,7 +37,7 @@ def counted(monkeypatch):
 def test_nuclei_view_caches_between_repaints_at_same_size(app, counted):
     """Repeated repaints at an unchanged size must not re-run the procedural
     field generator. This is the fix for visibly stuttering scroll in
-    ProjectsScreen's card grid (docstudio/BACKLOG.md's "Projects tab v2"
+    ProjectsScreen's card grid (docs/velum/BACKLOG.md's "Projects tab v2"
     entry): every visible card's NucleiView cover used to regenerate its
     whole gradient+polygon field from scratch on every scroll-triggered
     repaint, and there can be many simultaneously-visible cards. Confirmed

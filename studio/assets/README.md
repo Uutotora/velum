@@ -15,7 +15,7 @@ deliberately do *not* hand-pad it to the macOS grid: the app currently runs
 Dock tile is `python3.11`'s window icon, drawn by Qt as-is with no system
 treatment), and faking the Tahoe squircle margin by eye just chased its tail.
 The correct margin/masking is applied automatically once Studio is a real
-`.app` bundle — see [`docstudio/PACKAGING.md`](../../docstudio/PACKAGING.md).
+`.app` bundle — see [`docs/velum/PACKAGING.md`](../../docs/velum/PACKAGING.md).
 
 The full source set (every iOS variant + a full-bleed `AppIcon.iconset` and
 `AppIcon.icns`) lives in [`docs/app_icon/`](../../docs/app_icon/).

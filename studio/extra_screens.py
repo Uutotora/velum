@@ -3,7 +3,7 @@
 Models & Train is real (bound to ``studio.train_controller.TrainController`` —
 one-shot LoRA training on a background thread, a real trained-models list and
 recent-runs history from disk). Dashboard is real (bound to
-``studio.dashboard_controller.DashboardController``). See ``docstudio/
+``studio.dashboard_controller.DashboardController``). See ``docs/velum/
 BACKLOG.md`` / ``CHANGELOG.md`` for how each was wired.
 """
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Velum — the application shell and entry point.
 
 This app is a faithful, native-Qt reproduction of the north-star mockup, with
-functionality wired back tab by tab (see ``docstudio/`` — OVERVIEW,
+functionality wired back tab by tab (see ``docs/velum/`` — OVERVIEW,
 ARCHITECTURE, BACKLOG, AGENT_PROMPT). Every screen is real: Home/Projects
 (``ProjectController``), Segment (``SegmentController`` + our own canvas/layer
 model), Models & Train/Dashboard (``TrainController``/``DashboardController``),

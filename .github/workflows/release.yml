@@ -9,7 +9,7 @@
 # bundle over GitHub's 2 GB per-release-asset limit, and a desktop distributable
 # targets CPU/Apple-MPS anyway (CUDA users install from source). PyInstaller +
 # torch can still need a hidden-import shake-down for a new torch version — see
-# docstudio/PACKAGING.md.
+# docs/velum/PACKAGING.md.
 name: release
 
 on:

@@ -63,7 +63,7 @@ studio/                THE PRODUCT (PyQt6 desktop app — NOT napari)
                        train/dashboard/assistant controllers (take plain dicts
                        + callbacks, not Qt widgets — see tests/)
   components.py theme.py icons.py motion.py overlays.py   the UI kit
-  assets/icon.png      the app icon (see docs/app_icon/, docstudio/PACKAGING.md)
+  assets/icon.png      the app icon (see docs/app_icon/, docs/velum/PACKAGING.md)
 
 cellseg1_core/         THE ML CORE (engine-agnostic, Qt-free, no napari) — what
                        studio imports as its backend. Extracted 2026-07-21 from

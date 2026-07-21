@@ -435,7 +435,7 @@ class CommandPalette(QWidget):
         # against the near-identical dark tones of the dark theme but a
         # glaring flat-grey patch in light theme (bg #f4f6f8 vs. this
         # panel's own surface #ffffff) -- the exact "bare QWidget() wrapper"
-        # bug family docstudio/CHANGELOG.md's 2026-07-09 entry already found
+        # bug family docs/velum/CHANGELOG.md's 2026-07-09 entry already found
         # and fixed elsewhere (guide_screen.py's table/shortcut rows);
         # CommandPalette was still 100% static content at the time and never
         # got a real screenshot pass, so this instance went undiscovered

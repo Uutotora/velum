@@ -17,7 +17,7 @@ Source art for the Velum app icon.
 > tile is `python3.11`'s Qt window icon, drawn as-is with no system treatment),
 > there's no perfect margin to match by hand, so we ship it full-bleed and let
 > the OS do the right thing once it's a real `.app`. See
-> [`docstudio/PACKAGING.md`](../../docstudio/PACKAGING.md).
+> [`docs/velum/PACKAGING.md`](../../docs/velum/PACKAGING.md).
 
 The running app loads the single 1024×1024
 [`studio/assets/icon.png`](../../studio/assets/icon.png) via
@@ -32,4 +32,4 @@ The running app loads the single 1024×1024
    iconutil -c icns docs/app_icon/AppIcon.iconset -o docs/app_icon/AppIcon.icns
    ```
 3. For the real macOS-margined icon, prefer Icon Composer's `.icon` bundle at
-   `.app` packaging time (see `docstudio/PACKAGING.md`) rather than hand-padding.
+   `.app` packaging time (see `docs/velum/PACKAGING.md`) rather than hand-padding.

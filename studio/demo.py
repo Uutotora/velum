@@ -2,7 +2,7 @@
 
 Hard-coded stand-in data mirroring the north-star mockup, so every screen
 renders a believable, consistent picture with **no logic** behind it. When a
-tab is wired for real (see ``docstudio/BACKLOG.md``), its screen swaps this
+tab is wired for real (see ``docs/velum/BACKLOG.md``), its screen swaps this
 module for live data from the (re-introduced) data layer.
 """
 from __future__ import annotations

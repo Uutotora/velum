@@ -108,7 +108,7 @@ bash scripts/make_app.sh      # -> dist/Velum.app
 open "dist/Velum.app"
 ```
 
-See **[docstudio/PACKAGING.md](docstudio/PACKAGING.md)** for the full story
+See **[docs/velum/PACKAGING.md](docs/velum/PACKAGING.md)** for the full story
 (dev-launcher vs. a self-contained distributable, and how the icon works).
 
 ## Adding features (the update loop)
@@ -123,8 +123,8 @@ Studio is built so you add features by describing them, without re-packaging:
    terminal loop with live logs). Same `.app`, new code.
 4. **Keep it green:** run the tests (below); add one for new logic.
 
-Full guide: **[docstudio/PACKAGING.md](docstudio/PACKAGING.md)** ·
-architecture and how to wire a tab: **[docstudio/](docstudio/)**.
+Full guide: **[docs/velum/PACKAGING.md](docs/velum/PACKAGING.md)** ·
+architecture and how to wire a tab: **[docs/velum/](docs/velum/)**.
 
 ## Architecture
 
@@ -137,7 +137,7 @@ cellseg1_core/     Engine-agnostic ML core (Qt-free): predict controller,
 server/            Optional multi-user backend foundation (accounts, RBAC,
                    audit) — stdlib only, opt-in.
 segment_anything/  Vendored SAM fork · peft/ LoRA · data/ IO  (repo-root ML libs)
-docs/ · docstudio/ Project docs and Studio-specific docs (design, packaging,
+docs/ · docs/velum/ Project docs and Studio-specific docs (design, packaging,
                    backlog, changelog)
 ```
 

@@ -447,7 +447,7 @@ palette) is real. See `ROADMAP.md`.
   sidebar's "Guide & Docs" row (previously wired to a no-op) and from Home's
   Documentation / Getting started guide resource links (previously
   `QDesktopServices.openUrl`'d raw `.md` files — `README.md` /
-  `docstudio/OVERVIEW.md`, an internal dev doc that had no business being
+  `docs/velum/OVERVIEW.md`, an internal dev doc that had no business being
   user-facing). Getting Started's steps trigger the same real callbacks
   Home's quick cards use (New Project, Open a sample, navigate a tab) rather
   than being purely descriptive. Assistant is deliberately not documented —

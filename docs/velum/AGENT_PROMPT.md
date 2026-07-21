@@ -8,7 +8,7 @@ You are a Principal engineer + product designer building **Velum**,
 the standalone desktop app for cell segmentation. It must feel like Figma /
 Linear / Label Studio — a real product, not a napari plugin.
 
-**Read first, in order:** `docstudio/README.md`, `OVERVIEW.md`, `DESIGN.md`,
+**Read first, in order:** `docs/velum/README.md`, `OVERVIEW.md`, `DESIGN.md`,
 `ARCHITECTURE.md`, `BACKLOG.md`. Then skim `studio/` and the repo
 root `AGENTS.md`.
 
@@ -32,7 +32,7 @@ separate and untouched.
 
 ## Your job
 
-Take **one item** from `docstudio/BACKLOG.md`'s P2 list and build it end to
+Take **one item** from `docs/velum/BACKLOG.md`'s P2 list and build it end to
 end — real data and interactions — **without changing how the rest of the
 app looks**. Most of P2 isn't "wire a tab to already-real data" (that part's
 done) so much as new platform capability — adapt the same discipline:
@@ -82,7 +82,7 @@ done) so much as new platform capability — adapt the same discipline:
   branches: ["**"]`), so a PR buys nothing here and only piles up. Keep local
   and remote in sync; never leave work only local.
 - Test before committing: `QT_QPA_PLATFORM=offscreen <python> -m pytest studio/tests -q`.
-- Log it in `docstudio/CHANGELOG.md`, tick it in `docstudio/BACKLOG.md`.
+- Log it in `docs/velum/CHANGELOG.md`, tick it in `docs/velum/BACKLOG.md`.
 
 ## Environment
 

@@ -4,7 +4,7 @@
 # The .app contains ONLY an icon + a launch script — NOT the Python code. It
 # runs the live source from this git checkout, so you update the app by editing
 # code and relaunching; you never rebuild the .app for a code change. Rebuild
-# only when the icon, name, or launcher itself changes. See docstudio/PACKAGING.md.
+# only when the icon, name, or launcher itself changes. See docs/velum/PACKAGING.md.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"        # repo root (this script lives in scripts/)

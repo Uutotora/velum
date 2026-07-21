@@ -196,7 +196,7 @@ def _tall_scroll_area():
 
 def test_smooth_scroll_area_animates_a_discrete_wheel_notch(app):
     """A traditional notched mouse wheel (angleDelta only, no pixelDelta)
-    must not jump the scrollbar instantly -- docstudio/BACKLOG.md's
+    must not jump the scrollbar instantly -- docs/velum/BACKLOG.md's
     "Projects tab v2" entry. Right after the event the bar must still be at
     its starting value (an instant jump would already be at the target the
     moment wheelEvent() returns), and the animation actually queued for it

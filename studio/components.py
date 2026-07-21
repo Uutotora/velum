@@ -6,7 +6,7 @@ tiles, collapsible sections, and the navigation sidebar. **No business logic** â
 this branch is a pure design skeleton; controls render state but don't act.
 Interactivity that's part of the *design* (nav, theme toggle, opening the
 command palette, expanding a section, flipping a toggle's look) is kept; real
-functionality is wired later, tab by tab (see ``docstudio/``).
+functionality is wired later, tab by tab (see ``docs/velum/``).
 
 Every widget takes a token dict from :mod:`studio.theme`, so it
 renders in either theme. All constructible under ``QT_QPA_PLATFORM=offscreen``.
@@ -205,7 +205,7 @@ class EngineChip(QFrame):
         # both QFrame subclasses too, so an unscoped rule here would also
         # match them and leak this chip's border onto each (neither sets
         # its own `border`, only background) -- the same rendering-bug
-        # family docstudio/CHANGELOG.md's 2026-07-08 "Guide & Docs" entry
+        # family docs/velum/CHANGELOG.md's 2026-07-08 "Guide & Docs" entry
         # and the 2026-07-18 Assistant entries already found repeatedly.
         self.setObjectName("EngineChip")
         self.setStyleSheet(
@@ -711,7 +711,7 @@ class Accordion(QFrame):
     less directly on a plain page/panel background instead â€” `inset` there
     reads as barely more than a hollow outline (too little contrast against
     its surroundings), the same family of mistake as the token lesson in
-    `docstudio/CHANGELOG.md`'s 2026-07-08 entry, just one token over.
+    `docs/velum/CHANGELOG.md`'s 2026-07-08 entry, just one token over.
     """
 
     def __init__(self, title: str, t: dict, lead: str = "check", open_: bool = False,

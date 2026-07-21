@@ -562,7 +562,7 @@ def test_change_card_title_and_detail_labels_are_not_individually_boxed(styled_a
     ("QFrame{...}", no #ObjectName) -- QLabel is itself a QFrame subclass,
     so the card's own background+border+radius rule also matched its title
     and detail QLabels, each repainting its own small bordered box around
-    just its own text (the exact rendering-bug family docstudio/CHANGELOG.md's
+    just its own text (the exact rendering-bug family docs/velum/CHANGELOG.md's
     2026-07-08 "Guide & Docs" entry already named once)."""
     t = theme.DARK
     card = ap.ChangeCard(t, "Run a prediction first",

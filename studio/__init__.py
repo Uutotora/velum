@@ -2,7 +2,7 @@
 
 A faithful, native-Qt reproduction of the north-star mockup, with real
 functionality wired back tab by tab; the plan, the fresh-agent prompt, the
-changelog and the backlog all live in the repo's ``docstudio/`` folder.
+changelog and the backlog all live in the repo's ``docs/velum/`` folder.
 
 Modules (import direction is one-way, leaf → shell):
 
@@ -25,5 +25,5 @@ Modules (import direction is one-way, leaf → shell):
 - :mod:`~studio.app` — ``StudioWindow`` + ``main`` (the entry point).
 
 No napari, no torch, at any shared module's top level — the ML core is reused
-lazily, only inside the tab being wired (see ``docstudio/ARCHITECTURE.md``).
+lazily, only inside the tab being wired (see ``docs/velum/ARCHITECTURE.md``).
 """

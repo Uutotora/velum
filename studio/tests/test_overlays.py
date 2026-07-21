@@ -550,7 +550,7 @@ def test_input_and_footer_rows_match_the_panel_surface_not_the_page_bg(styled_ap
     <bg>-coloured rectangle over their own children -- invisible against the
     near-identical dark tones of the dark theme but a glaring flat-grey
     patch in light theme (bg #f4f6f8 vs. this panel's own surface #ffffff),
-    the same "bare QWidget() wrapper" family docstudio/CHANGELOG.md's
+    the same "bare QWidget() wrapper" family docs/velum/CHANGELOG.md's
     2026-07-09 entry already found and fixed elsewhere. CommandPalette was
     still 100% static content at the time and never got a real screenshot
     pass, so this instance went undiscovered until the palette actually
