@@ -17,14 +17,18 @@ for a future `.app` bundle. The running app still loads the single
 `docstudio/README.md`, centred GitHub-style, so it shows on the repo's front
 page. Verified `load_icon()` picks up the new art.
 
-**macOS padding.** The raw exports are *iOS* icons — the rounded square fills
-the whole canvas edge-to-edge, so dropped straight in it looked oversized in
-the Dock next to system icons (Safari/App Store et al. sit on a grid with a
-transparent margin). Fixed by padding `studio/assets/icon.png` and the macOS
-iconset to the same grid the previous icon used: the art scaled to ~0.772 of
-the canvas and centred on transparent 1024² (measured the old icon's ~0.77
-content ratio and matched it). The `docs/app_icon/exports/` stay full-bleed as
-the untouched design source.
+**Decision: ship it full-bleed for now.** Hand-padding the icon to match the
+Dock was a tail-chase *because the app is unbundled* — the Dock tile is the
+`python3.11` interpreter's Qt window icon (drawn as-is, no macOS icon
+treatment), so there's no stable system margin to match by eye (full-bleed read
+"too big", 0.772 "too small", 0.875 "too big" again). Reverted
+`studio/assets/icon.png` and the iconset to the **full-bleed Default** export
+and stopped hand-padding. The proper margin/masking is the OS's job once Studio
+is a real `.app`; wrote **[docstudio/PACKAGING.md](PACKAGING.md)** covering a
+thin dev-launcher `.app` (build once, then edit code + relaunch to update — no
+rebuild), the agent prompt to build it, the icon options for a real bundle
+(pre-padded `.icns` at ~0.875, or Icon Composer's `.icon` for the full Tahoe
+"Liquid Glass" look), and the vibe-coding update loop.
 
 ---
 

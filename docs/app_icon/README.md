@@ -2,34 +2,34 @@
 
 Source art for the CellSeg1 Studio app icon.
 
-- **`AppIcon.icns`** — the packaged macOS icon, ready for a future `.app`
-  bundle (built from `AppIcon.iconset/` with `iconutil`).
+- **`AppIcon.icns`** — the macOS icon, built from `AppIcon.iconset/` with
+  `iconutil` (full-bleed Default; see the note below).
 - **`AppIcon.iconset/`** — the `iconutil` input (`icon_16x16.png` …
-  `icon_512x512@2x.png`), the **macOS-padded** Default variant.
-- **`exports/`** — the raw design export: every iOS variant
-  (Default / Dark / ClearLight / ClearDark / TintedLight / TintedDark) at every
-  size (16 → 1024, @1x/@2x/@3x). The **Default** variant is the one shipped.
+  `icon_512x512@2x.png`), the full-bleed Default variant.
+- **`exports/`** — the raw design export from **Apple Icon Composer**: every
+  iOS variant (Default / Dark / ClearLight / ClearDark / TintedLight /
+  TintedDark) at every size (16 → 1024, @1x/@2x/@3x). The **Default** variant
+  is the one shipped.
 
-> **Padding matters.** The raw exports are **iOS** icons — the rounded square
-> fills the whole canvas edge-to-edge. macOS Dock icons instead sit on a grid
-> with a transparent margin (the artwork is ~0.77 of the canvas, centred);
-> dropping a full-bleed iOS icon straight in makes it look oversized next to
-> system icons. So `studio/assets/icon.png` and this iconset are the Default
-> art **scaled to ~0.772 and centred** on a transparent 1024² canvas, not a
-> raw copy of `Default-1024`.
+> **On sizing.** These are **full-bleed** icons — the rounded square fills the
+> canvas edge-to-edge (that's what Icon Composer exports; Xcode normally adds
+> the macOS margin at build time). While Studio runs **unbundled** (the Dock
+> tile is `python3.11`'s Qt window icon, drawn as-is with no system treatment),
+> there's no perfect margin to match by hand, so we ship it full-bleed and let
+> the OS do the right thing once it's a real `.app`. See
+> [`docstudio/PACKAGING.md`](../../docstudio/PACKAGING.md).
 
 The running app loads the single 1024×1024
 [`studio/assets/icon.png`](../../studio/assets/icon.png) via
-`QApplication.setWindowIcon()`.
+`QApplication.setWindowIcon()` — a copy of `exports/…Default-1024@1x.png`.
 
 ## Changing the icon
 
-1. Re-export the design (keep the `Default` variant as the shipped one) into
-   `exports/`.
-2. Re-pad it to the macOS grid and regenerate `studio/assets/icon.png` + this
-   iconset (0.772 content ratio, centred on a transparent 1024² canvas — see
-   the commit that added this folder for the exact snippet).
-3. Rebuild the packaging artifact:
+1. Re-export from Icon Composer into `exports/` (keep `Default` as shipped).
+2. Copy the new `Default-1024` over `studio/assets/icon.png`, regenerate the
+   iconset sizes from it, then rebuild the `.icns`:
    ```sh
    iconutil -c icns docs/app_icon/AppIcon.iconset -o docs/app_icon/AppIcon.icns
    ```
+3. For the real macOS-margined icon, prefer Icon Composer's `.icon` bundle at
+   `.app` packaging time (see `docstudio/PACKAGING.md`) rather than hand-padding.
