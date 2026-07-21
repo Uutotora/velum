@@ -11,27 +11,29 @@ actions. Everything the controller can reach runs locally; nothing leaves the
 machine unless the user has configured a remote Custom-API endpoint
 themselves.
 
-Layout: header · a collapsed-by-default "Model" settings accordion (backend
-picker + per-backend fields + live status) · the chat (the hero surface,
-filling whatever room is left) · the input row (Diagnose · text · Send).
+Layout: a clean header (title · Diagnose · Settings · Close — no decorative
+badge) · a one-line provider status strip that jumps to Settings · the chat
+(the hero surface, filling whatever room is left) · the input row. All
+provider/model *configuration* moved out to ``studio/settings_screen.py``;
+this drawer only reads whichever provider is active.
 """
 from __future__ import annotations
 
 import logging
 from typing import Callable, Optional
 
-from PyQt6.QtCore import Qt, QPropertyAnimation, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QFrame, QGraphicsOpacityEffect, QLabel, QHBoxLayout, QVBoxLayout,
-    QLineEdit, QToolButton, QScrollArea, QProgressBar,
+    QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout,
+    QLineEdit, QToolButton, QScrollArea,
 )
 
 from studio import icons
 from studio import theme
 from studio.components import (
-    Accordion, IconButton, PillButton, SegControl, SelectBox, bare_widget, hline, label,
+    IconButton, PillButton, bare_widget, hline, label,
 )
-from studio.assistant_controller import AssistantController, BACKENDS, BACKEND_LABELS
+from studio.assistant_controller import AssistantController
 
 _log = logging.getLogger("studio.assistant")
 
@@ -357,97 +359,39 @@ class ChangeCard(QFrame):
 
 _SEVERITY_TOKEN = {"good": "success", "info": "primary", "warn": "warning"}
 
-# state -> token: "unknown" (not checked yet) / "checking" (in flight,
-# pulses) / "ok" / "bad" (both solid).
-_STATUS_DOT_TOKEN = {"unknown": "text_muted", "checking": "primary", "ok": "success", "bad": "text_muted"}
-
-
-class _StatusDot(QLabel):
-    """A small live-status dot: solid once a check resolves, gently
-    *breathing* (a looping opacity pulse) while one is in flight — reads as
-    "checking right now", not just a static "please wait" label sitting
-    next to an inert circle."""
-
-    def __init__(self, t: dict, state: str = "unknown", size: int = 8):
-        super().__init__()
-        self._size = size
-        self.setFixedSize(size, size)
-        self._pulse: Optional[QPropertyAnimation] = None
-        self.set_state(t, state)
-
-    def set_state(self, t: dict, state: str) -> None:
-        # Guards the *whole* body, not just the animation setup: this can be
-        # called from a background-thread status check's completion
-        # callback, which can land after the drawer (and this dot) was torn
-        # down mid-check (e.g. a theme toggle) -- same deleted-widget hazard
-        # motion.py's helpers guard against, narrowly, so a genuine bug
-        # elsewhere still surfaces instead of being silently swallowed.
-        try:
-            color = t[_STATUS_DOT_TOKEN.get(state, "text_muted")]
-            self.setStyleSheet(f"background:{color}; border-radius:{self._size // 2}px;")
-            if self._pulse is not None:
-                self._pulse.stop()
-                self._pulse = None
-                self.setGraphicsEffect(None)
-            if state == "checking":
-                eff = QGraphicsOpacityEffect(self)
-                self.setGraphicsEffect(eff)
-                anim = QPropertyAnimation(eff, b"opacity", self)
-                anim.setDuration(900)
-                anim.setKeyValueAt(0.0, 0.35)
-                anim.setKeyValueAt(0.5, 1.0)
-                anim.setKeyValueAt(1.0, 0.35)
-                anim.setLoopCount(-1)
-                anim.start()
-                self._pulse = anim
-        except RuntimeError:
-            pass
-
-
 class AssistantDrawer(QFrame):
-    """Right-side chat drawer — a real chat backed by ``AssistantController``,
-    reading/acting on the active Segment session through ``workspace`` (see
-    ``workspace.py``'s "Assistant integration" methods)."""
+    """Right-side chat drawer — a pure chat surface backed by
+    ``AssistantController``, reading/acting on the active Segment session
+    through ``workspace`` (see ``workspace.py``'s "Assistant integration"
+    methods).
+
+    All provider/model configuration lives in the Settings screen
+    (``studio/settings_screen.py``) now, not here: this drawer shows only a
+    thin "which provider · which model" status strip with a gear that jumps
+    to Settings, then the chat itself. ``on_open_settings`` is the callback
+    (wired in ``app.py``) that navigates there.
+    """
 
     WIDTH = 360
 
     _token_sig = pyqtSignal(str)
     _done_sig = pyqtSignal(str)
     _error_sig = pyqtSignal(str)
-    _status_sig = pyqtSignal(object, object, object, object)   # backend_at_call, ok, msg, models
-    _pull_progress_sig = pyqtSignal(str, float)
-    _pull_done_sig = pyqtSignal(str, bool)
-    _create_status_sig = pyqtSignal(str)
-    _create_done_sig = pyqtSignal(bool)
 
     def __init__(self, parent: QWidget, t: dict, controller: Optional[AssistantController] = None,
-                workspace=None):
+                 workspace=None, on_open_settings: Optional[Callable[[], None]] = None):
         super().__init__(parent)
         self._t = t
         self._controller = controller or AssistantController()
         self._workspace = workspace
+        self._on_open_settings = on_open_settings or (lambda: None)
         self._history: list[dict] = []
         self._last_diag: Optional[dict] = None
         self._last_send_was_live = False
-        self._found_models: list[str] = []
-        self._status_ok: Optional[bool] = None
-        self._status_msg = ""
-        self._op_status_text = ""
 
         self.setFixedWidth(self.WIDTH)
-        # Qualified selector, not a bare "background:...;border-left:...;"
-        # rule: an *unqualified* setStyleSheet() on a container cascades to
-        # every descendant that doesn't more specifically override the same
-        # property. QWidget/QLabel have an app-wide type-selector for
-        # `background` (theme.build_qss), so that property is always safely
-        # overridden lower down -- but nothing overrides plain `border` for
-        # a bare QWidget, so the drawer's own border-left was leaking onto
-        # ChatView's inset empty-state widget as a stray vertical line at
-        # its own left edge (confirmed by pixel-sampling: exactly the
-        # border colour, exactly the empty-state's own x-offset and height,
-        # gone the moment this selector was scoped) -- the same rendering-
-        # bug family docs/velum/CHANGELOG.md's 2026-07-08 entries already
-        # named twice, just leaking `border` instead of `background`.
+        # Qualified selector (see the git-blame lesson that was here before):
+        # an unqualified border-left leaks onto inset children.
         self.setObjectName("AssistantDrawer")
         self.setStyleSheet(
             f"QFrame#AssistantDrawer{{background:{t['surface']}; border-left:1px solid {t['border']};}}")
@@ -455,63 +399,34 @@ class AssistantDrawer(QFrame):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
         v.addWidget(self._header())
-
-        self._model_acc = Accordion(
-            f"Model · {BACKEND_LABELS[self._controller.settings.backend]}",
-            t, lead="settings", open_=False, fill="surface2")
-        self._backend_seg = SegControl(
-            [BACKEND_LABELS[b] for b in BACKENDS], t,
-            active=BACKENDS.index(self._controller.settings.backend))
-        self._backend_seg.changed.connect(self._on_backend_changed)
-        self._model_acc.add(self._backend_seg)
-        self._model_body_wrap = bare_widget()
-        self._model_body_lay = QVBoxLayout(self._model_body_wrap)
-        self._model_body_lay.setContentsMargins(0, 10, 0, 0)
-        self._model_body_lay.setSpacing(10)
-        self._model_acc.add(self._model_body_wrap)
-        acc_wrap = bare_widget()
-        acc_wrap_lay = QVBoxLayout(acc_wrap)
-        acc_wrap_lay.setContentsMargins(12, 10, 12, 10)
-        acc_wrap_lay.addWidget(self._model_acc)
-        v.addWidget(acc_wrap)
+        v.addWidget(self._status_strip())
         v.addWidget(hline(t))
 
         self._chat = ChatView(t)
         v.addWidget(self._chat, 1)
-
         v.addWidget(self._input_row())
         self.hide()
 
         self._token_sig.connect(self._on_token)
         self._done_sig.connect(self._on_done)
         self._error_sig.connect(self._on_error)
-        self._status_sig.connect(self._on_status_result)
-        self._pull_progress_sig.connect(self._on_pull_progress)
-        self._pull_done_sig.connect(self._on_pull_done)
-        self._create_status_sig.connect(self._on_create_status)
-        self._create_done_sig.connect(self._on_create_done)
 
-        self._rebuild_model_body()
-        if self._controller.settings.backend != "offline":
-            self._refresh_status()
-
-    # ── chrome (header / input row) ─────────────────────────────────────────
+    # ── chrome ───────────────────────────────────────────────────────────────
     def _header(self) -> QWidget:
         t = self._t
         h = bare_widget()
         row = QHBoxLayout(h)
-        row.setContentsMargins(15, 13, 12, 13)
+        row.setContentsMargins(16, 13, 12, 13)
         row.setSpacing(10)
-        spark = QLabel()
-        spark.setFixedSize(23, 23)
-        spark.setPixmap(icons.pixmap("spark", "#fff", 13))
-        spark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        spark.setStyleSheet(
-            "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            f"stop:0 {t['primary']}, stop:1 {t['signal']}); border-radius:7px;")
-        row.addWidget(spark)
-        row.addWidget(label("Assistant", 14, t["text"], 600))
+        # No leading spark badge — a clean wordmark-style title reads more
+        # like a finished product panel than a decorated widget.
+        title = label("Assistant", 14.5, t["text"], 600)
+        row.addWidget(title)
         row.addStretch(1)
+        row.addWidget(IconButton("diagnose", t, 27,
+                                 "Diagnose the current result — offline, no model needed",
+                                 self._run_diagnose))
+        row.addWidget(IconButton("settings", t, 27, "Assistant settings", self._on_open_settings))
         row.addWidget(IconButton("close", t, 27, "Close", self.hide))
         wrap = bare_widget()
         wl = QVBoxLayout(wrap)
@@ -521,15 +436,49 @@ class AssistantDrawer(QFrame):
         wl.addWidget(hline(t))
         return wrap
 
+    def _status_strip(self) -> QWidget:
+        """A single quiet line: which provider (and model) is answering, a
+        readiness dot, and a shortcut into Settings — replacing the old
+        collapsible model-config accordion entirely."""
+        t = self._t
+        self._status_wrap = bare_widget()
+        self._status_wrap.setCursor(Qt.CursorShape.PointingHandCursor)
+        row = QHBoxLayout(self._status_wrap)
+        row.setContentsMargins(16, 9, 12, 9)
+        row.setSpacing(9)
+        self._status_dot = QFrame()
+        self._status_dot.setFixedSize(8, 8)
+        self._status_dot.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        row.addWidget(self._status_dot, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self._status_lbl = label("", 11.5, t["text_muted"], 600)
+        row.addWidget(self._status_lbl, 1)
+        chev = QLabel()
+        chev.setPixmap(icons.pixmap("chevron", t["text_muted"], 12))
+        row.addWidget(chev, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self._status_wrap.mouseReleaseEvent = lambda e: self._on_open_settings()
+        self._refresh_status_strip()
+        return self._status_wrap
+
+    def _refresh_status_strip(self) -> None:
+        """Re-read the active provider from the controller (called on show, so
+        a change made in Settings is reflected when the drawer reopens)."""
+        t = self._t
+        spec = self._controller.active_provider()
+        if spec.kind == "offline":
+            text, dot = spec.label, t["text_muted"]
+        else:
+            model = self._controller.resolved_model() or "no model selected"
+            text = f"{spec.label} · {model}"
+            dot = t["success"] if self._controller.backend_ready() else t["warning"]
+        self._status_lbl.setText(text)
+        self._status_dot.setStyleSheet(f"background:{dot}; border-radius:4px;")
+
     def _input_row(self) -> QWidget:
         t = self._t
         w = bare_widget()
         row = QHBoxLayout(w)
         row.setContentsMargins(12, 12, 12, 12)
         row.setSpacing(8)
-        row.addWidget(IconButton(
-            "diagnose", t, 34, "Diagnose the current result — offline, no model needed",
-            self._run_diagnose))
         self._input = QLineEdit()
         self._input.setPlaceholderText("Ask about this image, settings or results…")
         self._input.returnPressed.connect(self._send)
@@ -556,18 +505,18 @@ class AssistantDrawer(QFrame):
         if p:
             self.setGeometry(p.width() - self.WIDTH, 42, self.WIDTH, p.height() - 42)
 
+    def showEvent(self, e):
+        super().showEvent(e)
+        # Reflect any provider/model change made in Settings since last shown.
+        if hasattr(self, "_status_lbl"):
+            self._refresh_status_strip()
+
     # ── Command palette integration ─────────────────────────────────────────
-    # Thin public aliases — the ⌘K palette's "Diagnose" / "Switch backend →
-    # X" entries, same convention as WorkspaceScreen's/ModelsScreen's own
-    # command-palette aliases. switch_backend reuses _backend_seg._select()
-    # exactly as this module's own tests already do
-    # (test_switching_backend_persists_and_updates_title), rather than a
-    # second copy of _on_backend_changed's effect.
     def run_diagnose(self) -> None:
         self._run_diagnose()
 
-    def switch_backend(self, idx: int) -> None:
-        self._backend_seg._select(idx)
+    def open_settings(self) -> None:
+        self._on_open_settings()
 
     # ── diagnostics ──────────────────────────────────────────────────────────
     def _run_diagnose(self) -> None:
@@ -635,11 +584,7 @@ class AssistantDrawer(QFrame):
             t, "Assistant suggests", "", changes, t["primary"],
             "Apply & re-run", self._apply, self._apply_rerun))
 
-    # ── signal plumbing (background-thread -> Qt main thread) ──────────────
-    # Every emit is guarded: a background thread's completion callback can
-    # outlive this widget (e.g. torn down by a theme toggle mid-chat) —
-    # the same documented hazard + fix already used throughout Studio
-    # (ModelsScreen._safe_emit_log, etc.).
+    # ── signal plumbing (background thread -> Qt main thread) ────────────────
     def _safe_emit_token(self, text: str) -> None:
         try:
             self._token_sig.emit(text)
@@ -658,37 +603,6 @@ class AssistantDrawer(QFrame):
         except RuntimeError:
             pass
 
-    def _safe_emit_status(self, backend_at_call: str, ok: bool, msg: str, models: list) -> None:
-        try:
-            self._status_sig.emit(backend_at_call, ok, msg, models)
-        except RuntimeError:
-            pass
-
-    def _safe_emit_pull_progress(self, status: str, frac: float) -> None:
-        try:
-            self._pull_progress_sig.emit(status, frac)
-        except RuntimeError:
-            pass
-
-    def _safe_emit_pull_done(self, name: str, ok: bool) -> None:
-        try:
-            self._pull_done_sig.emit(name, ok)
-        except RuntimeError:
-            pass
-
-    def _safe_emit_create_status(self, status: str) -> None:
-        try:
-            self._create_status_sig.emit(status)
-        except RuntimeError:
-            pass
-
-    def _safe_emit_create_done(self, ok: bool) -> None:
-        try:
-            self._create_done_sig.emit(ok)
-        except RuntimeError:
-            pass
-
-    # ── chat signal handlers ────────────────────────────────────────────────
     def _on_token(self, text: str) -> None:
         self._chat.append_token(text)
 
@@ -708,255 +622,3 @@ class AssistantDrawer(QFrame):
         self._chat.append_token(f"\n[error contacting model: {msg}]")
         self._chat.assistant_done()
         self._send_btn.setEnabled(True)
-
-    # ── model settings: backend switch ──────────────────────────────────────
-    def _on_backend_changed(self, idx: int) -> None:
-        backend = BACKENDS[idx]
-        _log.info("backend switched to %s", BACKEND_LABELS[backend])
-        self._controller.settings.backend = backend
-        self._controller.save_settings()
-        self._found_models = []
-        self._status_ok = None
-        self._status_msg = ""
-        self._model_acc.set_title(f"Model · {BACKEND_LABELS[backend]}")
-        self._rebuild_model_body()
-        if backend != "offline":
-            self._refresh_status()
-
-    def _rebuild_model_body(self) -> None:
-        _clear_layout(self._model_body_lay)
-        backend = self._controller.settings.backend
-        if backend == "offline":
-            self._build_offline_body()
-        elif backend == "ollama":
-            self._build_ollama_body()
-        else:
-            self._build_custom_body()
-
-    def _status_line_text(self) -> str:
-        return "Checking…" if self._status_ok is None else self._status_msg
-
-    def _status_color(self) -> str:
-        t = self._t
-        if self._status_ok is None:
-            return t["text_muted"]
-        return t["success"] if self._status_ok else t["text_muted"]
-
-    def _status_state(self) -> str:
-        if self._status_ok is None:
-            return "checking"
-        return "ok" if self._status_ok else "bad"
-
-    def _refresh_status(self) -> None:
-        backend_at_call = self._controller.settings.backend
-        self._status_ok = None
-        self._status_msg = "Checking…"
-        if hasattr(self, "_status_lbl"):
-            self._status_lbl.setText(self._status_line_text())
-            self._status_lbl.setStyleSheet(
-                f"color:{self._status_color()}; font-size:11px; background:transparent;")
-        if hasattr(self, "_status_dot"):
-            self._status_dot.set_state(self._t, "checking")
-        self._controller.refresh_status_async(
-            on_result=lambda ok, msg, models: self._safe_emit_status(backend_at_call, ok, msg, models))
-
-    def _on_status_result(self, backend_at_call: str, ok: bool, msg: str, models: list) -> None:
-        if backend_at_call != self._controller.settings.backend:
-            return  # stale — the user switched backends while this was in flight
-        # DEBUG, not INFO -- this fires automatically on every backend
-        # switch/accordion open, not just a deliberate user action; the
-        # Logs console's default level filter hides it unless asked for.
-        _log.debug("status check (%s): ok=%s %s", backend_at_call, ok, msg)
-        self._status_ok = ok
-        self._status_msg = msg
-        self._found_models = list(models or [])
-        self._rebuild_model_body()
-
-    # ── offline body ─────────────────────────────────────────────────────────
-    def _build_offline_body(self) -> None:
-        t = self._t
-        desc = QLabel(
-            "Built-in diagnostics only — deterministic, always available, nothing "
-            "leaves your machine. No model or network needed.")
-        desc.setWordWrap(True)
-        desc.setStyleSheet(f"color:{t['text_muted']}; font-size:11px; background:transparent;")
-        self._model_body_lay.addWidget(desc)
-
-    # ── Ollama body ──────────────────────────────────────────────────────────
-    def _build_ollama_body(self) -> None:
-        t = self._t
-        status_row = QHBoxLayout()
-        status_row.setSpacing(8)
-        self._status_dot = _StatusDot(t, self._status_state())
-        status_row.addWidget(self._status_dot, alignment=Qt.AlignmentFlag.AlignVCenter)
-        self._status_lbl = label(self._status_line_text(), 11, self._status_color())
-        self._status_lbl.setWordWrap(True)
-        status_row.addWidget(self._status_lbl, 1)
-        status_row.addWidget(IconButton("refresh", t, 28, "Re-check Ollama", self._refresh_status))
-        self._model_body_lay.addLayout(status_row)
-
-        models = self._found_models
-        if models:
-            current = self._controller.settings.ollama_model or models[0]
-            select = SelectBox(current, t, options=models, on_select=self._pick_ollama_model)
-            self._model_body_lay.addWidget(select)
-            bake_row = QHBoxLayout()
-            bake_row.setContentsMargins(0, 4, 0, 0)
-            bake_btn = PillButton("Tune for CellSeg1", t, "ghost", small=True)
-            bake_btn.setEnabled(not self._controller.model_op_busy())
-            bake_btn.setToolTip(
-                "Bake a task-specialised agent (cellseg1-assistant) from the selected "
-                "model: pins the domain persona and a low temperature for precise advice.")
-            bake_btn.clicked.connect(self._create_agent)
-            bake_row.addWidget(bake_btn)
-            bake_row.addStretch(1)
-            self._model_body_lay.addLayout(bake_row)
-        elif self._status_ok is not None:
-            none_lbl = label("No local models yet — download one below.", 10.5, t["text_muted"])
-            none_lbl.setWordWrap(True)
-            self._model_body_lay.addWidget(none_lbl)
-
-        catalog = Accordion("Download a model", t, lead="download", open_=False)
-        for m in self._controller.recommended_models:
-            row = QHBoxLayout()
-            row.setSpacing(6)
-            info = QLabel(f"{m['name']}  ·  {m['size']}\n{m['note']}")
-            info.setStyleSheet(f"color:{t['text_muted']}; font-size:10px; background:transparent;")
-            info.setWordWrap(True)
-            row.addWidget(info, 1)
-            dl = PillButton("Get", t, "ghost", small=True)
-            dl.setEnabled(not self._controller.model_op_busy())
-            dl.clicked.connect(lambda _c=False, name=m["name"]: self._download_model(name))
-            row.addWidget(dl)
-            catalog.add_layout(row)
-        hint = QLabel(
-            "Requires Ollama running locally (ollama.com). Models download once and "
-            "stay on disk — nothing is sent to the cloud.")
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color:{t['text_muted']}; font-size:10px; background:transparent;")
-        catalog.add(hint)
-        self._model_body_lay.addWidget(catalog)
-
-        self._op_progress = QProgressBar()
-        self._op_progress.setRange(0, 100)
-        self._op_progress.setFixedHeight(4)
-        self._op_progress.setVisible(self._controller.model_op_busy())
-        self._model_body_lay.addWidget(self._op_progress)
-        self._op_status_lbl = label(self._op_status_text, 10, t["text_muted"])
-        self._op_status_lbl.setWordWrap(True)
-        self._model_body_lay.addWidget(self._op_status_lbl)
-
-    def _pick_ollama_model(self, choice: str) -> None:
-        self._controller.settings.ollama_model = choice
-        self._controller.save_settings()
-
-    def _download_model(self, name: str) -> None:
-        if self._controller.model_op_busy():
-            return
-        self._op_status_text = f"Downloading {name}…"
-        thread = self._controller.pull_ollama_model_async(
-            name, on_progress=self._safe_emit_pull_progress, on_done=self._safe_emit_pull_done)
-        if thread is not None:
-            self._rebuild_model_body()
-
-    def _on_pull_progress(self, status: str, frac: float) -> None:
-        self._op_status_text = status
-        if hasattr(self, "_op_progress"):
-            self._op_progress.setValue(int(frac * 100))
-        if hasattr(self, "_op_status_lbl"):
-            self._op_status_lbl.setText(status)
-
-    def _on_pull_done(self, name: str, ok: bool) -> None:
-        if ok:
-            _log.info("model pulled: %s", name)
-        else:
-            _log.warning("model pull failed: %s", name)
-        self._op_status_text = f"✓ {name} ready" if ok else f"✗ failed to download {name}"
-        self._rebuild_model_body()
-        self._refresh_status()
-
-    def _create_agent(self) -> None:
-        if self._controller.model_op_busy():
-            return
-        base = self._controller.settings.ollama_model
-        if not base or base.startswith(self._controller.agent_model_name):
-            self._op_status_text = "Pick a base model (not the agent itself) to tune."
-            if hasattr(self, "_op_status_lbl"):
-                self._op_status_lbl.setText(self._op_status_text)
-            return
-        self._op_status_text = f"Baking {self._controller.agent_model_name} from {base}…"
-        thread = self._controller.create_agent_async(
-            base, on_status=self._safe_emit_create_status, on_done=self._safe_emit_create_done)
-        if thread is not None:
-            self._rebuild_model_body()
-
-    def _on_create_status(self, status: str) -> None:
-        self._op_status_text = status
-        if hasattr(self, "_op_status_lbl"):
-            self._op_status_lbl.setText(status)
-
-    def _on_create_done(self, ok: bool) -> None:
-        if ok:
-            _log.info("tuned agent cellseg1-assistant ready")
-        else:
-            _log.warning("failed to create the tuned agent")
-        self._op_status_text = ("✓ cellseg1-assistant ready — pick it above" if ok
-                                else "✗ could not create the tuned agent")
-        self._rebuild_model_body()
-        self._refresh_status()
-
-    # ── Custom API body ──────────────────────────────────────────────────────
-    def _build_custom_body(self) -> None:
-        t = self._t
-        s = self._controller.settings
-
-        url_edit = QLineEdit(s.custom_base_url)
-        url_edit.setPlaceholderText("http://localhost:1234/v1")
-        url_edit.textChanged.connect(lambda v: setattr(s, "custom_base_url", v))
-        url_edit.editingFinished.connect(self._controller.save_settings)
-        self._model_body_lay.addWidget(_field("Base URL", url_edit, t))
-
-        key_edit = QLineEdit(s.custom_api_key)
-        key_edit.setPlaceholderText("optional — sent as a Bearer token")
-        key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        key_edit.textChanged.connect(lambda v: setattr(s, "custom_api_key", v))
-        key_edit.editingFinished.connect(self._controller.save_settings)
-        self._model_body_lay.addWidget(_field("API key", key_edit, t))
-
-        model_edit = QLineEdit(s.custom_model)
-        model_edit.setPlaceholderText("model id")
-        model_edit.textChanged.connect(lambda v: setattr(s, "custom_model", v))
-        model_edit.editingFinished.connect(self._controller.save_settings)
-        self._model_body_lay.addWidget(_field("Model", model_edit, t))
-
-        test_row = QHBoxLayout()
-        test_row.setContentsMargins(0, 2, 0, 0)
-        test_row.setSpacing(8)
-        test_btn = PillButton("Test connection", t, "ghost", small=True)
-        test_btn.clicked.connect(self._refresh_status)
-        test_row.addWidget(test_btn)
-        self._status_dot = _StatusDot(t, self._status_state())
-        test_row.addWidget(self._status_dot, alignment=Qt.AlignmentFlag.AlignVCenter)
-        self._status_lbl = label(self._status_line_text(), 10.5, self._status_color())
-        self._status_lbl.setWordWrap(True)
-        test_row.addWidget(self._status_lbl, 1)
-        self._model_body_lay.addLayout(test_row)
-
-        if self._found_models:
-            n = len(self._found_models)
-            pick = SelectBox(f"{n} model{'s' if n != 1 else ''} found — pick one", t,
-                             options=self._found_models, on_select=self._pick_custom_model)
-            self._model_body_lay.addWidget(pick)
-
-        hint = QLabel(
-            "Works with any OpenAI-compatible server: OpenAI, LM Studio, vLLM, "
-            "llama.cpp, OpenRouter and others. Leave the key blank for a local "
-            "server that doesn't need one.")
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color:{t['text_muted']}; font-size:10px; background:transparent;")
-        self._model_body_lay.addWidget(hint)
-
-    def _pick_custom_model(self, choice: str) -> None:
-        self._controller.settings.custom_model = choice
-        self._controller.save_settings()
-        self._rebuild_model_body()

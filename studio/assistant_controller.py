@@ -1,29 +1,32 @@
-"""Velum — the Assistant tab's controller.
+"""Velum — the Assistant's controller.
 
 Qt-free glue (mirrors ``train_controller.py`` / ``segment_controller.py``:
 plain data in, plain callbacks out, background threads for anything that
-touches the network) behind three interchangeable chat backends:
+touches the network) behind a set of interchangeable, *named* chat
+providers. Every provider is one of three kinds:
 
-  * **"offline"** — the deterministic diagnostic engine
+  * **offline** — the deterministic diagnostic engine
     (``velum_core.advisor.diagnose``). Always available, no model, no
     network call — reused read-only, imported lazily, exactly like
     ``segment_controller.py`` reuses ``predict_controller`` without ever
     modifying it.
-  * **"ollama"** — a locally running Ollama server. Reuses
+  * **ollama** — a locally running Ollama server. Reuses
     ``velum_core.advisor``'s existing Ollama bridge verbatim (model
     discovery, pull, the task-specialised "bake an agent" flow, streaming
     chat) — again read-only.
-  * **"custom"** — any OpenAI-compatible HTTP endpoint: local (LM Studio,
-    vLLM, llama.cpp's server, text-generation-webui, …) or remote (OpenAI
-    itself, OpenRouter, Groq, …), with or without an API key. This is new
-    capability the classic app doesn't have, so it's Studio's own — the
-    bridge functions below (``custom_api_available``/``custom_api_models``/
-    ``custom_api_chat``), stdlib ``urllib`` only, no new dependency, same
+  * **openai** — any OpenAI-compatible HTTP ``/chat/completions`` endpoint.
+    The named presets (OpenAI, OpenRouter, Groq, LM Studio, …) all share
+    this one bridge — they differ only in a pre-filled base URL, whether a
+    key is required, and the setup copy; a "Custom endpoint" preset lets the
+    user type any base URL. stdlib ``urllib`` only, no new dependency, same
     idiom as ``velum_core.advisor.ollama_chat``.
 
-Settings (which backend, which model, the custom endpoint + key) persist to
-one small JSON file under the shared storage dir — a machine-level choice,
-not a per-project one, so it doesn't belong in ``ProjectSettings``.
+The provider a user has chosen (``active``), each provider's own remembered
+API key + model, and the custom endpoint URL persist to one small JSON file
+under the shared storage dir — a machine-level choice, not a per-project
+one, so it doesn't belong in ``ProjectSettings``. The Settings screen
+(``studio/settings_screen.py``) is where all of this is configured; the
+Assistant drawer is a pure chat surface that just reads the active provider.
 """
 from __future__ import annotations
 
@@ -31,12 +34,122 @@ import json
 import threading
 import urllib.error
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-BACKENDS = ("offline", "ollama", "custom")
-BACKEND_LABELS = {"offline": "Offline", "ollama": "Ollama", "custom": "Custom API"}
+
+# ── Provider registry (declarative — the Settings screen renders from this) ───
+
+@dataclass(frozen=True)
+class ProviderSpec:
+    """One selectable chat provider.
+
+    ``kind`` drives dispatch: ``offline`` (diagnostics), ``ollama`` (the
+    advisor bridge), or ``openai`` (the OpenAI-compatible bridge below). For
+    ``openai`` providers ``base_url`` is the fixed endpoint (empty +
+    ``editable_url`` for the user-typed "custom" one); ``needs_key`` gates
+    whether an API key is required for :meth:`AssistantController.backend_ready`.
+    Everything else is display/help copy the Settings screen renders.
+    """
+    id: str
+    label: str
+    kind: str                       # "offline" | "ollama" | "openai"
+    base_url: str = ""
+    needs_key: bool = False
+    editable_url: bool = False
+    local: bool = False             # runs on this machine (privacy badge)
+    key_hint: str = ""              # API-key field placeholder
+    docs_url: str = ""
+    default_model: str = ""
+    tagline: str = ""               # one-line description
+    steps: tuple[str, ...] = ()     # numbered setup instructions
+    model_hints: tuple[str, ...] = ()  # example model ids for the picker
+
+
+PROVIDERS: tuple[ProviderSpec, ...] = (
+    ProviderSpec(
+        "offline", "Offline diagnostics", "offline", local=True,
+        tagline="Built-in, deterministic advice — no model, no network, always on.",
+        steps=("Nothing to set up. Ask a question or hit Diagnose any time.",),
+    ),
+    ProviderSpec(
+        "ollama", "Ollama", "ollama", local=True, docs_url="https://ollama.com",
+        tagline="Run open models locally. Private, free, no API key.",
+        steps=(
+            "Install Ollama from ollama.com and launch it.",
+            "It serves on http://localhost:11434 automatically — no config.",
+            "Download a model below (or run `ollama pull llama3.2`), then pick it.",
+        ),
+    ),
+    ProviderSpec(
+        "openai", "OpenAI", "openai", base_url="https://api.openai.com/v1",
+        needs_key=True, key_hint="sk-…", docs_url="https://platform.openai.com/api-keys",
+        default_model="gpt-4o-mini",
+        tagline="GPT-4o-class models via your OpenAI API key.",
+        steps=(
+            "Create a key at platform.openai.com/api-keys.",
+            "Paste it below — it is stored only on this machine, never sent anywhere else.",
+        ),
+        model_hints=("gpt-4o-mini", "gpt-4o"),
+    ),
+    ProviderSpec(
+        "openrouter", "OpenRouter", "openai", base_url="https://openrouter.ai/api/v1",
+        needs_key=True, key_hint="sk-or-…", docs_url="https://openrouter.ai/keys",
+        default_model="openai/gpt-4o-mini",
+        tagline="One key, hundreds of models from every major lab.",
+        steps=(
+            "Create a key at openrouter.ai/keys.",
+            "Paste it below, then pick a model (Test connection lists them).",
+        ),
+        model_hints=("openai/gpt-4o-mini", "anthropic/claude-3.7-sonnet",
+                     "meta-llama/llama-3.1-70b-instruct"),
+    ),
+    ProviderSpec(
+        "groq", "Groq", "openai", base_url="https://api.groq.com/openai/v1",
+        needs_key=True, key_hint="gsk-…", docs_url="https://console.groq.com/keys",
+        default_model="llama-3.3-70b-versatile",
+        tagline="Extremely fast inference on open models.",
+        steps=(
+            "Create a key at console.groq.com/keys.",
+            "Paste it below, then pick a model.",
+        ),
+        model_hints=("llama-3.3-70b-versatile", "llama-3.1-8b-instant"),
+    ),
+    ProviderSpec(
+        "lmstudio", "LM Studio", "openai", base_url="http://localhost:1234/v1",
+        local=True, docs_url="https://lmstudio.ai",
+        tagline="A local OpenAI-compatible server with a friendly desktop UI.",
+        steps=(
+            "Install LM Studio from lmstudio.ai and download a model in-app.",
+            "Open the Developer tab and Start Server.",
+            "It serves on http://localhost:1234/v1 — no key needed.",
+        ),
+    ),
+    ProviderSpec(
+        "custom", "Custom endpoint", "openai", base_url="", editable_url=True,
+        tagline="Any OpenAI-compatible server: vLLM, llama.cpp, a gateway…",
+        steps=(
+            "Enter the base URL (usually ending in /v1).",
+            "Add an API key only if the server requires one, then pick a model.",
+        ),
+    ),
+)
+
+PROVIDER_BY_ID: dict[str, ProviderSpec] = {p.id: p for p in PROVIDERS}
+PROVIDER_IDS: tuple[str, ...] = tuple(p.id for p in PROVIDERS)
+
+
+def provider(provider_id: str) -> ProviderSpec:
+    """The :class:`ProviderSpec` for ``provider_id``, falling back to the
+    always-safe offline provider for an unknown id."""
+    return PROVIDER_BY_ID.get(provider_id, PROVIDER_BY_ID["offline"])
+
+
+# Back-compat aliases (the Assistant drawer / older call sites imported
+# these two names). Providers are the real model now.
+BACKENDS = PROVIDER_IDS
+BACKEND_LABELS = {p.id: p.label for p in PROVIDERS}
 
 
 # ── Custom-API (OpenAI-compatible) bridge — Studio's own, stdlib only ────────
@@ -135,21 +248,39 @@ def custom_api_chat(base_url: str, api_key: str, model: str, messages: list[dict
 
 @dataclass
 class AssistantSettings:
-    backend: str = "offline"           # offline | ollama | custom
+    """Which provider is active plus each provider's remembered API key and
+    model — so switching provider in Settings never loses a previously
+    entered key. ``custom_base_url`` is the only per-provider *URL* the user
+    can set (the "custom" provider); every other openai-kind provider's URL
+    is fixed by its :class:`ProviderSpec`.
+    """
+    active: str = "offline"                             # a ProviderSpec id
     ollama_model: str = ""
     custom_base_url: str = ""
-    custom_api_key: str = ""
-    custom_model: str = ""
+    keys: dict[str, str] = field(default_factory=dict)      # provider id -> API key
+    models: dict[str, str] = field(default_factory=dict)    # provider id -> model id
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AssistantSettings":
-        known = {"backend", "ollama_model", "custom_base_url", "custom_api_key", "custom_model"}
-        settings = cls(**{k: v for k, v in (data or {}).items() if k in known})
-        if settings.backend not in BACKENDS:
-            settings.backend = "offline"
+        data = dict(data or {})
+        # Migrate the pre-provider format (backend + flat custom_* fields) so
+        # an existing install keeps its endpoint/key on upgrade.
+        if "active" not in data and "backend" in data:
+            data["active"] = data.get("backend")
+            if data.get("custom_api_key"):
+                data.setdefault("keys", {})["custom"] = data["custom_api_key"]
+            if data.get("custom_model"):
+                data.setdefault("models", {})["custom"] = data["custom_model"]
+        known = {"active", "ollama_model", "custom_base_url", "keys", "models"}
+        clean = {k: v for k, v in data.items() if k in known}
+        clean["keys"] = {str(k): str(v) for k, v in (clean.get("keys") or {}).items()}
+        clean["models"] = {str(k): str(v) for k, v in (clean.get("models") or {}).items()}
+        settings = cls(**clean)
+        if settings.active not in PROVIDER_IDS:
+            settings.active = "offline"
         return settings
 
 
@@ -207,6 +338,94 @@ class AssistantController:
     def save_settings(self) -> None:
         self.settings_store.save(self.settings)
 
+    # ── provider resolution (any provider by id, or the active one) ──────────
+    def active_provider(self) -> ProviderSpec:
+        return provider(self.settings.active)
+
+    def active_kind(self) -> str:
+        return self.active_provider().kind
+
+    def base_url_for(self, provider_id: str) -> str:
+        """The base URL to talk to for ``provider_id`` — the user-typed one
+        for the editable "custom" provider, the spec's fixed URL otherwise."""
+        spec = provider(provider_id)
+        return self.settings.custom_base_url if spec.editable_url else spec.base_url
+
+    def key_for(self, provider_id: str) -> str:
+        return self.settings.keys.get(provider_id, "")
+
+    def model_for(self, provider_id: str) -> str:
+        """The chosen model for ``provider_id``: the shared Ollama field for
+        Ollama, else the per-provider remembered model (or the spec's default
+        when the user hasn't picked one yet)."""
+        spec = provider(provider_id)
+        if spec.kind == "ollama":
+            return self.settings.ollama_model
+        return self.settings.models.get(spec.id, "") or spec.default_model
+
+    def resolved_base_url(self) -> str:
+        return self.base_url_for(self.settings.active)
+
+    def resolved_key(self) -> str:
+        return self.key_for(self.settings.active)
+
+    def resolved_model(self) -> str:
+        return self.model_for(self.settings.active)
+
+    def set_active(self, provider_id: str) -> None:
+        self.settings.active = provider_id if provider_id in PROVIDER_IDS else "offline"
+        self.save_settings()
+
+    def set_key(self, provider_id: str, key: str) -> None:
+        self.settings.keys[provider_id] = key
+
+    def set_model(self, provider_id: str, model: str) -> None:
+        self.settings.models[provider_id] = model
+
+    def provider_ready(self, provider_id: str) -> bool:
+        """Same readiness rule as :meth:`backend_ready`, for any provider —
+        the Settings screen uses it to show a per-card "configured" tick."""
+        spec = provider(provider_id)
+        if spec.kind == "ollama":
+            return bool(self.settings.ollama_model.strip())
+        if spec.kind == "openai":
+            if not self.base_url_for(provider_id).strip() or not self.model_for(provider_id).strip():
+                return False
+            return bool(self.key_for(provider_id).strip()) if spec.needs_key else True
+        return False
+
+    def check_provider_async(
+        self, provider_id: str, *, on_result: Callable[[bool, str, list[str]], None]
+    ) -> Optional[threading.Thread]:
+        """Live reachability check for a *specific* provider (not necessarily
+        the active one), so each Settings card can Test its own endpoint.
+        ``on_result(ok, message, models)`` — models empty for offline/failure.
+        Returns ``None`` for the synchronous offline case."""
+        spec = provider(provider_id)
+        if spec.kind == "offline":
+            on_result(True, "Built-in diagnostics — always available, no model needed.", [])
+            return None
+
+        def run():
+            if spec.kind == "ollama":
+                ok = self.ollama_available()
+                models = self.ollama_models() if ok else []
+                n = len(models)
+                msg = (f"Connected — {n} model{'s' if n != 1 else ''} on this machine" if ok
+                       else "Ollama isn't reachable — install/start it from ollama.com")
+            else:
+                base_url, key = self.base_url_for(provider_id), self.key_for(provider_id)
+                ok = custom_api_available(base_url, key)
+                models = custom_api_models(base_url, key) if ok else []
+                msg = ("Connected" if ok else
+                       "Could not reach this endpoint (some servers don't expose a model "
+                       "list — chat may still work if the URL and model id are correct)")
+            on_result(ok, msg, models)
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        return t
+
     # ── diagnostics (reuses velum_core.advisor's engine, read-only) ─────────
     @staticmethod
     def diagnose(image, mask, params: dict) -> dict:
@@ -235,14 +454,18 @@ class AssistantController:
 
     # ── backend readiness (cheap, local — no network) ────────────────────────
     def backend_ready(self) -> bool:
-        """Whether the *configured* backend has enough info to actually try
-        a chat call right now. ``send_async`` falls back to the offline
+        """Whether the *active* provider has enough info to actually try a
+        chat call right now. ``send_async`` falls back to the offline
         diagnostic reply whenever this is False, so a half-configured
-        backend degrades gracefully instead of erroring."""
-        if self.settings.backend == "ollama":
+        provider degrades gracefully instead of erroring."""
+        kind = self.active_kind()
+        if kind == "ollama":
             return bool(self.settings.ollama_model.strip())
-        if self.settings.backend == "custom":
-            return bool(self.settings.custom_base_url.strip() and self.settings.custom_model.strip())
+        if kind == "openai":
+            spec = self.active_provider()
+            if not self.resolved_base_url().strip() or not self.resolved_model().strip():
+                return False
+            return bool(self.resolved_key().strip()) if spec.needs_key else True
         return False
 
     # ── Ollama model management (reuses velum_core.advisor verbatim) ────────
@@ -299,12 +522,15 @@ class AssistantController:
         t.start()
         return t
 
-    # ── Custom API management (this module's own bridge) ────────────────────
+    # ── OpenAI-compatible management (this module's own bridge) ─────────────
+    # Resolve against the *active* provider, so these work for every
+    # openai-kind preset (OpenAI/OpenRouter/Groq/LM Studio/custom), not just
+    # the user-typed "custom" endpoint.
     def custom_api_available(self) -> bool:
-        return custom_api_available(self.settings.custom_base_url, self.settings.custom_api_key)
+        return custom_api_available(self.resolved_base_url(), self.resolved_key())
 
     def custom_api_models(self) -> list[str]:
-        return custom_api_models(self.settings.custom_base_url, self.settings.custom_api_key)
+        return custom_api_models(self.resolved_base_url(), self.resolved_key())
 
     # ── live status check (whichever backend is currently selected) ─────────
     def refresh_status_async(
@@ -315,13 +541,13 @@ class AssistantController:
         freshly-listed set (Ollama or Custom API), empty for "offline" or on
         failure. Returns ``None`` (no thread — nothing to wait on) for the
         synchronous "offline" case."""
-        backend = self.settings.backend
-        if backend == "offline":
+        kind = self.active_kind()
+        if kind == "offline":
             on_result(True, "Built-in diagnostics — always available, no model needed.", [])
             return None
 
         def run():
-            if backend == "ollama":
+            if kind == "ollama":
                 ok = self.ollama_available()
                 models = self.ollama_models() if ok else []
                 n = len(models)
@@ -358,14 +584,15 @@ class AssistantController:
         """
         from velum_core import advisor
 
-        if self.settings.backend == "offline" or not self.backend_ready():
+        kind = self.active_kind()
+        if kind == "offline" or not self.backend_ready():
             on_done(advisor.findings_to_text(diag))
             return None
 
         self._stop_chat.clear()
         stop = self._stop_chat.is_set
 
-        if self.settings.backend == "ollama":
+        if kind == "ollama":
             model = self.settings.ollama_model
             is_agent = model.startswith(advisor.AGENT_MODEL_NAME)
             if is_agent:
@@ -384,16 +611,15 @@ class AssistantController:
                     on_done(full)
                 except Exception as e:
                     on_error(str(e))
-        else:  # "custom"
+        else:  # openai-compatible (OpenAI / OpenRouter / Groq / LM Studio / custom)
             system = advisor.build_context_prompt(diag, params)
             messages = [{"role": "system", "content": system}] + history + [
                 {"role": "user", "content": user_text}]
+            base_url, key, model = self.resolved_base_url(), self.resolved_key(), self.resolved_model()
 
             def run():
                 try:
-                    full = custom_api_chat(
-                        self.settings.custom_base_url, self.settings.custom_api_key,
-                        self.settings.custom_model, messages, on_token, stop=stop)
+                    full = custom_api_chat(base_url, key, model, messages, on_token, stop=stop)
                     on_done(full)
                 except Exception as e:
                     on_error(str(e))

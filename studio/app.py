@@ -46,12 +46,13 @@ from studio.components import Sidebar
 from studio.project_controller import ProjectController
 from studio.train_controller import TrainController
 from studio.segment_controller import SegmentController
-from studio.assistant_controller import AssistantController, BACKENDS, BACKEND_LABELS
+from studio.assistant_controller import AssistantController, PROVIDERS
 from studio.new_project_dialog import NewProjectDialog
 from studio.screens import HomeScreen, ProjectsScreen
 from studio.workspace import WorkspaceScreen, QUALITY_PRESET_NAMES
 from studio.project import ENGINE_LABELS
 from studio.extra_screens import ModelsScreen, DashboardScreen
+from studio.settings_screen import SettingsScreen
 from studio.guide_screen import GuideScreen
 from studio.assistant_panel import AssistantDrawer
 from studio.overlays import LogsConsole, CommandPalette, Toast
@@ -77,8 +78,9 @@ _NAV = [
     ("dashboard", "dashboard", "Dashboard",      "Current project"),
     ("assistant", "assistant", "Assistant",      "Tools"),
     ("logs",      "log",       "Logs",           "Tools"),
+    ("settings",  "settings",  "Settings",       "Tools"),
 ]
-_STACK_KEYS = ("home", "projects", "workspace", "train", "dashboard", "guide")
+_STACK_KEYS = ("home", "projects", "workspace", "train", "dashboard", "settings", "guide")
 
 
 def load_fonts() -> str:
@@ -225,6 +227,7 @@ class StudioWindow(QMainWindow):
                                         on_new_project=self._new_project_dialog.open),
             "train": ModelsScreen(t, self._train, self._projects, self._toast.announce),
             "dashboard": DashboardScreen(t, self._train, self._projects, self._toast.announce),
+            "settings": SettingsScreen(t, self._assistant_controller, self._toast.announce),
             "guide": GuideScreen(t, self._projects, self.navigate, self._open_project,
                                  self._new_project_dialog.open),
         }
@@ -237,7 +240,8 @@ class StudioWindow(QMainWindow):
 
         # overlays (children of the window, positioned on resize / open)
         self._assistant = AssistantDrawer(
-            self, t, self._assistant_controller, self._screens["workspace"])
+            self, t, self._assistant_controller, self._screens["workspace"],
+            on_open_settings=self._open_assistant_settings)
         self._logs = LogsConsole(self, t)
         self._palette = CommandPalette(self, t, get_commands=self._build_commands)
         self._overlays = [self._assistant, self._logs, self._palette, self._toast,
@@ -420,14 +424,17 @@ class StudioWindow(QMainWindow):
         commands.append(Command(
             id="assistant.diagnose", label="Diagnose current result", section="Assistant",
             icon="diagnose", emoji="🩺", handler=self._cmd_diagnose))
-        current_backend = self._assistant_controller.settings.backend
-        for idx, key in enumerate(BACKENDS):
-            if key != current_backend:
+        commands.append(Command(
+            id="assistant.settings", label="Assistant & app settings", section="Assistant",
+            icon="settings", emoji="⚙️", handler=lambda: self.navigate("settings")))
+        current_provider = self._assistant_controller.settings.active
+        for spec in PROVIDERS:
+            if spec.id != current_provider:
                 commands.append(Command(
-                    id=f"assistant.backend.{key}",
-                    label=f"Switch Assistant backend → {BACKEND_LABELS[key]}",
+                    id=f"assistant.provider.{spec.id}",
+                    label=f"Use Assistant provider → {spec.label}",
                     section="Assistant", icon="assistant", emoji="🤖",
-                    handler=lambda i=idx: self._cmd_switch_backend(i)))
+                    handler=lambda pid=spec.id: self._cmd_use_provider(pid)))
 
         # Appearance -- names the concrete destination, not a generic toggle,
         # the same "Switch engine → X" naming convention as Segment above.
@@ -464,9 +471,14 @@ class StudioWindow(QMainWindow):
         self.navigate("assistant")
         self._assistant.run_diagnose()
 
-    def _cmd_switch_backend(self, idx: int) -> None:
-        self.navigate("assistant")
-        self._assistant.switch_backend(idx)
+    def _cmd_use_provider(self, provider_id: str) -> None:
+        self._assistant_controller.set_active(provider_id)
+        self._screens["settings"].focus_provider(provider_id)
+        self.navigate("settings")
+
+    def _open_assistant_settings(self) -> None:
+        self._screens["settings"].focus_provider(self._assistant_controller.settings.active)
+        self.navigate("settings")
 
     def _cmd_open_sample(self) -> None:
         projects = self._projects.list_projects()

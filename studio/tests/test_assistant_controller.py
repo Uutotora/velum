@@ -16,30 +16,58 @@ import pytest
 from studio import assistant_controller as ac
 
 
+# ── Provider registry ─────────────────────────────────────────────────────────
+
+def test_provider_registry_has_the_expected_kinds():
+    kinds = {p.id: p.kind for p in ac.PROVIDERS}
+    assert kinds["offline"] == "offline"
+    assert kinds["ollama"] == "ollama"
+    assert kinds["openai"] == "openai" and kinds["custom"] == "openai"
+    # Every id is unique and reachable via the lookup helpers.
+    assert set(ac.PROVIDER_IDS) == set(ac.PROVIDER_BY_ID)
+    assert ac.provider("openrouter").base_url == "https://openrouter.ai/api/v1"
+
+
+def test_provider_lookup_falls_back_to_offline_for_unknown_id():
+    assert ac.provider("nope").id == "offline"
+
+
 # ── AssistantSettings / AssistantSettingsStore ────────────────────────────────
 
-def test_settings_default_backend_is_offline():
+def test_settings_default_active_is_offline():
     s = ac.AssistantSettings()
-    assert s.backend == "offline"
-    assert s.ollama_model == "" and s.custom_base_url == "" and s.custom_model == ""
+    assert s.active == "offline"
+    assert s.ollama_model == "" and s.custom_base_url == "" and s.keys == {} and s.models == {}
 
 
 def test_settings_round_trip_through_dict():
-    s = ac.AssistantSettings(backend="ollama", ollama_model="qwen2.5:7b")
+    s = ac.AssistantSettings(active="openai", keys={"openai": "sk-x"}, models={"openai": "gpt-4o"})
     back = ac.AssistantSettings.from_dict(s.to_dict())
     assert back == s
 
 
 def test_settings_from_dict_ignores_unknown_keys_and_fills_defaults():
-    s = ac.AssistantSettings.from_dict({"backend": "custom", "custom_model": "gpt-x", "bogus": 1})
-    assert s.backend == "custom"
-    assert s.custom_model == "gpt-x"
+    s = ac.AssistantSettings.from_dict({"active": "groq", "models": {"groq": "llama"}, "bogus": 1})
+    assert s.active == "groq"
+    assert s.models == {"groq": "llama"}
     assert s.ollama_model == ""
 
 
-def test_settings_from_dict_rejects_unknown_backend():
-    s = ac.AssistantSettings.from_dict({"backend": "telepathy"})
-    assert s.backend == "offline"
+def test_settings_from_dict_rejects_unknown_active():
+    s = ac.AssistantSettings.from_dict({"active": "telepathy"})
+    assert s.active == "offline"
+
+
+def test_settings_from_dict_migrates_legacy_backend_format():
+    """A pre-provider install stored backend + flat custom_* fields — they
+    must map onto the provider model so the endpoint/key survive upgrade."""
+    s = ac.AssistantSettings.from_dict({
+        "backend": "custom", "custom_base_url": "http://localhost:1234/v1",
+        "custom_api_key": "sk-old", "custom_model": "local-model"})
+    assert s.active == "custom"
+    assert s.custom_base_url == "http://localhost:1234/v1"
+    assert s.keys["custom"] == "sk-old"
+    assert s.models["custom"] == "local-model"
 
 
 def test_settings_from_dict_handles_none():
@@ -48,8 +76,8 @@ def test_settings_from_dict_handles_none():
 
 def test_settings_store_round_trips(tmp_path):
     store = ac.AssistantSettingsStore(tmp_path / "settings.json")
-    settings = ac.AssistantSettings(backend="custom", custom_base_url="http://localhost:1234/v1",
-                                    custom_api_key="sk-x", custom_model="local-model")
+    settings = ac.AssistantSettings(active="custom", custom_base_url="http://localhost:1234/v1",
+                                    keys={"custom": "sk-x"}, models={"custom": "local-model"})
     store.save(settings)
     loaded = ac.AssistantSettingsStore(tmp_path / "settings.json").load()
     assert loaded == settings
@@ -74,13 +102,38 @@ def test_default_settings_path_uses_shared_storage_dir():
 
 def test_controller_persists_settings_across_instances(tmp_path):
     c1 = ac.AssistantController(storage_dir=tmp_path)
-    c1.settings.backend = "ollama"
+    c1.settings.active = "ollama"
     c1.settings.ollama_model = "llama3.2:3b"
     c1.save_settings()
 
     c2 = ac.AssistantController(storage_dir=tmp_path)
-    assert c2.settings.backend == "ollama"
+    assert c2.settings.active == "ollama"
     assert c2.settings.ollama_model == "llama3.2:3b"
+
+
+# ── active-provider resolution ────────────────────────────────────────────────
+
+def test_resolution_for_a_preset_provider_uses_the_spec_url_and_per_provider_key(tmp_path):
+    c = ac.AssistantController(storage_dir=tmp_path)
+    c.settings.active = "openai"
+    c.set_key("openai", "sk-abc")
+    c.set_model("openai", "gpt-4o")
+    assert c.resolved_base_url() == "https://api.openai.com/v1"
+    assert c.resolved_key() == "sk-abc"
+    assert c.resolved_model() == "gpt-4o"
+
+
+def test_resolution_falls_back_to_default_model_when_unset(tmp_path):
+    c = ac.AssistantController(storage_dir=tmp_path)
+    c.settings.active = "openai"
+    assert c.resolved_model() == ac.provider("openai").default_model
+
+
+def test_resolution_for_custom_uses_the_user_typed_url(tmp_path):
+    c = ac.AssistantController(storage_dir=tmp_path)
+    c.settings.active = "custom"
+    c.settings.custom_base_url = "http://localhost:9000/v1"
+    assert c.resolved_base_url() == "http://localhost:9000/v1"
 
 
 def test_controller_accepts_an_explicit_settings_store(tmp_path):
@@ -93,13 +146,13 @@ def test_controller_accepts_an_explicit_settings_store(tmp_path):
 
 def test_backend_ready_offline_is_always_false(tmp_path):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "offline"
+    c.settings.active = "offline"
     assert c.backend_ready() is False
 
 
 def test_backend_ready_ollama_needs_a_model(tmp_path):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "ollama"
+    c.settings.active = "ollama"
     assert c.backend_ready() is False
     c.settings.ollama_model = "qwen2.5:7b"
     assert c.backend_ready() is True
@@ -107,11 +160,19 @@ def test_backend_ready_ollama_needs_a_model(tmp_path):
 
 def test_backend_ready_custom_needs_base_url_and_model(tmp_path):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "custom"
+    c.settings.active = "custom"
     assert c.backend_ready() is False
     c.settings.custom_base_url = "http://localhost:1234/v1"
     assert c.backend_ready() is False   # model still missing
-    c.settings.custom_model = "local-model"
+    c.set_model("custom", "local-model")
+    assert c.backend_ready() is True    # custom needs no key
+
+
+def test_backend_ready_keyed_provider_needs_a_key(tmp_path):
+    c = ac.AssistantController(storage_dir=tmp_path)
+    c.settings.active = "openai"        # fixed URL + default model already present
+    assert c.backend_ready() is False   # but needs_key and none set
+    c.set_key("openai", "sk-x")
     assert c.backend_ready() is True
 
 
@@ -274,7 +335,7 @@ def test_refresh_status_offline_is_synchronous_and_always_ok(tmp_path):
 
 def test_refresh_status_ollama_reports_reachable_and_models(tmp_path, monkeypatch):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "ollama"
+    c.settings.active = "ollama"
     monkeypatch.setattr("velum_core.advisor.ollama_available", lambda: True)
     monkeypatch.setattr("velum_core.advisor.ollama_models", lambda: ["a", "b"])
     results = []
@@ -286,7 +347,7 @@ def test_refresh_status_ollama_reports_reachable_and_models(tmp_path, monkeypatc
 
 def test_refresh_status_ollama_unreachable(tmp_path, monkeypatch):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "ollama"
+    c.settings.active = "ollama"
     monkeypatch.setattr("velum_core.advisor.ollama_available", lambda: False)
     results = []
     t = c.refresh_status_async(on_result=lambda ok, msg, models: results.append((ok, msg, models)))
@@ -296,7 +357,7 @@ def test_refresh_status_ollama_unreachable(tmp_path, monkeypatch):
 
 def test_refresh_status_custom_uses_controller_bridge_methods(tmp_path, monkeypatch):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "custom"
+    c.settings.active = "custom"
     monkeypatch.setattr(c, "custom_api_available", lambda: True)
     monkeypatch.setattr(c, "custom_api_models", lambda: ["local-model"])
     results = []
@@ -329,7 +390,7 @@ def test_send_async_offline_backend_answers_synchronously(tmp_path):
 
 def test_send_async_falls_back_to_offline_when_backend_not_ready(tmp_path):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "ollama"   # selected, but no model chosen
+    c.settings.active = "ollama"   # selected, but no model chosen
     diag, params = _diag_and_params()
     done = []
     thread = c.send_async([], "hi", diag, params, on_token=lambda t: None,
@@ -340,7 +401,7 @@ def test_send_async_falls_back_to_offline_when_backend_not_ready(tmp_path):
 
 def test_send_async_ollama_streams_and_builds_system_prompt(tmp_path, monkeypatch):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "ollama"
+    c.settings.active = "ollama"
     c.settings.ollama_model = "qwen2.5:7b"
     diag, params = _diag_and_params()
 
@@ -369,7 +430,7 @@ def test_send_async_ollama_streams_and_builds_system_prompt(tmp_path, monkeypatc
 
 def test_send_async_ollama_agent_model_skips_system_prompt(tmp_path, monkeypatch):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "ollama"
+    c.settings.active = "ollama"
     c.settings.ollama_model = f"{c.agent_model_name}:latest"
     diag, params = _diag_and_params()
 
@@ -389,10 +450,10 @@ def test_send_async_ollama_agent_model_skips_system_prompt(tmp_path, monkeypatch
 
 def test_send_async_custom_backend_dispatches_to_module_bridge(tmp_path, monkeypatch):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "custom"
+    c.settings.active = "custom"
     c.settings.custom_base_url = "http://localhost:1234/v1"
-    c.settings.custom_model = "local-model"
-    c.settings.custom_api_key = "sk-x"
+    c.set_model("custom", "local-model")
+    c.set_key("custom", "sk-x")
     diag, params = _diag_and_params()
 
     captured = {}
@@ -415,7 +476,7 @@ def test_send_async_custom_backend_dispatches_to_module_bridge(tmp_path, monkeyp
 
 def test_send_async_reports_errors_via_on_error(tmp_path, monkeypatch):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "ollama"
+    c.settings.active = "ollama"
     c.settings.ollama_model = "qwen2.5:7b"
     diag, params = _diag_and_params()
 
@@ -433,7 +494,7 @@ def test_send_async_reports_errors_via_on_error(tmp_path, monkeypatch):
 
 def test_chat_busy_true_during_send_then_false(tmp_path, monkeypatch):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "ollama"
+    c.settings.active = "ollama"
     c.settings.ollama_model = "m"
     diag, params = _diag_and_params()
     release = threading.Event()
@@ -454,7 +515,7 @@ def test_chat_busy_true_during_send_then_false(tmp_path, monkeypatch):
 
 def test_stop_chat_lets_a_running_backend_bail_out_early(tmp_path, monkeypatch):
     c = ac.AssistantController(storage_dir=tmp_path)
-    c.settings.backend = "ollama"
+    c.settings.active = "ollama"
     c.settings.ollama_model = "m"
     diag, params = _diag_and_params()
     started = threading.Event()

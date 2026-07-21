@@ -7,6 +7,47 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-22 — Settings screen + a redesigned, chat-only Assistant
+
+Reworked the Assistant into something that reads like a finished product, and
+gave the app a proper **Settings** screen (Zed-inspired), on user request.
+
+**New `studio/settings_screen.py`** — a real main-stack screen (sidebar →
+Tools → Settings) with three sections:
+- **AI Assistant** — the provider picker, modelled on Zed's LLM-Providers page.
+  A card per provider (Offline · Ollama · OpenAI · OpenRouter · Groq · LM Studio ·
+  Custom), each expanding to numbered setup steps, an API-key/URL/model form, a
+  live *Test connection* status, a docs link, and — for Ollama — the local-model
+  catalog + "Tune for CellSeg1". "Use" makes a provider active. **All Assistant
+  configuration moved here** out of the chat drawer.
+- **Compute** — the detected inference device (`studio.hardware`).
+- **About** — version + GitHub.
+
+**Provider model (`studio/assistant_controller.py`)** — replaced the flat
+`backend` (offline/ollama/custom) with a declarative `PROVIDERS` registry of
+*named* providers, each of kind `offline`/`ollama`/`openai`. Every
+OpenAI-compatible preset (OpenAI/OpenRouter/Groq/LM Studio/custom) shares the
+one existing `custom_api_*` bridge, differing only in a pre-filled base URL,
+whether a key is required, and setup copy. Settings now remember a per-provider
+API key + model (switching provider never loses a key). Old on-disk settings
+migrate automatically (`backend` + `custom_*` → the new shape).
+
+**Chat-only drawer (`studio/assistant_panel.py`)** — stripped the model-config
+accordion entirely; removed the decorative spark badge top-left. The drawer is
+now header (Diagnose · Settings · Close) → a one-line "provider · model" status
+strip (a gear/click jumps to Settings) → the chat → input. It just reads the
+active provider; a change made in Settings shows on next open.
+
+⌘K palette gains "Assistant & app settings" and "Use Assistant provider → X";
+`app.py` wires the new screen + drawer callback.
+
+Verified: full `studio/` pytest suite green (controller/drawer/settings tests
+rewritten + added); offscreen screenshots of every Settings section, an
+expanded OpenAI/Ollama card, and the new drawer. Not verified: real GUI drag/
+click, real cloud-provider calls, real Ollama pull.
+
+---
+
 ## 2026-07-21 — Cover images: Steam-style region picker (crop)
 
 Picking a cover image now opens an image-region picker (`studio/image_crop.py`)

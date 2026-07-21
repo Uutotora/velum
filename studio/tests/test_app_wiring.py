@@ -1012,12 +1012,17 @@ def test_build_commands_train_start_stop_reflect_is_training(
     assert cmds["train.stop"].enabled is True
 
 
-def test_build_commands_assistant_backend_excludes_the_current_one(
+def test_build_commands_assistant_provider_excludes_the_current_one(
         app, empty_controller, train_controller, assistant_controller):
     win = _win(empty_controller, train_controller, assistant_controller)
-    assert assistant_controller.settings.backend == "offline"
-    labels = {c.label for c in win._build_commands() if c.id.startswith("assistant.backend.")}
-    assert labels == {"Switch Assistant backend → Ollama", "Switch Assistant backend → Custom API"}
+    assert assistant_controller.settings.active == "offline"
+    from studio.assistant_controller import PROVIDERS
+    labels = {c.label for c in win._build_commands() if c.id.startswith("assistant.provider.")}
+    expected = {f"Use Assistant provider → {p.label}" for p in PROVIDERS if p.id != "offline"}
+    assert labels == expected
+    # And an explicit "open settings" command exists in the Assistant section.
+    ids = {c.id for c in win._build_commands()}
+    assert "assistant.settings" in ids
 
 
 def test_build_commands_appearance_names_the_other_theme(
