@@ -5,6 +5,20 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+---
+
+## 2026-07-21 — Downloadable releases: PyInstaller bundle + DMG/tar.gz CI
+
+Wire up a self-contained distributable (docstudio/PACKAGING.md Mode 2):
+`scripts/build_bundle.sh` builds a PyInstaller bundle — a macOS `.app` + `.dmg`,
+or a Linux dist folder + `.tar.gz` — bundling Python/torch/PyQt6/the app + small
+LoRA checkpoints (the ~2.5 GB SAM backbone downloads on first use).
+`.github/workflows/release.yml` builds both on a `v*` tag and attaches them to
+the GitHub Release (macos + ubuntu runners). Not verified end-to-end here
+(PyInstaller+torch needs a real build run to shake out hidden imports; DMG is
+ad-hoc signed) — documented as such.
+
+
 ## 2026-07-21 — New app icon (v2) + show it on GitHub
 
 Replaced the app icon again with the new design (the **Default**, full-colour

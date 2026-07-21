@@ -94,24 +94,48 @@ Paste this to an agent (Claude Code / Codex / Cursor) in the repo root:
 ## Mode 2 — Self-contained distributable (for shipping to other people)
 
 When you want to hand the app to someone who does **not** have the repo/conda
-env, freeze everything into the `.app` with **PyInstaller** or **py2app**. This
-bundles the Python runtime + all deps (PyQt6, and for real inference torch + the
-SAM weights — a multi-GB bundle). Trade-off: every code change needs a rebuild,
-so this is a *release* step, not your daily loop.
+env, freeze everything into a bundle with **PyInstaller**. This is wired up:
 
-- Auto-update without re-downloading the whole app: add the **Sparkle**
-  framework (the macOS standard). You publish a small *appcast* XML + delta
-  updates; users get updates in the background. This is real work — only invest
-  in it when you actually distribute.
-- Until then, Mode 1 is strictly better for iterating.
+**Locally** (build on the OS you're targeting — you can't cross-build):
 
-Agent prompt (only when you reach distribution):
+```bash
+pip install -e . pyinstaller
+bash scripts/build_bundle.sh
+#   macOS  -> dist/CellSeg1 Studio.app  +  dist/CellSeg1-Studio.dmg
+#   Linux  -> dist/CellSeg1 Studio/     +  dist/CellSeg1-Studio-linux-x86_64.tar.gz
+```
 
-> Package CellSeg1 Studio as a self-contained macOS `.app` with PyInstaller
-> (entry `studio/app.py`, windowed/`--noconsole`, icon `docs/app_icon/AppIcon.icns`,
-> name "CellSeg1 Studio"). Bundle PyQt6; make torch/SAM optional or document the
-> weights path. Produce a `scripts/build_release.sh`, ad-hoc codesign, and a
-> DMG. Note what needs a real machine to verify.
+**In CI / Releases** — [`.github/workflows/release.yml`](../.github/workflows/release.yml)
+builds both on a version tag and attaches them to the GitHub Release:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+# -> Actions builds macOS .dmg (macos runner) + Linux .tar.gz (ubuntu runner),
+#    uploads both to the v0.1.0 Release. Or run it manually from the Actions tab.
+```
+
+What's bundled: Python + torch + PyQt6 + the app + small LoRA checkpoints
+(`checkpoints/`). What's **not**: the ~2.5 GB SAM ViT-H backbone — it downloads
+on first use into the app's data store, keeping the artifact to ~1.5–2.5 GB
+(torch dominates). Every code change needs a rebuild, so this is a *release*
+step, not your daily loop (that's Mode 1).
+
+**Honest caveats** (matters, since this can't be verified without running the
+actual build on each OS):
+- **PyInstaller + torch almost always needs a shake-down run or two** to catch a
+  missing hidden import for a specific torch/OS combo. Expect to iterate on the
+  `--collect-*` flags in `scripts/build_bundle.sh` the first time; that's normal,
+  not a sign it's broken.
+- The macOS `.dmg` is **ad-hoc signed**, so first launch needs right-click ▸ Open
+  (or `xattr -dr com.apple.quarantine`) — a real Developer ID + notarization is a
+  separate step for a "just double-click" download.
+- Auto-update without re-downloading the whole app: add **Sparkle** (macOS) —
+  real work, only worth it once you actually distribute regularly.
+
+**Is it too early?** No — the app is functional (real segmentation, green tests),
+so packaging works. The two real costs are size (torch) and that each OS's bundle
+must be built on that OS (the CI matrix handles this). Tag a release and let CI
+produce the first artifacts, then iterate.
 
 ---
 
