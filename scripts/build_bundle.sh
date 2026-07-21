@@ -36,10 +36,13 @@ COMMON=(
   # the app's own packages (pure-python, but keep them whole)
   --collect-submodules studio --collect-submodules cellseg1_core
   --collect-submodules segment_anything --collect-submodules peft
-  # bundled assets + small LoRA checkpoints (NOT the big SAM backbone)
-  --add-data "studio/fonts${DATASEP}studio/fonts"
-  --add-data "studio/assets${DATASEP}studio/assets"
-  --add-data "checkpoints${DATASEP}checkpoints"
+  # bundled assets + small LoRA checkpoints (NOT the big SAM backbone).
+  # Source paths are ABSOLUTE: --add-data resolves the source relative to
+  # --specpath (build/), not the cwd, so a relative "studio/fonts" is looked
+  # for under build/ and fails ("Unable to find .../build/studio/fonts").
+  --add-data "${REPO}/studio/fonts${DATASEP}studio/fonts"
+  --add-data "${REPO}/studio/assets${DATASEP}studio/assets"
+  --add-data "${REPO}/checkpoints${DATASEP}checkpoints"
 )
 
 if [ "$OS" = "Darwin" ]; then
