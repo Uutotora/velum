@@ -808,7 +808,12 @@ class _NavItem(QToolButton):
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.setText("   " + text)
+        # Escape '&' -> '&&': QToolButton (like every QAbstractButton) treats a
+        # single '&' as a keyboard-mnemonic marker and swallows it, underlining
+        # the next character -- so "Models & Train" / "Guide & Docs" rendered as
+        # "Models_Train" / "Guide_Docs" with an underlined space. Escaping keeps
+        # the literal ampersand.
+        self.setText("   " + text.replace("&", "&&"))
         self.setIcon(icons.icon(icon_name, t["text_muted"], 18))
         self.setIconSize(QSize(18, 18))
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)

@@ -384,3 +384,14 @@ def test_fieldrow_label_background_is_transparent(app):
 def test_grouplabel_background_is_transparent(app):
     gl = components.GroupLabel("engine", theme.DARK)
     assert "background:transparent" in gl.styleSheet().replace(" ", "")
+
+
+# ── _NavItem ampersand mnemonic ───────────────────────────────────────────────
+def test_navitem_ampersand_label_is_not_swallowed_as_mnemonic(app):
+    """QToolButton treats a single '&' as a keyboard-mnemonic marker and hides
+    it (underlining the next char), so "Models & Train" rendered as
+    "Models_Train". _NavItem must escape it so the literal ampersand shows."""
+    item = components._NavItem("train", "models", "Models & Train", theme.DARK)
+    assert item.text() == "   Models && Train"   # && is Qt's escaped literal '&'
+    # displayed form drops the escaping and keeps the real ampersand
+    assert item.text().replace("&&", "&").strip() == "Models & Train"
