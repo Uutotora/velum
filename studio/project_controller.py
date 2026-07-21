@@ -93,6 +93,17 @@ def relative_time(iso_ts: str) -> str:
 
 
 @dataclass
+class HomeSummary:
+    """Rolled-up library stats for the Home KPI row."""
+
+    n_projects: int
+    n_images: int
+    n_cells: int
+    n_benchmarked: int
+    avg_f1: Optional[float]
+
+
+@dataclass
 class ProjectCard:
     """Display-ready view of a ``Project`` for the Home/Projects card renderers."""
 
@@ -109,6 +120,9 @@ class ProjectCard:
     seed: int
     favorite: bool
     when: str
+    cover_kind: str = "auto"
+    cover_color: str = ""
+    cover_image: str = ""
 
 
 def to_card(project: Project) -> ProjectCard:
@@ -128,6 +142,9 @@ def to_card(project: Project) -> ProjectCard:
         seed=cover_seed(project.id),
         favorite=project.favorite,
         when=relative_time(project.updated_at),
+        cover_kind=project.cover.kind,
+        cover_color=project.cover.color,
+        cover_image=project.cover.image_path,
     )
 
 
@@ -217,6 +234,32 @@ class ProjectController:
         n_images = sum(p.stats.n_images for p in projects)
         n_engines = len({p.engine for p in projects})
         return len(projects), n_images, n_engines
+
+    def home_summary(self) -> "HomeSummary":
+        """Aggregate stats for the Home KPI row — real numbers rolled up from
+        every project on disk, not the mockup's hard-coded ones."""
+        projects = self.store.list()
+        f1s = [p.stats.last_f1 for p in projects if p.stats.last_f1 is not None]
+        return HomeSummary(
+            n_projects=len(projects),
+            n_images=sum(p.stats.n_images for p in projects),
+            n_cells=sum(p.stats.n_cells for p in projects),
+            n_benchmarked=len(f1s),
+            avg_f1=(sum(f1s) / len(f1s)) if f1s else None,
+        )
+
+    def set_cover(self, project_id: str, *, kind: str, color: str = "",
+                  image_path: str = "") -> Project:
+        """Persist a project's chosen cover (Notion-style, applied instantly).
+        Unknown ``kind`` falls back to ``auto`` so a bad value can't corrupt a
+        project file."""
+        from studio.project import ProjectCover
+        if kind not in ("auto", "color", "image"):
+            kind = "auto"
+        project = self.store.load(project_id)
+        project.cover = ProjectCover(kind=kind, color=color, image_path=image_path)
+        self.store.save(project)
+        return project
 
     # ── mutation ─────────────────────────────────────────────────────────────
     def toggle_favorite(self, project_id: str) -> Project:

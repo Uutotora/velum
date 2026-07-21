@@ -81,6 +81,31 @@ def _coerce(cls: type, data: dict[str, Any]) -> dict[str, Any]:
 
 
 @dataclass
+class ProjectCover:
+    """A project's card cover — its user-chosen visual identity.
+
+    Three kinds, mirroring how Notion lets a page pick an identity:
+    ``"auto"`` derives a deterministic tint from the project id, so every
+    project looks distinct with zero effort; ``"color"`` pins a chosen palette
+    hue; ``"image"`` uses a user-picked image file. Backward compatible — a
+    project file written before covers existed has no ``cover`` key and loads
+    as ``auto`` (the whole library instantly gains distinct covers with no
+    migration).
+    """
+
+    kind: str = "auto"       # auto | color | image
+    color: str = ""          # hex, when kind == "color"
+    image_path: str = ""     # absolute path, when kind == "image"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProjectCover":
+        return cls(**_coerce(cls, data or {}))
+
+
+@dataclass
 class ProjectSettings:
     """Every segmentation knob, per project — the persisted config contract.
 
@@ -167,6 +192,7 @@ class Project:
     image_paths: list[str] = field(default_factory=list)
     settings: ProjectSettings = field(default_factory=ProjectSettings)
     stats: ProjectStats = field(default_factory=ProjectStats)
+    cover: ProjectCover = field(default_factory=ProjectCover)
     schema_version: int = SCHEMA_VERSION
 
     # ── Convenience ─────────────────────────────────────────────────────────
@@ -191,6 +217,7 @@ class Project:
         kw = _coerce(cls, data)
         kw["settings"] = ProjectSettings.from_dict(data.get("settings", {}))
         kw["stats"] = ProjectStats.from_dict(data.get("stats", {}))
+        kw["cover"] = ProjectCover.from_dict(data.get("cover", {}))
         # id/name are required in practice; guard against a corrupt file.
         kw.setdefault("id", slugify(kw.get("name", "")))
         kw.setdefault("name", kw["id"])

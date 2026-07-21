@@ -23,10 +23,13 @@ import html
 from typing import Callable, Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QWidget, QFrame, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit
+from PyQt6.QtWidgets import (
+    QWidget, QFrame, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QFileDialog,
+)
 
 from studio import theme
 from studio.components import GroupLabel, IconButton, PillButton, hline, label, soft_shadow
+from studio.covers import CoverView, COVER_COLORS
 
 
 class ConfirmDialog(QWidget):
@@ -139,12 +142,17 @@ class ProjectSettingsDialog(QWidget):
 
     def __init__(self, parent: QWidget, t: dict, project,
                  on_saved: Optional[Callable[[str, str], None]] = None,
+                 on_cover: Optional[Callable[[str, str, str], None]] = None,
                  on_delete: Optional[Callable[[], None]] = None):
         super().__init__(parent)
         self._t = t
         self._project = project
         self._on_saved = on_saved
+        self._on_cover = on_cover
         self._on_delete = on_delete
+        self._cover_kind = project.cover.kind
+        self._cover_color = project.cover.color
+        self._cover_image = project.cover.image_path
         self.setStyleSheet(f"background:{theme.SCRIM};")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         outer = QVBoxLayout(self)
@@ -175,6 +183,7 @@ class ProjectSettingsDialog(QWidget):
         b.setContentsMargins(22, 20, 22, 20)
         b.setSpacing(16)
         b.addWidget(self._general_section())
+        b.addWidget(self._cover_section())
         b.addWidget(self._danger_zone())
         v.addWidget(body)
         return panel
@@ -221,6 +230,64 @@ class ProjectSettingsDialog(QWidget):
         save_row.addWidget(save_btn)
         v.addLayout(save_row)
         return w
+
+    def _cover_section(self) -> QWidget:
+        """Pick the project's cover — a live preview banner plus a palette of
+        colours, an Auto tint, and Upload image. Applied instantly (no Save
+        step), Notion-style, via ``on_cover``."""
+        t = self._t
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        v = QVBoxLayout(w)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(9)
+        v.addWidget(GroupLabel("Cover", t))
+
+        self._cover_preview = CoverView(
+            kind=self._cover_kind, color=self._cover_color, image_path=self._cover_image,
+            project_id=self._project.id, radius=10, min_size=(120, 66))
+        self._cover_preview.setFixedHeight(66)
+        v.addWidget(self._cover_preview)
+
+        swatches = QHBoxLayout()
+        swatches.setSpacing(7)
+        for _name, hex_color in COVER_COLORS:
+            sw = QFrame()
+            sw.setFixedSize(24, 24)
+            sw.setCursor(Qt.CursorShape.PointingHandCursor)
+            sw.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            sw.setStyleSheet(f"background:{hex_color}; border-radius:6px; border:1px solid rgba(255,255,255,0.10);")
+            sw.mouseReleaseEvent = lambda e, c=hex_color: self._apply_cover("color", c, "")
+            swatches.addWidget(sw)
+        swatches.addStretch(1)
+        v.addLayout(swatches)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        auto_btn = PillButton("Auto", t, "ghost", small=True)
+        auto_btn.clicked.connect(lambda: self._apply_cover("auto", "", ""))
+        img_btn = PillButton("Upload image…", t, "ghost", "download", small=True)
+        img_btn.clicked.connect(self._pick_cover_image)
+        actions.addWidget(auto_btn)
+        actions.addWidget(img_btn)
+        actions.addStretch(1)
+        v.addLayout(actions)
+        return w
+
+    def _apply_cover(self, kind: str, color: str, image_path: str) -> None:
+        self._cover_kind, self._cover_color, self._cover_image = kind, color, image_path
+        if hasattr(self, "_cover_preview"):
+            self._cover_preview.set_cover(kind=kind, color=color, image_path=image_path)
+        if self._on_cover:
+            self._on_cover(kind, color, image_path)
+
+    def _pick_cover_image(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a cover image", "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog)
+        if path:
+            self._apply_cover("image", "", path)
 
     def _danger_zone(self) -> QFrame:
         t = self._t

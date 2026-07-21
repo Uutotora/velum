@@ -7,6 +7,40 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — Project covers + a richer, honest Home screen
+
+Give every project a **cover** — its own visual identity on cards and Home,
+so a microscopist tells one cohort from another at a glance (the Notion-style
+"colour / image / auto" pattern from the cover-design research).
+
+- **Cover model** (`studio.project.ProjectCover`, persisted, backward
+  compatible — a pre-covers project file loads as `auto`): `auto` derives a
+  deterministic hue from the project id (whole library differentiates for
+  free), `color` pins a palette hue, `image` uses a user-picked image.
+- **Cover art** (`studio/covers.py`): a soft, heavily-blurred "aurora" of
+  glowing blobs in the chosen hue (the generated look the product owner liked,
+  dialled up on blur), or a centre-cropped image. `CoverView` caches its render
+  like `NucleiView`, so cards stay cheap to scroll.
+- **Where they show**: reintroduced a cover **banner** on Projects cards (with
+  the engine chip overlaid), cover **avatars** on Home's recent rows, and a big
+  cover on the Home hero — all user-controlled now, unlike the always-on nuclei
+  art removed earlier.
+- **Cover picker** in Project Settings: a live preview, an 8-hue palette, Auto,
+  and Upload image — applied instantly (no Save step), Notion-style.
+
+Home also gains a real **KPI row** (projects · images · cells · avg F1, rolled
+up from disk via `ProjectController.home_summary()`) and a **"Pick up where you
+left off"** hero for the most-recent project. Deliberately *not* framed as
+"Resume segmenting" — there is no paused-segmentation state to resume (product
+owner caught this); the hero just opens the project.
+
+Tests: `studio/tests/test_covers.py` (Qt-gated) + cover/summary cases added to
+`test_project.py` and `test_project_controller.py`; full suite green. Verified
+offscreen (dark + light) for Projects cards, Home, and the settings picker;
+**not** verified: real GUI interaction, real image-cover upload.
+
+---
+
 ## 2026-07-21 — Models & Train redesigned into a guided, three-section hub
 
 Rebuilt the Models & Train screen (`studio/extra_screens.py::ModelsScreen`)
