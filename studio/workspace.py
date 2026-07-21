@@ -2216,6 +2216,10 @@ class WorkspaceScreen(QWidget):
         tiles.addWidget(StatTile(f"{coverage:.1f}", "%", "COVERAGE", t))
         layout.addLayout(tiles)
 
+        explore = PillButton("Explore cell population", t, "primary", "chart")
+        explore.clicked.connect(self._show_measurements)
+        layout.addWidget(explore)
+
         layout.addWidget(GroupLabel("Pixel calibration", t))
         pixel_size = self._project.settings.pixel_size_um
         cal_edit = QLineEdit(f"{pixel_size:.3f}")
@@ -2234,7 +2238,7 @@ class WorkspaceScreen(QWidget):
         export_btn.clicked.connect(self._export_csv)
         refine_btn = PillButton("Refine…", t, "ghost", "spark", small=True)
         refine_btn.clicked.connect(self._refine_coming_soon)
-        measure_btn = PillButton("Measurements", t, "ghost", "measure", small=True)
+        measure_btn = PillButton("Analytics", t, "ghost", "measure", small=True)
         measure_btn.clicked.connect(self._show_measurements)
         for i, b in enumerate([save_btn, export_btn, refine_btn, measure_btn]):
             btns.addWidget(b, i // 2, i % 2)
@@ -2375,10 +2379,18 @@ class WorkspaceScreen(QWidget):
         self._toast("Refine — coming soon", "Interactive point-prompt refinement isn't wired up yet.")
 
     def _show_measurements(self) -> None:
+        """Open the Cell Population Analytics explorer over the current
+        result — the per-cell morphometry the engine already computed, shown
+        as distribution histograms + summary stats (see
+        ``studio/cell_analytics.py``)."""
         if self._last_result is None:
             self._toast("No measurements yet", "Run segmentation first.")
             return
-        self._toast("Measurements", self._segment.summary_line(self._last_result))
+        from studio.cell_analytics import CellAnalyticsDialog
+        name = Path(self._current_image_path).name if self._current_image_path else ""
+        dlg = CellAnalyticsDialog(self, self._t, self._last_result,
+                                  image_name=name, on_export=self._export_csv)
+        dlg.open()
 
     # ── Batch prediction ─────────────────────────────────────────────────────
     def _batch_accordion(self) -> Accordion:

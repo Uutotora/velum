@@ -18,6 +18,34 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-22 — Cell Population Analytics: distribution explorer
+
+The engines already measure *every* labelled cell (area, diameter,
+circularity, aspect ratio, intensity, … via
+`velum_core.analysis.compute_measurements`), but the Segment inspector only
+ever surfaced three rolled-up numbers — the whole "measure and compare cells"
+promise went unshown. New `studio/cell_analytics.py` turns that per-cell table
+into a real population view.
+
+- **`CellAnalyticsDialog`** — a scrim-backed, centred modal (same construction
+  + self-disposing lifecycle as `ConfirmDialog`) reached from a new primary
+  **"Explore cell population"** CTA under the results hero, and from the
+  renamed **"Analytics"** action button.
+- **What it shows:** a gradient distribution **histogram** of the selected
+  metric with count gridlines, x-axis value labels, and dashed **mean/median
+  guide lines** (staggered so a tight population never overprints them); a row
+  of summary **stat tiles** (mean / median / std / CV / min / max in the
+  metric's real units); and a clickable **small-multiples overview** strip of
+  the six lead metrics — click any to make it the main chart.
+- **Pure, tested logic:** `histogram` (robust to empty + all-identical
+  populations), `plottable_metrics`, `metric_values`, `metric_stats` (derives
+  CV, falls back to raw rows when a summary block is missing) — all unit-tested
+  headless, plus offscreen construction/switch/dispose tests
+  (`studio/tests/test_cell_analytics.py`, 15 cases).
+- Reads the exact dict `compute_measurements` returns; no engine/torch/napari.
+  Verified over real segmentation output (45-cell result) and synthetic
+  populations in dark + light themes via offscreen screenshots.
+
 ## 2026-07-22 — Dashboard charts: analytics-grade line + bar rendering
 
 The Dashboard's two chart panels were the weakest visual moment in an

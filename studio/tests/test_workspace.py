@@ -902,15 +902,19 @@ def test_rebuilding_results_pane_does_not_accumulate_widgets(app, segment, proje
     assert ws._last_result is not None
 
     def action_buttons():
+        wanted = {"Save masks", "Export CSV", "Refine…", "Analytics",
+                  "Explore cell population"}
         return [b.text() for b in ws._results_container.findChildren(PillButton)
-                if b.text() in {"Save masks", "Export CSV", "Refine…", "Measurements"}]
+                if b.text() in wanted]
 
-    assert sorted(action_buttons()) == ["Export CSV", "Measurements", "Refine…", "Save masks"]
+    expected = ["Analytics", "Explore cell population", "Export CSV",
+                "Refine…", "Save masks"]
+    assert sorted(action_buttons()) == expected
     for _ in range(5):
         ws._rebuild_results_pane()
         app.processEvents()
     # still exactly one of each -- not 6 stacked copies
-    assert sorted(action_buttons()) == ["Export CSV", "Measurements", "Refine…", "Save masks"]
+    assert sorted(action_buttons()) == expected
 
 
 def test_editing_the_mask_keeps_results_and_card_count_in_sync(app, segment, projects, toasts, tmp_path, storage):
@@ -1472,14 +1476,20 @@ def test_show_measurements_without_a_result_toasts(app, segment, projects, toast
     assert toasts and "No measurements yet" in toasts[-1][0]
 
 
-def test_show_measurements_after_predict_shows_a_summary(app, segment, projects, toasts, tmp_path, storage):
+def test_show_measurements_after_predict_opens_the_analytics_dialog(app, segment, projects, toasts, tmp_path, storage):
+    from studio.cell_analytics import CellAnalyticsDialog, CellAnalyticsPanel
     project = _make_project(tmp_path, projects, storage)
     ws = _ws(app, segment, projects, toasts)
+    ws.show()  # the screen is always visible when a user opens the dialog
     ws._load_project(project)
     ws._start_predict()
     _pump(app, ws)
     ws._show_measurements()
-    assert toasts[-1][0] == "Measurements"
+    app.processEvents()
+    dlgs = ws.findChildren(CellAnalyticsDialog)
+    assert dlgs and dlgs[-1].isVisible()
+    # the dialog is fed the real per-cell result and builds its panel
+    assert dlgs[-1].findChildren(CellAnalyticsPanel)
 
 
 def test_export_csv_without_a_result_toasts(app, segment, projects, toasts, tmp_path, storage):
