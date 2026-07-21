@@ -40,6 +40,14 @@ detected_device_label()` + rank/epoch help text — all covered by
 (idle / ready / training), My models, and Engines (built-in + custom) states;
 **not** verified: real GUI interaction or a real training run.
 
+Follow-up (same day): fixed the "No trained models yet" empty-state caption
+overlapping its buttons (a word-wrapped QLabel added with an alignment flag
+doesn't get heightForWidth honoured — centred a fixed-width inner column
+instead); added in-form guidance on the expected **image + label-mask** format
+(`<name>_mask.png`, one integer id per cell) and the SAM backbone; and expanded
+the "How do I add my own engine?" help to name the three built-in engines and
+show a complete runnable plugin snippet.
+
 ---
 
 ## 2026-07-21 — Renamed the product to **Velum**
