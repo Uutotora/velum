@@ -57,7 +57,8 @@ class TitleBar(QWidget):
     HEIGHT = 42
 
     def __init__(self, window: QWidget, t: dict,
-                 on_toggle_theme: Optional[Callable[[], None]] = None):
+                 on_toggle_theme: Optional[Callable[[], None]] = None,
+                 on_open_settings: Optional[Callable[[], None]] = None):
         super().__init__()
         self._win = window
         self.setFixedHeight(self.HEIGHT)
@@ -88,20 +89,28 @@ class TitleBar(QWidget):
         row.addWidget(title)
         row.addStretch(1)
 
-        # ── right slot: theme toggle ──
-        if on_toggle_theme is not None:
-            tb = QToolButton()
-            tb.setCursor(Qt.CursorShape.PointingHandCursor)
-            tb.setFixedSize(26, 26)
-            tb.setIcon(icons.icon("moon", t["text_muted"], 15))
-            tb.setIconSize(QSize(15, 15))
-            tb.setToolTip("Toggle light / dark")
-            tb.clicked.connect(lambda: on_toggle_theme())
-            tb.setStyleSheet(
+        # ── right slot: settings + theme toggle ──
+        def _chrome_button(icon_name: str, tip: str, handler: Callable[[], None]) -> QToolButton:
+            b = QToolButton()
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFixedSize(26, 26)
+            b.setIcon(icons.icon(icon_name, t["text_muted"], 15))
+            b.setIconSize(QSize(15, 15))
+            b.setToolTip(tip)
+            b.clicked.connect(lambda: handler())
+            b.setStyleSheet(
                 f"QToolButton{{background:transparent; border:1px solid transparent; border-radius:7px;}}"
                 f"QToolButton:hover{{background:{t['surface2']}; border-color:{t['border']};}}")
-            row.addWidget(tb)
-        else:
+            return b
+
+        added = 0
+        if on_open_settings is not None:
+            row.addWidget(_chrome_button("settings", "Settings", on_open_settings))
+            added += 1
+        if on_toggle_theme is not None:
+            row.addWidget(_chrome_button("moon", "Toggle light / dark", on_toggle_theme))
+            added += 1
+        if added == 0:
             row.addSpacing(52)  # keep the title visually centred
 
     def _toggle_max(self) -> None:

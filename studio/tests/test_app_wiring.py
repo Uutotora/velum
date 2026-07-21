@@ -725,31 +725,29 @@ def test_assistant_and_logs_toggle_as_overlays(app, controller, train_controller
     assert not win._logs.isHidden()
 
 
-def test_opening_the_assistant_slides_in_from_the_right_not_an_instant_pop(
+def test_opening_the_assistant_fades_in_at_its_final_place_not_off_screen(
         app, controller, train_controller, assistant_controller):
     win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
                                 train_controller=train_controller,
                                 assistant_controller=assistant_controller)
     win.navigate("assistant")
-    anim = win._assistant._slide_anim
-    assert anim.startValue().x() == anim.endValue().x() + win._assistant.WIDTH
-    assert anim.startValue().y() == anim.endValue().y()   # right edge only, no vertical drift
-    # QPropertyAnimation.start() applies t=0 (== startValue) synchronously —
-    # proves this is a real, currently-mid-flight animation (starting
-    # off-screen) rather than an instant teleport to the final position.
-    assert win._assistant.geometry() == anim.startValue()
+    # A short opacity fade (studio.motion.fade_in sets _fade_anim), not a
+    # geometry slide — the panel sits at its final anchored position from the
+    # first frame (right edge of the window), only its opacity eases in.
+    assert win._assistant._fade_anim is not None
+    assert not win._assistant.isHidden()
+    assert win._assistant.geometry().right() == win._assistant.parentWidget().width() - 1
 
 
-def test_opening_logs_slides_up_from_the_bottom(app, controller, train_controller, assistant_controller):
-    from studio.overlays import LogsConsole
+def test_opening_logs_fades_in_at_its_final_place(app, controller, train_controller, assistant_controller):
     win = app_mod.StudioWindow(theme_name="dark", project_controller=controller,
                                 train_controller=train_controller,
                                 assistant_controller=assistant_controller)
     win.navigate("logs")
-    anim = win._logs._slide_anim
-    assert anim.startValue().y() == anim.endValue().y() + LogsConsole.HEIGHT
-    assert anim.startValue().x() == anim.endValue().x()
-    assert win._logs.geometry() == anim.startValue()
+    assert win._logs._fade_anim is not None
+    assert not win._logs.isHidden()
+    # Bottom-anchored: its bottom edge meets the window's bottom, no off-screen start.
+    assert win._logs.geometry().bottom() == win._logs.parentWidget().height() - 1
 
 
 def test_command_palette_opens_and_escape_closes(app, controller, train_controller, assistant_controller):

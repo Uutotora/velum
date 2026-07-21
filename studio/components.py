@@ -83,6 +83,35 @@ class SmoothScrollArea(QScrollArea):
 
     _STEP_PX = 120  # ~3 row-heights per notch -- matches Qt's own default "3 lines" feel
 
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        # Keep the vertical scrollbar *gutter* reserved at all times (callers
+        # use ScrollBarAlwaysOn via screens.scroll()) so content never
+        # reflows/resizes the instant a scrollbar appears -- a real user
+        # complaint ("появляется слайдер сбоку ... меняются размеры всего").
+        # When there's nothing to scroll we simply hide the handle (transparent)
+        # so the reserved gutter reads as a hair of right padding, not an inert
+        # bar. Synced on any range/value change.
+        self._gutter_scrollable: Optional[bool] = None
+        bar = self.verticalScrollBar()
+        bar.rangeChanged.connect(self._sync_gutter)
+        self._sync_gutter()
+
+    def _sync_gutter(self, *_a) -> None:
+        try:
+            bar = self.verticalScrollBar()
+            scrollable = bar.maximum() > bar.minimum()
+            if scrollable == self._gutter_scrollable:
+                return  # only restyle on an actual state flip, not every event
+            self._gutter_scrollable = scrollable
+            # Empty instance stylesheet -> the app-wide QScrollBar QSS (a
+            # visible handle) applies; a scoped override hides just the handle
+            # when there's nothing to scroll.
+            bar.setStyleSheet("" if scrollable
+                              else "QScrollBar::handle:vertical{background:transparent;}")
+        except RuntimeError:
+            pass
+
     def wheelEvent(self, event) -> None:
         bar = self.verticalScrollBar()
         angle_y = event.angleDelta().y()
@@ -881,6 +910,14 @@ class Sidebar(QFrame):
 
         lay.addStretch(1)
         lay.addWidget(hline(t))
+
+        # Settings lives in the footer group (with Guide & Docs / Appearance),
+        # not the Tools section -- and is *checkable* + registered in _items so
+        # set_active() highlights it like any real screen while it's showing.
+        settings = _NavItem("settings", "settings", "Settings", t)
+        settings.clicked.connect(lambda: self.navigate.emit("settings"))
+        self._items["settings"] = settings
+        lay.addWidget(settings)
 
         guide = _NavItem("__guide__", "guide", "Guide & Docs", t)
         guide.setCheckable(False)
