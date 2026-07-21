@@ -257,8 +257,12 @@ class ModelsScreen(QWidget):
             backbone_box = SelectBox(self._backbone_field_text(), t, on_click=self._pick_backbone_file)
         rank_box = SelectBox(self._lora_rank, t, options=tc.RANK_OPTIONS, on_select=self._set_rank)
         epochs_box = SelectBox(self._epochs, t, options=tc.EPOCH_OPTIONS, on_select=self._set_epochs)
-        fields = [("Annotated image", image_box, None),
-                  ("SAM backbone", backbone_box, None),
+        fields = [("Annotated image", image_box,
+                   "PNG / TIFF / JPG (grayscale or RGB). Needs a label mask "
+                   "named <name>_mask.png beside it — one integer id per cell."),
+                  ("SAM backbone", backbone_box,
+                   "The base SAM weights LoRA fine-tunes. Auto-detected in "
+                   "sam_backbone/, or browse for a .pth."),
                   ("LoRA rank", rank_box, tc.rank_help(self._lora_rank)),
                   ("Epochs", epochs_box, tc.epoch_help(self._epochs))]
         for i, (fname, control, hint) in enumerate(fields):
@@ -655,24 +659,32 @@ class ModelsScreen(QWidget):
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         card.setObjectName("ModelsEmpty")
         card.setStyleSheet(f"QFrame#ModelsEmpty{{background:{t['surface']}; border:1px dashed {t['border_strong']}; border-radius:14px;}}")
-        cv = QVBoxLayout(card)
-        cv.setContentsMargins(28, 34, 28, 34)
-        cv.setSpacing(8)
-        C = Qt.AlignmentFlag.AlignHCenter
+        # Centre a fixed-width inner column: a word-wrapped QLabel added to a
+        # box layout *with an alignment flag* doesn't get its heightForWidth
+        # honoured (the caption collapsed to one line and the buttons drew over
+        # it — the "кривой текст" bug). Giving the column a fixed width lets the
+        # label wrap and reserve its real height without any alignment flag.
+        outer = QHBoxLayout(card)
+        outer.setContentsMargins(28, 34, 28, 34)
+        outer.addStretch(1)
+        inner = bare_widget()
+        inner.setFixedWidth(460)
+        cv = QVBoxLayout(inner)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(9)
         ic = QLabel()
         ic.setPixmap(icons.pixmap("models", t["text_muted"], 30))
         ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cv.addWidget(ic, alignment=C)
+        cv.addWidget(ic)
         h = label("No trained models yet", 15, t["text"], 600)
         h.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cv.addWidget(h, alignment=C)
+        cv.addWidget(h)
         cap = label("Fine-tune one from a single annotated image, or import an existing "
                     "checkpoint — both land here for you to reuse across projects.",
                     12.5, t["text_muted"])
         cap.setWordWrap(True)
         cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cap.setFixedWidth(440)
-        cv.addWidget(cap, alignment=C)
+        cv.addWidget(cap)
         cv.addSpacing(6)
         cta_row = QHBoxLayout()
         cta_row.setSpacing(10)
@@ -685,6 +697,8 @@ class ModelsScreen(QWidget):
         cta_row.addWidget(import_btn)
         cta_row.addStretch(1)
         cv.addLayout(cta_row)
+        outer.addWidget(inner)
+        outer.addStretch(1)
         return card
 
     # ── Engines section ──────────────────────────────────────────────────────
@@ -791,18 +805,28 @@ class ModelsScreen(QWidget):
         acc = Accordion("How do I add my own engine?", t, lead="guide",
                         caps=False, fill="surface2")
         body = label(
-            "An engine plugin is a single Python file. At import time it calls "
-            "velum_core.engine_registry.register() with an EngineSpec — a stable "
-            "key, a display label, and a predict(image, config) → label-mask "
-            "function. Velum imports the file, registers whatever it declares, and "
-            "remembers it for next launch.", 12.5, t["text_subtle"])
+            "An engine turns an image into a label mask. Velum ships three — "
+            "CellSeg1 (SAM + LoRA, one-shot), Cellpose-SAM (zero-shot), and "
+            "SAM 2 (z-stacks / video) — and your own plug in the same way.\n\n"
+            "A plugin is one Python (.py) file. When imported it calls "
+            "velum_core.engine_registry.register() with an EngineSpec: a stable "
+            "key, a display label, a predict(image, config) → int-label-mask "
+            "function (each cell a distinct id, 0 = background), and an optional "
+            "available() probe. “Register engine…” imports the file, registers "
+            "whatever it declares, and remembers it for the next launch — it "
+            "then shows here and in the Segment tab’s engine picker. Nothing is "
+            "compiled or packaged; import any library you like inside predict().",
+            12.5, t["text_subtle"])
         body.setWordWrap(True)
         acc.add(body)
         snippet = QLabel(
+            "# my_engine.py  →  Register engine…\n"
+            "import numpy as np\n"
             "from velum_core.engine_registry import EngineSpec, register\n\n"
             "def predict(image, config):\n"
-            "    # return an int label mask, one id per cell\n"
-            "    ...\n\n"
+            "    # image: HxWx3 uint8 → return an int label mask (HxW),\n"
+            "    # one id per cell, 0 = background\n"
+            "    return np.zeros(image.shape[:2], dtype=np.int32)\n\n"
             "register(EngineSpec(\n"
             "    key=\"my_engine\", label=\"My Engine\",\n"
             "    predict=predict, available=lambda: True))")
