@@ -54,10 +54,17 @@ if [ "$OS" = "Darwin" ]; then
   APP="$DIST/$NAME.app"
   # Ad-hoc codesign so Gatekeeper lets a locally-built app run.
   codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || echo "(codesign skipped)"
-  echo "==> DMG"
+  echo "==> DMG (drag-to-Applications layout)"
   DMG="$DIST/CellSeg1-Studio.dmg"
   rm -f "$DMG"
-  hdiutil create -volname "$NAME" -srcfolder "$APP" -ov -format UDZO "$DMG"
+  # Stage the app next to an /Applications symlink so opening the DMG shows the
+  # standard "drag the app onto Applications" install window, like every normal
+  # macOS download — not just a lone .app.
+  STAGE="$(mktemp -d)/dmgroot"
+  mkdir -p "$STAGE"
+  cp -R "$APP" "$STAGE/"
+  ln -s /Applications "$STAGE/Applications"
+  hdiutil create -volname "$NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
   echo "Built: $APP"
   echo "       $DMG"
 else

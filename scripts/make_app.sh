@@ -101,8 +101,25 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# ── Ad-hoc codesign so Gatekeeper/Dock behave for a locally-built app.
+# ── Ad-hoc codesign (no Apple Developer ID) — good enough for a personal dev
+# app, but Gatekeeper still gates the FIRST launch (see the note printed below).
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || echo "(codesign skipped)"
 
-echo "Built: $APP"
-echo "Launch: open \"$APP\"   (logs -> ~/Library/Logs/CellSeg1Studio.log)"
+cat <<EOF
+
+Built: $APP
+
+This is the DEV launcher (runs your live source — edit code, relaunch, no rebuild).
+
+Simplest way to run during development (no Gatekeeper, no dialog):
+    bash run_studio.sh
+
+To use the .app from the Dock instead:
+  1. Drag "$APP" into your Dock (or /Applications).
+  2. First launch is blocked by Gatekeeper because it's not signed by Apple
+     ("Apple could not verify..."). Allow it ONCE:
+     System Settings > Privacy & Security > scroll down > "Open Anyway".
+     After that it launches from the Dock like any app.
+
+Logs: ~/Library/Logs/CellSeg1Studio.log
+EOF
