@@ -286,8 +286,26 @@ class ProjectSettingsDialog(QWidget):
             self, "Choose a cover image", "",
             "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff);;All files (*)",
             options=QFileDialog.Option.DontUseNativeDialog)
-        if path:
+        if not path:
+            return
+        from PyQt6.QtGui import QPixmap
+        if QPixmap(path).isNull():   # unreadable → skip the cropper, use as-is
             self._apply_cover("image", "", path)
+            return
+        from studio.image_crop import CropDialog
+        parent = self.parentWidget() or self
+        self._crop_dialog = CropDialog(parent, self._t, path, on_apply=self._apply_cropped_cover)
+        self._crop_dialog.open()
+
+    def _apply_cropped_cover(self, pixmap) -> None:
+        """Persist the chosen region: write the cropped image to a temp PNG and
+        apply it as the cover (ProjectController then copies it into the project
+        folder)."""
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile(prefix="velum_cover_", suffix=".png", delete=False)
+        tmp.close()
+        pixmap.save(tmp.name, "PNG")
+        self._apply_cover("image", "", tmp.name)
 
     def _danger_zone(self) -> QFrame:
         t = self._t

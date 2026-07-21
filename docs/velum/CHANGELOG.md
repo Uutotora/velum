@@ -7,6 +7,24 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-21 — Cover images: Steam-style region picker (crop)
+
+Picking a cover image now opens an image-region picker (`studio/image_crop.py`)
+before it's applied — the Steam-avatar interaction the user asked for: a
+draggable, resizable crop rectangle over the image (8 handles + rule-of-thirds
+guides + a dimmed outside), with **live previews** of how the selection reads as
+a card banner and as a square avatar. "Use image" crops to the chosen region and
+saves that as the cover (written to a temp PNG, then copied into the project by
+`ProjectController.set_cover`). An unreadable file skips the cropper and applies
+as-is; the picker is reusable for any "pick a region of an image" need.
+
+The crop maths (`clamp_crop` / `apply_drag` / `crop_to_source`) are pure
+functions, unit-tested in `studio/tests/test_image_crop.py` alongside Qt
+construction smoke tests. Verified offscreen (dialog with crop frame + dual
+previews). Not verified: real drag interaction.
+
+---
+
 ## 2026-07-21 — Covers/Home fixes + a real Dashboard upgrade
 
 Follow-up to the covers work, from live-app feedback:
