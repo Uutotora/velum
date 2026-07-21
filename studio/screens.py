@@ -1039,8 +1039,13 @@ class ProjectsScreen(QWidget):
         # install_hover_lift() alone; the QSS :hover border-color above still
         # gives real hover feedback without the broken effect.
         lay = QHBoxLayout(row)
-        lay.setContentsMargins(14, 11, 14, 11)
-        lay.setSpacing(14)
+        lay.setContentsMargins(12, 10, 14, 10)
+        lay.setSpacing(13)
+
+        avatar = CoverView(kind=p.cover_kind, color=p.cover_color, image_path=p.cover_image,
+                           project_id=p.id, radius=8, min_size=(42, 42))
+        avatar.setFixedSize(42, 42)
+        lay.addWidget(avatar)
 
         meta = QVBoxLayout()
         meta.setSpacing(2)
