@@ -31,6 +31,7 @@ from studio.components import (
     hline, soft_shadow, label,
 )
 from studio.project_dialogs import ProjectSettingsDialog
+from studio.covers import CoverView
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -128,6 +129,10 @@ class HomeScreen(QWidget):
 
         left = QVBoxLayout()
         left.setSpacing(24)
+        left.addWidget(self._kpis())
+        hero = self._hero()
+        if hero is not None:
+            left.addWidget(hero)
         self._quick_grid = self._quick()
         left.addLayout(self._quick_grid)
         self._recent_widget = self._recent_section()
@@ -151,7 +156,8 @@ class HomeScreen(QWidget):
         the rendered ``when`` string, so it stays stable across visits unless
         the data really moved."""
         return tuple(
-            (p.id, p.updated_at, p.stats.n_images, p.stats.n_cells, p.engine, p.name)
+            (p.id, p.updated_at, p.stats.n_images, p.stats.n_cells, p.engine, p.name,
+             p.cover.kind, p.cover.color, p.cover.image_path)
             for p in self._controller.recent(limit=4)
         )
 
@@ -225,6 +231,114 @@ class HomeScreen(QWidget):
         guarded, and ``getattr`` tolerates the widget having been torn down."""
         for row in getattr(widget, "_rows", ()):  # RRow frames collected below
             install_hover_lift(row)
+
+    # ── KPI row ──────────────────────────────────────────────────────────────
+    def _kpis(self) -> QWidget:
+        t = self._t
+        s = self._controller.home_summary()
+        avg = f"{s.avg_f1:.2f}" if s.avg_f1 is not None else "—"
+        bench_cap = (f"avg over {s.n_benchmarked} benchmarked"
+                     if s.n_benchmarked else "none benchmarked yet")
+        tiles = [
+            ("projects", "primary", str(s.n_projects), "Projects", "in your library"),
+            ("image", "signal", project_controller.format_count(s.n_images), "Images", "across all projects"),
+            ("target", "success", project_controller.format_count(s.n_cells), "Cells detected", "segmented so far"),
+            ("chart", "warning", avg, "Avg F1", bench_cap),
+        ]
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        row = QHBoxLayout(w)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(14)
+        for icon_name, kind, value, cap, sub in tiles:
+            row.addWidget(self._kpi_card(icon_name, kind, value, cap, sub))
+        return w
+
+    def _kpi_card(self, icon_name: str, kind: str, value: str, cap: str, sub: str) -> QFrame:
+        t = self._t
+        colm = {"primary": t["primary"], "signal": t["signal"], "warning": t["warning"], "success": t["success"]}
+        weakm = {"primary": t["primary_weak"], "signal": t["signal_weak"], "warning": t["warning_weak"], "success": t["success_weak"]}
+        card = QFrame()
+        card.setObjectName("KpiCard")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        card.setStyleSheet(f"#KpiCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}")
+        soft_shadow(card, 14, 20, 3)
+        v = QVBoxLayout(card)
+        v.setContentsMargins(15, 14, 15, 14)
+        v.setSpacing(3)
+        badge = QLabel()
+        badge.setFixedSize(30, 30)
+        badge.setPixmap(icons.pixmap(icon_name, colm[kind], 16))
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet(f"background:{weakm[kind]}; border-radius:8px;")
+        v.addWidget(badge)
+        v.addSpacing(4)
+        val = QLabel(value)
+        val.setStyleSheet(f"color:{t['text']}; font-family:{theme.MONO}; font-size:23px; font-weight:600; letter-spacing:-0.5px;")
+        v.addWidget(val)
+        v.addWidget(label(cap.upper(), 10.5, t["text_muted"], 600, 0.3))
+        sub_lbl = label(sub, 11, t["text_muted"])
+        sub_lbl.setWordWrap(True)
+        v.addWidget(sub_lbl)
+        return card
+
+    # ── "pick up where you left off" hero ────────────────────────────────────
+    def _hero(self) -> Optional[QWidget]:
+        """A big card for the most-recently-touched project — cover, identity,
+        progress, and honest actions (Open project / Segment / Dashboard).
+        Returns None on an empty library (nothing to continue)."""
+        recent = self._controller.recent(limit=1)
+        if not recent:
+            return None
+        t = self._t
+        p = project_controller.to_card(recent[0])
+        pid = p.id
+        card = QFrame()
+        card.setObjectName("HeroCard")
+        card.setCursor(Qt.CursorShape.PointingHandCursor)
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        card.setStyleSheet(
+            f"#HeroCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}"
+            f"#HeroCard:hover{{border-color:{t['border_strong']};}}")
+        install_hover_lift(card, base=(14, 22, 3), hover=(22, 34, 6))
+        row = QHBoxLayout(card)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+
+        cover = CoverView(kind=p.cover_kind, color=p.cover_color, image_path=p.cover_image,
+                          project_id=pid, radius=14, min_size=(190, 150))
+        cover.setFixedWidth(190)
+        row.addWidget(cover)
+
+        body = QFrame()
+        body.setStyleSheet("background:transparent;")
+        bv = QVBoxLayout(body)
+        bv.setContentsMargins(22, 20, 22, 20)
+        bv.setSpacing(3)
+        bv.addWidget(label("PICK UP WHERE YOU LEFT OFF", 10.5, t["primary"], 700, 0.5))
+        bv.addWidget(label(p.name, 19, t["text"], 700, -0.3))
+        meta = f"{p.engine_label} · {p.n_images} images · {p.n_cells} cells · {p.when}"
+        bv.addWidget(label(meta, 12.5, t["text_muted"]))
+        bv.addSpacing(4)
+        f1_txt = f" · F1 {p.f1}" if p.f1 else ""
+        bv.addWidget(label(f"{p.progress}% segmented{f1_txt}", 12, t["text_subtle"], 600))
+        bv.addSpacing(14)
+        actions = QHBoxLayout()
+        actions.setSpacing(9)
+        open_btn = PillButton("Open project", t, "primary", "workspace", small=True)
+        open_btn.clicked.connect(lambda _=False, i=pid: self._open(i))
+        seg_btn = PillButton("Segment images", t, "ghost", "brush", small=True)
+        seg_btn.clicked.connect(lambda _=False, i=pid: self._open(i))
+        dash_btn = PillButton("Dashboard", t, "ghost", "dashboard", small=True)
+        dash_btn.clicked.connect(lambda: self._nav("dashboard"))
+        actions.addWidget(open_btn)
+        actions.addWidget(seg_btn)
+        actions.addWidget(dash_btn)
+        actions.addStretch(1)
+        bv.addLayout(actions)
+        row.addWidget(body, 1)
+        card.mouseReleaseEvent = lambda e, i=pid: self._open(i)
+        return card
 
     def _quick(self) -> QGridLayout:
         t = self._t
@@ -321,8 +435,12 @@ class HomeScreen(QWidget):
         if with_hover:
             install_hover_lift(row)
         lay = QHBoxLayout(row)
-        lay.setContentsMargins(14, 11, 14, 11)
-        lay.setSpacing(14)
+        lay.setContentsMargins(12, 10, 14, 10)
+        lay.setSpacing(13)
+        avatar = CoverView(kind=p.cover_kind, color=p.cover_color, image_path=p.cover_image,
+                           project_id=p.id, radius=8, min_size=(42, 42))
+        avatar.setFixedSize(42, 42)
+        lay.addWidget(avatar)
         meta = QVBoxLayout()
         meta.setSpacing(2)
         meta.addWidget(label(p.name, 13.5, t["text"], 600))
@@ -658,8 +776,15 @@ class ProjectsScreen(QWidget):
         self._active_dialog = ProjectSettingsDialog(
             self, self._t, project,
             on_saved=lambda name, desc: self._save_settings(project_id, name, desc),
+            on_cover=lambda kind, color, image: self._set_cover(project_id, kind, color, image),
             on_delete=lambda: self._delete_project(project_id, project.name))
         self._active_dialog.open()
+
+    def _set_cover(self, project_id: str, kind: str, color: str, image_path: str) -> None:
+        """Apply a project's chosen cover immediately (Notion-style — no Save
+        step) and re-render the grid so the new banner shows at once."""
+        self._controller.set_cover(project_id, kind=kind, color=color, image_path=image_path)
+        self.refresh()
 
     def _save_settings(self, project_id: str, name: str, description: str) -> None:
         self._controller.rename_project(project_id, name)
@@ -725,16 +850,13 @@ class ProjectsScreen(QWidget):
         self._list_host.setVisible(self._view == "list")
 
     def _card(self, p: "project_controller.ProjectCard") -> QFrame:
-        """A clean, text-only card -- no thumbnail/cover art. Matches Label
-        Studio's own project card (reference screenshots supplied by the
-        product owner): identity + stats + a footer, nothing decorative.
-        The earlier version had a live-painted "nuclei art" cover; removed
-        entirely (not hidden behind a flag -- genuinely not wanted), which
-        also removes the single most expensive thing this grid used to
-        repaint on every scroll frame (on top of the NucleiView caching and
-        eased-wheel-scroll work already done -- this is the rest of that
-        same performance story, and the more important half of it).
-        """
+        """A project card with a user-chosen **cover** banner (colour / image /
+        auto tint — see ``studio/covers.py``) that gives each project a distinct
+        visual identity, over a clean Label-Studio-style body (identity, stats,
+        footer). The cover is set in Project Settings; a project with none picked
+        gets a deterministic per-id tint, so the whole library reads distinct for
+        free. ``CoverView`` caches its render, so this stays cheap to scroll —
+        the perf lesson behind the earlier always-on nuclei art's removal."""
         t = self._t
         card = QFrame()
         card.setObjectName("PCard")
@@ -744,15 +866,34 @@ class ProjectsScreen(QWidget):
             f"#PCard{{background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px;}}"
             f"#PCard:hover{{border-color:{t['border_strong']};}}")
         install_hover_lift(card, base=(14, 22, 3), hover=(22, 34, 6))
-        b = QVBoxLayout(card)
-        b.setContentsMargins(16, 16, 16, 16)
+        outer = QVBoxLayout(card)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # ── cover banner (engine identity overlaid) ──────────────────────────
+        cover = CoverView(kind=p.cover_kind, color=p.cover_color, image_path=p.cover_image,
+                          project_id=p.id, radius=14, top_only=True, min_size=(120, 74))
+        cover.setFixedHeight(74)
+        cov_lay = QVBoxLayout(cover)
+        cov_lay.setContentsMargins(12, 10, 12, 10)
+        cov_lay.addStretch(1)
+        eng_row = QHBoxLayout()
+        eng = EngineChip(p.engine_label, _ENGINE_DOT.get(p.engine_key, theme.VIZ[0]),
+                        bg="rgba(0,0,0,0.40)", fg="#eef0f6", border="transparent")
+        eng_row.addWidget(eng)
+        eng_row.addStretch(1)
+        cov_lay.addLayout(eng_row)
+        outer.addWidget(cover)
+
+        content = QFrame()
+        content.setStyleSheet("background:transparent;")
+        b = QVBoxLayout(content)
+        b.setContentsMargins(16, 14, 16, 16)
         b.setSpacing(3)
+        outer.addWidget(content)
 
         head = QHBoxLayout()
         head.setSpacing(8)
-        eng = EngineChip(p.engine_label, _ENGINE_DOT.get(p.engine_key, theme.VIZ[0]),
-                        bg=t["surface2"], fg=t["text_subtle"], border=t["border"])
-        head.addWidget(eng)
         head.addStretch(1)
         star = IconButton("star", t, 26, "Favourite",
                            on_click=lambda pid=p.id: self._toggle_favorite(pid))
@@ -762,9 +903,10 @@ class ProjectsScreen(QWidget):
         more.clicked.connect(lambda _=False, w=more, pid=p.id, name=p.name: self._open_card_menu(w, pid, name))
         head.addWidget(more)
         b.addLayout(head)
-        b.addSpacing(6)
 
-        b.addWidget(label(p.name, 14.5, t["text"], 600, -0.2))
+        name_lbl = label(p.name, 14.5, t["text"], 600, -0.2)
+        name_lbl.setObjectName("PCardName")  # found by name in tests, not by brittle layout index
+        b.addWidget(name_lbl)
         desc = label(p.description, 12, t["text_muted"])
         desc.setWordWrap(True)
         desc.setFixedHeight(34)
@@ -819,10 +961,10 @@ class ProjectsScreen(QWidget):
         card = QFrame()
         card.setObjectName("Ghost")
         card.setCursor(Qt.CursorShape.PointingHandCursor)
-        # Matches a real card's own height (measured: 265px with tags, now
-        # that cards are cover-art-free and shorter) so the grid's last
-        # (ghost) cell doesn't stand out as a visibly different size.
-        card.setMinimumHeight(265)
+        # Matches a real card's own height (the 74px cover banner plus the
+        # text body) so the grid's last (ghost) cell doesn't stand out as a
+        # visibly different size.
+        card.setMinimumHeight(339)
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         card.setStyleSheet(
             f"#Ghost{{background:transparent; border:1px dashed {t['border_strong']}; border-radius:14px;}}"

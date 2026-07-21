@@ -317,3 +317,44 @@ def test_import_images_is_idempotent_for_already_stored_paths(tmp_path):
     twice = store.import_images(proj.id, once)  # re-importing our own copy
     assert twice == once  # no copy-of-a-copy
     assert len(list(store.image_dir(proj.id).glob("*.png"))) == 1
+
+
+# ── ProjectCover ──────────────────────────────────────────────────────────────
+def test_project_cover_defaults_to_auto():
+    from studio.project import ProjectCover
+    c = ProjectCover()
+    assert c.kind == "auto" and c.color == "" and c.image_path == ""
+
+
+def test_project_cover_round_trips_through_project(tmp_path):
+    from studio.project import ProjectCover
+    store = ProjectStore(tmp_path)
+    p = store.create("Covered")
+    p.cover = ProjectCover(kind="color", color="#6d87f1")
+    store.save(p)
+    reloaded = store.load(p.id)
+    assert reloaded.cover.kind == "color"
+    assert reloaded.cover.color == "#6d87f1"
+
+
+def test_project_cover_image_round_trips(tmp_path):
+    from studio.project import ProjectCover
+    store = ProjectStore(tmp_path)
+    p = store.create("Img")
+    p.cover = ProjectCover(kind="image", image_path="/tmp/cover.png")
+    store.save(p)
+    assert store.load(p.id).cover.image_path == "/tmp/cover.png"
+
+
+def test_project_without_cover_key_loads_as_auto():
+    """Backward compatibility: a project file written before covers existed
+    (no ``cover`` key) must load with the default auto cover, not crash."""
+    data = {"id": "old", "name": "Old", "settings": {}, "stats": {}}
+    p = Project.from_dict(data)
+    assert p.cover.kind == "auto"
+
+
+def test_project_to_dict_includes_cover():
+    p = Project(id="x", name="X")
+    assert "cover" in p.to_dict()
+    assert p.to_dict()["cover"]["kind"] == "auto"

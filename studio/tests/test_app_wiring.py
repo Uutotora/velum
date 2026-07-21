@@ -332,6 +332,7 @@ def test_projects_screen_sort_by_name_reorders_the_grid(app, controller):
     checks the actual built grid, not just the controller call underneath
     it (that algorithm is already covered in test_project_controller.py).
     """
+    from PyQt6.QtWidgets import QLabel
     scr = _projects_screen(controller)
     scr._on_sort_changed("Name (A–Z)")
     assert scr._sort == "name"
@@ -340,10 +341,10 @@ def test_projects_screen_sort_by_name_reorders_the_grid(app, controller):
     shown_names = []
     for i in range(len(expected_names)):
         card = scr._grid.itemAtPosition(i // 3, i % 3).widget()
-        # card's own layout: [0]=header row (engine chip/star/more), [1]=a
-        # spacing item, [2]=the name label (_card()'s construction order) --
-        # verified directly against a real card before trusting this here.
-        name_label = card.layout().itemAt(2).widget()
+        # The name label carries objectName "PCardName" (set in _card) so this
+        # finds it robustly, independent of the card's internal layout — which
+        # now nests the body under a cover banner (studio/covers.py).
+        name_label = card.findChild(QLabel, "PCardName")
         shown_names.append(name_label.text())
     assert shown_names == expected_names
 

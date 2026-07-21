@@ -281,3 +281,63 @@ def test_delete_project_leaves_other_active_project_untouched(store):
     ctrl.set_active(a.id)
     ctrl.delete_project(b.id)
     assert ctrl.get_active().id == a.id
+
+
+# ── covers + home summary ─────────────────────────────────────────────────────
+def test_to_card_includes_cover_fields(store):
+    from studio.project import ProjectCover
+    ctrl = ProjectController(store, seed_if_empty=False)
+    p = store.create("Covered")
+    p.cover = ProjectCover(kind="color", color="#2bd4c0")
+    store.save(p)
+    card = to_card(store.load(p.id))
+    assert card.cover_kind == "color"
+    assert card.cover_color == "#2bd4c0"
+    assert card.cover_image == ""
+
+
+def test_set_cover_persists_choice(store):
+    ctrl = ProjectController(store, seed_if_empty=False)
+    p = store.create("P")
+    ctrl.set_cover(p.id, kind="color", color="#e0982f")
+    reloaded = store.load(p.id)
+    assert reloaded.cover.kind == "color"
+    assert reloaded.cover.color == "#e0982f"
+
+
+def test_set_cover_rejects_unknown_kind(store):
+    ctrl = ProjectController(store, seed_if_empty=False)
+    p = store.create("P")
+    ctrl.set_cover(p.id, kind="bogus", color="#fff")
+    assert store.load(p.id).cover.kind == "auto"
+
+
+def test_set_cover_image_path(store):
+    ctrl = ProjectController(store, seed_if_empty=False)
+    p = store.create("P")
+    ctrl.set_cover(p.id, kind="image", image_path="/x/y.png")
+    reloaded = store.load(p.id)
+    assert reloaded.cover.kind == "image"
+    assert reloaded.cover.image_path == "/x/y.png"
+
+
+def test_home_summary_aggregates_across_projects(store):
+    ctrl = ProjectController(store, seed_if_empty=False)
+    a = store.create("A"); a.stats.n_images = 10; a.stats.n_cells = 100; a.stats.last_f1 = 0.90
+    store.save(a)
+    b = store.create("B"); b.stats.n_images = 5; b.stats.n_cells = 50; b.stats.last_f1 = 0.80
+    store.save(b)
+    c = store.create("C"); c.stats.n_images = 2; c.stats.n_cells = 20  # unbenchmarked
+    store.save(c)
+    s = ctrl.home_summary()
+    assert s.n_projects == 3
+    assert s.n_images == 17
+    assert s.n_cells == 170
+    assert s.n_benchmarked == 2
+    assert abs(s.avg_f1 - 0.85) < 1e-9
+
+
+def test_home_summary_empty_library(store):
+    ctrl = ProjectController(store, seed_if_empty=False)
+    s = ctrl.home_summary()
+    assert s.n_projects == 0 and s.n_cells == 0 and s.avg_f1 is None
