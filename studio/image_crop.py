@@ -230,6 +230,10 @@ class CropDialog(QWidget):
         t = self._t
         panel = QFrame()
         panel.setObjectName("CropPanel")
+        # Fixed width so the modal is a compact centred card (matching the other
+        # dialogs) instead of stretching to the whole window — the canvas maxes
+        # at 460 + 22px margins, so this fits it snugly.
+        panel.setFixedWidth(508)
         panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         panel.setStyleSheet(
             f"QFrame#CropPanel{{background:{t['surface']}; border:1px solid {t['border_strong']};"
