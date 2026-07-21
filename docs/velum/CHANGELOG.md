@@ -7,6 +7,31 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-22 — Settings polish: title-bar entry, no-reflow scroll, smoother overlays
+
+Follow-up to the Settings/Assistant work, from live-app feedback:
+- **Settings moved out of the Tools nav.** It's now reached from a **title-bar
+  icon** (next to the light/dark toggle, `window_chrome.TitleBar`) and a
+  **sidebar-footer** item next to Guide & Docs / Appearance (`components.Sidebar`,
+  registered in `_items` so it highlights while active). Removed from the
+  `_NAV` Tools list.
+- **No more scroll-reflow.** Page scroll areas (`screens.scroll`) now reserve the
+  vertical-scrollbar gutter permanently (`ScrollBarAlwaysOn`); `SmoothScrollArea`
+  hides the handle when there's nothing to scroll. Opening/expanding something no
+  longer makes a scrollbar pop in and shrink/resize the whole page.
+- **Smoother overlay open.** The Assistant drawer / Logs console now fade in
+  (150 ms opacity) instead of a geometry *slide* — the slide read as janky and
+  briefly overlapped content mid-travel. (`motion.slide_in` kept but unused.)
+- **Toast fixed.** Dropped the 3px green `border-left` accent (a partial coloured
+  edge with a plain border on the other three sides looked unfinished); the frame
+  is now an even 1px border, the green check badge alone signals success.
+
+Verified: full `studio/` suite green; offscreen screenshots of the title bar +
+sidebar footer, the toast, and a scrollable vs. short Settings section (content
+width identical → no reflow). Not verified: real GUI interaction.
+
+---
+
 ## 2026-07-22 — Settings screen + a redesigned, chat-only Assistant
 
 Reworked the Assistant into something that reads like a finished product, and

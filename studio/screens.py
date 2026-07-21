@@ -67,6 +67,10 @@ def scroll(inner: QWidget) -> QScrollArea:
     sa.setWidgetResizable(True)
     sa.setFrameShape(QFrame.Shape.NoFrame)
     sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    # AlwaysOn reserves the scrollbar gutter permanently so the page never
+    # reflows/resizes the moment content grows past the viewport (SmoothScrollArea
+    # hides the handle when there's nothing to scroll -- see its _sync_gutter).
+    sa.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
     sa.setWidget(inner)
     return sa
 

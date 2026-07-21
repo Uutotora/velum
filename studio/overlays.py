@@ -685,9 +685,14 @@ class Toast(QFrame):
         super().__init__(parent)
         self._t = t
         self.setObjectName("Toast")   # qualified -- see AssistantDrawer's comment
+        # A single, even 1px border all the way round -- no partial coloured
+        # accent bar on one edge (a 3px green border-left, with a plain border
+        # on the other three, read as unfinished: "либо полностью обводишь
+        # зелёным либо вообще не обводишь"). The green check badge already
+        # signals success; the frame stays neutral.
         self.setStyleSheet(
             f"QFrame#Toast{{background:{t['surface']}; border:1px solid {t['border']};"
-            f"border-left:3px solid {t['success']}; border-radius:11px;}}")
+            f" border-radius:11px;}}")
         row = QHBoxLayout(self)
         row.setContentsMargins(15, 12, 15, 12)
         row.setSpacing(12)

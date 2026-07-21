@@ -78,8 +78,10 @@ _NAV = [
     ("dashboard", "dashboard", "Dashboard",      "Current project"),
     ("assistant", "assistant", "Assistant",      "Tools"),
     ("logs",      "log",       "Logs",           "Tools"),
-    ("settings",  "settings",  "Settings",       "Tools"),
 ]
+# "settings" is a real stack screen too, but it's reached from the sidebar
+# *footer* (built inside Sidebar, next to Guide & Docs / Appearance) and a
+# title-bar icon — not from the Tools nav list above.
 _STACK_KEYS = ("home", "projects", "workspace", "train", "dashboard", "settings", "guide")
 
 
@@ -187,7 +189,8 @@ class StudioWindow(QMainWindow):
         outer.setSpacing(0)
         self.setCentralWidget(central)
 
-        outer.addWidget(TitleBar(self, t, on_toggle_theme=self.toggle_theme))
+        outer.addWidget(TitleBar(self, t, on_toggle_theme=self.toggle_theme,
+                                 on_open_settings=lambda: self.navigate("settings")))
 
         body = QWidget()
         row = QHBoxLayout(body)
@@ -298,29 +301,17 @@ class StudioWindow(QMainWindow):
         if not drawer.isHidden():
             drawer.hide()
         else:
+            # A short, even opacity fade — never a geometry slide. The old
+            # slide animated the whole panel's `geometry` across the window
+            # every frame, which read as janky ("очень не плавное") and, for
+            # the right-anchored drawer, momentarily overlapped content
+            # mid-travel. A fade lands the panel at its final place instantly
+            # and only eases its opacity, which is always smooth.
             drawer.place()
-            end_geom = drawer.geometry()
-            # Slide in from whichever edge this overlay is anchored to
-            # (AssistantDrawer: the right edge; LogsConsole: the bottom) —
-            # a real product cue instead of an instant pop-in. Both overlays'
-            # *right* edge touches the window's right edge (LogsConsole
-            # spans full remaining width too, not just AssistantDrawer), so
-            # "which edge does it touch" doesn't disambiguate them — compare
-            # which dimension dominates instead: a right-anchored vertical
-            # panel is tall relative to the window's height (its width is
-            # comparatively narrow); a bottom-anchored horizontal one is
-            # wide relative to the window's width (its height is narrow).
-            height_frac = end_geom.height() / max(1, self.height())
-            width_frac = end_geom.width() / max(1, self.width())
-            if height_frac >= width_frac:
-                start_geom = end_geom.translated(end_geom.width(), 0)   # slide in from the right
-            else:
-                start_geom = end_geom.translated(0, end_geom.height())  # slide up from the bottom
-            drawer.setGeometry(start_geom)
             drawer.show()
             drawer.raise_()
-            from studio.motion import slide_in
-            slide_in(drawer, start_geom, end_geom)
+            from studio.motion import fade_in
+            fade_in(drawer, 150)
 
     def _toggle_palette(self) -> None:
         if not self._palette.isHidden():
