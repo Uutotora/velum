@@ -155,6 +155,20 @@ class StudioWindow(QMainWindow):
         # full UI teardown/rebuild the same way _projects/_train/_segment do,
         # so a chosen backend/model/API key isn't lost on a theme switch.
         self._assistant_controller = assistant_controller or AssistantController()
+        # Ship a ready-made, fully-segmented demo project so the flagship
+        # Segment workspace is never an empty canvas on a fresh install / demo
+        # machine -- the product's core value (image → labelled instances →
+        # morphometry → F1) is visible with zero setup. Best-effort: a failure
+        # here (no cv2, read-only store) must never block the app from
+        # starting, so it only logs. Idempotent after the first launch.
+        #
+        # Only for the real app's own default store: when a caller injects its
+        # own project_controller (every test does, against a tmp_path store),
+        # we leave its store exactly as given -- never seed surprise data into
+        # a controlled fixture, and never write into the real data_store from a
+        # test that only injected some of the controllers.
+        self._sample_project_id = (
+            self._ensure_sample_project() if project_controller is None else None)
         self._screens: dict[str, QWidget] = {}
         self.setWindowTitle("Velum")
         self.resize(1320, 860)
@@ -227,7 +241,8 @@ class StudioWindow(QMainWindow):
             "workspace": WorkspaceScreen(t, self._segment, self._projects, self._toast.announce,
                                         on_toggle_logs=lambda: self._toggle_drawer(self._logs),
                                         on_navigate=self.navigate,
-                                        on_new_project=self._new_project_dialog.open),
+                                        on_new_project=self._new_project_dialog.open,
+                                        on_open_sample=self._cmd_open_sample),
             "train": ModelsScreen(t, self._train, self._projects, self._toast.announce),
             "dashboard": DashboardScreen(t, self._train, self._projects, self._toast.announce),
             "settings": SettingsScreen(t, self._assistant_controller, self._toast.announce),
@@ -471,7 +486,26 @@ class StudioWindow(QMainWindow):
         self._screens["settings"].focus_provider(self._assistant_controller.settings.active)
         self.navigate("settings")
 
+    def _ensure_sample_project(self) -> Optional[str]:
+        """Create (once) the bundled fully-segmented demo project; return its
+        id, or ``None`` if it couldn't be built. Never raises -- app startup
+        must not depend on it."""
+        try:
+            from studio.sample_data import ensure_sample_project
+            return ensure_sample_project(self._projects.store, self._segment)
+        except Exception:
+            _log.warning("sample project unavailable", exc_info=True)
+            return None
+
     def _cmd_open_sample(self) -> None:
+        # Prefer the purpose-built, always-segmented sample so "Open Sample"
+        # lands on the hero experience (image + instances + real F1), not just
+        # whichever project happens to be first. Rebuild it if it was deleted.
+        sid = self._sample_project_id or self._ensure_sample_project()
+        if sid and self._projects.store.exists(sid):
+            self._sample_project_id = sid
+            self._open_project(sid)
+            return
         projects = self._projects.list_projects()
         if projects:
             self._open_project(projects[0].id)

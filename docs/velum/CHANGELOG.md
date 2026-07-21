@@ -7,6 +7,41 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-22 — Bundled "Sample — Fluorescence Nuclei" demo project (the hero moment)
+
+The flagship Segment workspace used to open onto an empty canvas ("No image
+loaded") on a fresh install or a demo machine — the one screen that should
+sell the product showed nothing, and the stored projects pointed at images
+that don't exist on another computer. Fixed by shipping a ready-made,
+**already-segmented** demo project, so the core loop (image → labelled
+instances → morphometry → F1 vs ground truth) is visible with zero setup, no
+SAM weights and no network.
+
+- **`studio/sample_data.py`** — deterministically synthesises a realistic
+  DAPI-style nuclei field (~190 instances, Poisson-disc placement, soft
+  elliptical Gaussian blobs over an organic background + vignette + sensor
+  noise) **and** the matching instance mask + a perturbed "engine result"
+  (a few honest misses/merges so the F1 lands at ~0.94, never a fake 1.0).
+  Pure `numpy` so it imports and unit-tests in the light CI group.
+- **`ensure_sample_project(store, controller)`** — idempotently creates the
+  project + writes the image, a ground-truth sibling, and the precomputed
+  result mask where the workspace loads it back. Called best-effort at
+  `StudioWindow` startup (never blocks the app if it fails).
+- **Entry points wired to the sample:** the Segment empty-state gains an
+  **"Explore the sample dataset"** button; Home's *Open Sample* card and the
+  ⌘K *Open Sample* command now land on this project specifically, not
+  whichever project happened to sort first.
+
+Result: opening the sample shows a densely-labelled field — "179 detected",
+per-instance colours, median Ø / mean area / coverage, and **F1 0.94 /
+Precision 0.94** against ground truth — the product's value at a glance.
+
+Verified: 8 new tests (`test_sample_data.py`, pure-synth always-on + a
+cv2-guarded wiring pair); full `studio/` suite green; offscreen screenshots
+(dark) of the workspace opened on the sample, the Results tab, and the new
+empty-state CTA. **Not** verified here: live GUI interaction, real model
+inference (the sample deliberately needs neither).
+
 ## 2026-07-22 — Settings polish: title-bar entry, no-reflow scroll, smoother overlays
 
 Follow-up to the Settings/Assistant work, from live-app feedback:

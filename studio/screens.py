@@ -386,6 +386,15 @@ class HomeScreen(QWidget):
         return g
 
     def _open_sample(self) -> None:
+        # Prefer the purpose-built, already-segmented sample so this lands on
+        # the hero experience, not just whichever project sorts first.
+        try:
+            from studio.sample_data import SAMPLE_PROJECT_ID
+            if self._controller.store.exists(SAMPLE_PROJECT_ID):
+                self._open(SAMPLE_PROJECT_ID)
+                return
+        except Exception:
+            pass
         projects = self._controller.list_projects()
         if projects:
             self._open(projects[0].id)
