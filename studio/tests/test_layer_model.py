@@ -73,7 +73,7 @@ def test_labels_layer_defaults_match_classic_app_fill_plus_outline():
     Our own canvas renders both from a single LabelsLayer instead — these
     are the values that reproduce that exact look by default."""
     layer = LabelsLayer("Segmentation", np.zeros((10, 10), dtype=np.int32))
-    assert layer.contour == 2  # thicker than cellseg1_core's 1px — see the field's own comment
+    assert layer.contour == 2  # thicker than velum_core's 1px — see the field's own comment
     assert layer.fill_opacity == 0.35
 
 

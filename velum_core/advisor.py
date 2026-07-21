@@ -270,7 +270,7 @@ def build_live_message(diag: dict[str, Any], params: dict[str, Any]) -> str:
 def build_tuning_prompt(diag: dict[str, Any], params: dict[str, Any],
                         trajectory: list[Any]) -> str:
     """Prompt for the agentic tuning loop's LLM-driven strategy
-    (:func:`cellseg1_core.tuning_loop.llm_propose_fn`): like
+    (:func:`velum_core.tuning_loop.llm_propose_fn`): like
     :func:`build_context_prompt`, but framed as one round of an autonomous
     tuning session with the score trajectory so far, so the model reasons
     about what it already tried instead of re-suggesting the same thing

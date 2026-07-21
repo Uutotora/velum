@@ -1,4 +1,4 @@
-"""Pure-logic tests for multi-channel microscopy support (cellseg1_core.channels).
+"""Pure-logic tests for multi-channel microscopy support (velum_core.channels).
 
 No torch/napari/GPU — runs in the lightweight CI job. Multi-page and OME-TIFF
 reading is exercised through tifffile round-trips on synthetic stacks.
@@ -9,7 +9,7 @@ import types
 import numpy as np
 import pytest
 
-from cellseg1_core import channels as ch
+from velum_core import channels as ch
 
 
 # ── canonicalisation ────────────────────────────────────────────────────────
@@ -486,7 +486,7 @@ class _FakeLifImage:
 def _install_fake_readlif(monkeypatch, img):
     # __import__("readlif.reader") returns the *top* package ("readlif"), so
     # LifFile must live there, not on the "readlif.reader" submodule object —
-    # matches cellseg1_core.channels._require's exact import mechanism.
+    # matches velum_core.channels._require's exact import mechanism.
     parent = types.ModuleType("readlif")
     parent.LifFile = lambda path: types.SimpleNamespace(get_image=lambda idx: img)
     submod = types.ModuleType("readlif.reader")

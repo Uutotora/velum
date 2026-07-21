@@ -1,4 +1,4 @@
-"""Unit tests for cellseg1_core.advisor (the deterministic diagnostic engine).
+"""Unit tests for velum_core.advisor (the deterministic diagnostic engine).
 
 The LLM/Ollama bridge is intentionally not exercised here (it depends on an
 external service). We pin the offline diagnostic engine, which is what makes
@@ -6,7 +6,7 @@ the Assistant useful even with no model running.
 """
 import numpy as np
 
-from cellseg1_core.advisor import (
+from velum_core.advisor import (
     diagnose,
     findings_to_text,
     image_stats,

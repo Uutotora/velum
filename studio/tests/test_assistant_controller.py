@@ -115,7 +115,7 @@ def test_backend_ready_custom_needs_base_url_and_model(tmp_path):
     assert c.backend_ready() is True
 
 
-# ── diagnostics passthrough (reuses the real cellseg1_core.advisor engine) ───────
+# ── diagnostics passthrough (reuses the real velum_core.advisor engine) ───────
 
 def test_diagnose_without_mask_prompts_to_predict(tmp_path):
     c = ac.AssistantController(storage_dir=tmp_path)
@@ -275,8 +275,8 @@ def test_refresh_status_offline_is_synchronous_and_always_ok(tmp_path):
 def test_refresh_status_ollama_reports_reachable_and_models(tmp_path, monkeypatch):
     c = ac.AssistantController(storage_dir=tmp_path)
     c.settings.backend = "ollama"
-    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: True)
-    monkeypatch.setattr("cellseg1_core.advisor.ollama_models", lambda: ["a", "b"])
+    monkeypatch.setattr("velum_core.advisor.ollama_available", lambda: True)
+    monkeypatch.setattr("velum_core.advisor.ollama_models", lambda: ["a", "b"])
     results = []
     t = c.refresh_status_async(on_result=lambda ok, msg, models: results.append((ok, msg, models)))
     t.join(timeout=5)
@@ -287,7 +287,7 @@ def test_refresh_status_ollama_reports_reachable_and_models(tmp_path, monkeypatc
 def test_refresh_status_ollama_unreachable(tmp_path, monkeypatch):
     c = ac.AssistantController(storage_dir=tmp_path)
     c.settings.backend = "ollama"
-    monkeypatch.setattr("cellseg1_core.advisor.ollama_available", lambda: False)
+    monkeypatch.setattr("velum_core.advisor.ollama_available", lambda: False)
     results = []
     t = c.refresh_status_async(on_result=lambda ok, msg, models: results.append((ok, msg, models)))
     t.join(timeout=5)
@@ -312,7 +312,7 @@ def _diag_and_params():
     mask = np.zeros((60, 60), dtype=np.int32)
     params = {"points_per_side": 32, "pred_iou_thresh": 0.8, "stability_score_thresh": 0.6,
              "box_nms_thresh": 0.05, "min_mask_area": 20, "resize_size": 512}
-    from cellseg1_core import advisor
+    from velum_core import advisor
     return advisor.diagnose(img, mask, params), params
 
 
@@ -353,7 +353,7 @@ def test_send_async_ollama_streams_and_builds_system_prompt(tmp_path, monkeypatc
         on_token(" there")
         return "Hi there"
 
-    monkeypatch.setattr("cellseg1_core.advisor.ollama_chat", fake_ollama_chat)
+    monkeypatch.setattr("velum_core.advisor.ollama_chat", fake_ollama_chat)
 
     tokens, done = [], []
     thread = c.send_async([], "why merged?", diag, params, on_token=tokens.append,
@@ -379,7 +379,7 @@ def test_send_async_ollama_agent_model_skips_system_prompt(tmp_path, monkeypatch
         captured["messages"] = messages
         return "ok"
 
-    monkeypatch.setattr("cellseg1_core.advisor.ollama_chat", fake_ollama_chat)
+    monkeypatch.setattr("velum_core.advisor.ollama_chat", fake_ollama_chat)
     thread = c.send_async([], "why merged?", diag, params, on_token=lambda t: None,
                           on_done=lambda t: None, on_error=lambda e: pytest.fail(e))
     thread.join(timeout=5)
@@ -422,7 +422,7 @@ def test_send_async_reports_errors_via_on_error(tmp_path, monkeypatch):
     def fake_ollama_chat(*a, **k):
         raise RuntimeError("connection reset")
 
-    monkeypatch.setattr("cellseg1_core.advisor.ollama_chat", fake_ollama_chat)
+    monkeypatch.setattr("velum_core.advisor.ollama_chat", fake_ollama_chat)
     errors = []
     thread = c.send_async([], "hi", diag, params, on_token=lambda t: None,
                           on_done=lambda t: pytest.fail("on_done should not fire"),
@@ -442,7 +442,7 @@ def test_chat_busy_true_during_send_then_false(tmp_path, monkeypatch):
         release.wait(timeout=5)
         return "done"
 
-    monkeypatch.setattr("cellseg1_core.advisor.ollama_chat", fake_ollama_chat)
+    monkeypatch.setattr("velum_core.advisor.ollama_chat", fake_ollama_chat)
     assert c.chat_busy() is False
     thread = c.send_async([], "hi", diag, params, on_token=lambda t: None,
                           on_done=lambda t: None, on_error=lambda e: None)
@@ -465,7 +465,7 @@ def test_stop_chat_lets_a_running_backend_bail_out_early(tmp_path, monkeypatch):
             time.sleep(0.01)
         return "stopped early"
 
-    monkeypatch.setattr("cellseg1_core.advisor.ollama_chat", fake_ollama_chat)
+    monkeypatch.setattr("velum_core.advisor.ollama_chat", fake_ollama_chat)
     done = []
     thread = c.send_async([], "hi", diag, params, on_token=lambda t: None,
                           on_done=done.append, on_error=lambda e: None)
@@ -485,7 +485,7 @@ def test_pull_ollama_model_async_reports_progress_and_completion(tmp_path, monke
         on_progress("done", 1.0)
         return True
 
-    monkeypatch.setattr("cellseg1_core.advisor.ollama_pull", fake_pull)
+    monkeypatch.setattr("velum_core.advisor.ollama_pull", fake_pull)
     progress, done = [], []
     thread = c.pull_ollama_model_async("llama3.2:3b", on_progress=lambda s, f: progress.append((s, f)),
                                        on_done=lambda n, ok: done.append((n, ok)))
@@ -502,7 +502,7 @@ def test_model_op_busy_blocks_a_second_concurrent_pull(tmp_path, monkeypatch):
         release.wait(timeout=5)
         return True
 
-    monkeypatch.setattr("cellseg1_core.advisor.ollama_pull", fake_pull)
+    monkeypatch.setattr("velum_core.advisor.ollama_pull", fake_pull)
     first = c.pull_ollama_model_async("a", on_progress=lambda s, f: None, on_done=lambda n, ok: None)
     assert c.model_op_busy() is True
     second = c.pull_ollama_model_async("b", on_progress=lambda s, f: None, on_done=lambda n, ok: None)
@@ -519,7 +519,7 @@ def test_create_agent_async_reports_status_and_completion(tmp_path, monkeypatch)
         on_status("baking…")
         return True
 
-    monkeypatch.setattr("cellseg1_core.advisor.ollama_create_agent", fake_create)
+    monkeypatch.setattr("velum_core.advisor.ollama_create_agent", fake_create)
     statuses, done = [], []
     thread = c.create_agent_async("qwen2.5:7b", on_status=statuses.append, on_done=done.append)
     thread.join(timeout=5)
@@ -529,6 +529,6 @@ def test_create_agent_async_reports_status_and_completion(tmp_path, monkeypatch)
 
 def test_recommended_models_and_agent_model_name_expose_the_real_advisor_data(tmp_path):
     c = ac.AssistantController(storage_dir=tmp_path)
-    from cellseg1_core import advisor
+    from velum_core import advisor
     assert c.recommended_models == advisor.RECOMMENDED_MODELS
     assert c.agent_model_name == advisor.AGENT_MODEL_NAME

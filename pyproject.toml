@@ -25,7 +25,7 @@ classifiers = [
 # permissive; exact known-good pins live in requirements.txt (the lock).
 # NOTE: napari itself is no longer a dependency — Studio has its own Qt canvas
 # and layer model (studio/canvas.py, studio/layer_model.py) and imports nothing
-# from napari. The ML core lives in cellseg1_core/ (engine-agnostic, Qt-free).
+# from napari. The ML core lives in velum_core/ (engine-agnostic, Qt-free).
 dependencies = [
     "torch>=2.1",
     "torchvision>=0.16",
@@ -48,14 +48,14 @@ dependencies = [
 
 [project.optional-dependencies]
 # Optional microscopy-format readers. Absent readers degrade gracefully with a
-# MissingReaderError (see cellseg1_core/channels.py); install only what you need.
+# MissingReaderError (see velum_core/channels.py); install only what you need.
 formats = [
     "nd2>=0.7",
     "czifile>=2019.7.2",
     "readlif>=0.6",
 ]
 
-# Optional SAM2 engine (cellseg1_core/engines_sam2.py) for z-stack/time-lapse
+# Optional SAM2 engine (velum_core/engines_sam2.py) for z-stack/time-lapse
 # segmentation. Not installed by default: heavy (its own torch-version
 # constraints, Hydra configs, GB-scale checkpoints) and the app degrades
 # gracefully without it (EngineSpec.available() reports False; the Predict
@@ -66,7 +66,7 @@ sam2 = [
     "sam2",
 ]
 
-# Optional experiment tracking (cellseg1_core/experiment_tracking.py):
+# Optional experiment tracking (velum_core/experiment_tracking.py):
 # logs predict/train/auto-tune runs to a local Aim (aimstack.io) repo instead
 # of only this app's own custom charts. Fully local/self-hosted — nothing is
 # sent anywhere — and degrades gracefully without it (every tracking call is
@@ -135,7 +135,7 @@ py-modules = [
 # `studio*` is the standalone app package; `server*` is the multi-user backend
 # foundation (accounts/DB/RBAC — stdlib only, no runtime deps). Both are
 # siblings of the classic app; their test suites are excluded from the wheel.
-include = ["studio*", "cellseg1_core*", "server*", "segment_anything*", "peft*", "data*"]
+include = ["studio*", "velum_core*", "server*", "segment_anything*", "peft*", "data*"]
 exclude = ["studio.tests*", "server.tests*"]
 namespaces = true
 

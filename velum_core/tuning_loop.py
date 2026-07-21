@@ -90,7 +90,7 @@ def default_score_fn(gt_mask: np.ndarray) -> ScoreFn:
     engine-benchmark table already reports — matching how
     ``docs/BACKLOG.md`` frames the stopping criterion ("until AP plateaus").
     """
-    from cellseg1_core import benchmark
+    from velum_core import benchmark
 
     def score(mask: np.ndarray) -> tuple[float, dict[str, float]]:
         metrics = benchmark.evaluate(gt_mask, mask)
@@ -123,7 +123,7 @@ def default_propose_fn(image: Any, mask: np.ndarray, params: dict[str, Any],
     parameter from its current value (a no-op suggestion isn't progress and
     would otherwise loop forever).
     """
-    from cellseg1_core import advisor
+    from velum_core import advisor
 
     diag = advisor.diagnose(image, mask, params)
     changes, reasons = _merge_finding_changes(diag, params)
@@ -147,7 +147,7 @@ def llm_propose_fn(model: str, *, on_token: Callable[[str], None] | None = None)
     """A tool-calling propose_fn backed by a local Ollama model.
 
     Each round, the model sees the score trajectory so far and the
-    advisor's own diagnosis (:func:`cellseg1_core.advisor.build_tuning_prompt`),
+    advisor's own diagnosis (:func:`velum_core.advisor.build_tuning_prompt`),
     then either proposes one change (a ``SUGGEST:`` line, the same protocol
     the Assistant's chat already parses) or decides to stop (a ``STOP:``
     line) — a real ReAct-style reason-then-act round, not a fixed rule
@@ -157,7 +157,7 @@ def llm_propose_fn(model: str, *, on_token: Callable[[str], None] | None = None)
     """
     def propose(image: Any, mask: np.ndarray, params: dict[str, Any],
                trajectory: list[TuningStep]) -> Proposal:
-        from cellseg1_core import advisor
+        from velum_core import advisor
 
         diag = advisor.diagnose(image, mask, params)
         try:

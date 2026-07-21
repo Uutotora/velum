@@ -2,7 +2,7 @@
 (studio/segment_controller.py).
 
 Pure-logic — no Qt, and no *real* torch/model either: every test that
-exercises a predict run monkeypatches ``cellseg1_core.inference_cache
+exercises a predict run monkeypatches ``velum_core.inference_cache
 .predict_cached`` (the one seam the "cellseg1" engine calls into,
 regardless of which higher-level path reaches it), so the exact real
 production call chain (build_params -> build_config -> engine dispatch ->
@@ -40,7 +40,7 @@ def _write_mask(path: Path, *labels_and_boxes, size: int = 32) -> np.ndarray:
 
 
 def _fake_predict_cached(config, image_rgb):
-    """Stand-in for cellseg1_core.inference_cache.predict_cached: two fixed
+    """Stand-in for velum_core.inference_cache.predict_cached: two fixed
     blobs regardless of input, fast and fully deterministic.
 
     Runs on the *resized* image (default 512x512 -- see config["resize_size"])
@@ -58,14 +58,14 @@ def _fake_predict_cached(config, image_rgb):
 
 @pytest.fixture(autouse=True)
 def _fake_engine(monkeypatch):
-    monkeypatch.setattr("cellseg1_core.inference_cache.predict_cached", _fake_predict_cached)
+    monkeypatch.setattr("velum_core.inference_cache.predict_cached", _fake_predict_cached)
     # cellpose is a real, heavy [project.dependencies] package that may well
     # be installed in whatever env runs these tests (it is, in the full conda
     # env) — without this, list_available_engines()/run_benchmark_async see
     # it as real and available and actually run genuine (slow, possibly
     # model-downloading) Cellpose inference instead of the fake above, which
     # only stands in for the "cellseg1" engine's predict_cached seam.
-    monkeypatch.setattr("cellseg1_core.engines.cellpose_available", lambda: False)
+    monkeypatch.setattr("velum_core.engines.cellpose_available", lambda: False)
 
 
 @pytest.fixture

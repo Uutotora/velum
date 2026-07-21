@@ -34,7 +34,7 @@ COMMON=(
   --collect-all cellpose --collect-all numpy --collect-all cv2
   --collect-all tifffile --collect-all matplotlib
   # the app's own packages (pure-python, but keep them whole)
-  --collect-submodules studio --collect-submodules cellseg1_core
+  --collect-submodules studio --collect-submodules velum_core
   --collect-submodules segment_anything --collect-submodules peft
   # bundled assets + small LoRA checkpoints (NOT the big SAM backbone).
   # Source paths are ABSOLUTE: --add-data resolves the source relative to

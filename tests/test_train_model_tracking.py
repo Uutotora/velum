@@ -19,7 +19,7 @@ pytest.importorskip("torch")
 import cellseg1_train  # noqa: E402
 import set_environment  # noqa: E402
 
-from cellseg1_core import train_model  # noqa: E402
+from velum_core import train_model  # noqa: E402
 
 
 def _fake_state_manager():
@@ -66,7 +66,7 @@ def test_train_model_logs_one_tracked_value_per_epoch(mocked_training, monkeypat
         starts.append((experiment, hparams))
         return tracked
 
-    from cellseg1_core import experiment_tracking
+    from velum_core import experiment_tracking
     monkeypatch.setattr(experiment_tracking, "start_run", fake_start_run)
 
     config = _base_config(tmp_path, epoch_max=3)
@@ -84,7 +84,7 @@ def test_train_model_logs_one_tracked_value_per_epoch(mocked_training, monkeypat
 def test_train_model_closes_the_run_even_when_stopped_early(mocked_training, monkeypatch, tmp_path):
     tracked = MagicMock()
     monkeypatch.setattr(
-        "cellseg1_core.experiment_tracking.start_run",
+        "velum_core.experiment_tracking.start_run",
         lambda experiment, hparams: tracked)
 
     config = _base_config(tmp_path, epoch_max=10)
@@ -100,7 +100,7 @@ def test_train_model_closes_the_run_even_when_stopped_early(mocked_training, mon
 def test_train_model_closes_the_run_even_on_a_training_exception(mocked_training, monkeypatch, tmp_path):
     tracked = MagicMock()
     monkeypatch.setattr(
-        "cellseg1_core.experiment_tracking.start_run",
+        "velum_core.experiment_tracking.start_run",
         lambda experiment, hparams: tracked)
     monkeypatch.setattr(cellseg1_train, "train_epoch",
                         MagicMock(side_effect=RuntimeError("boom")))

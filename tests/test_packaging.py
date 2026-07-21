@@ -63,9 +63,9 @@ def test_no_napari_plugin_manifest():
 def test_ml_core_package_is_shipped():
     """The engine-agnostic ML core Studio imports must be a packaged module."""
     include = " ".join(_load()["tool"]["setuptools"]["packages"]["find"]["include"])
-    assert "cellseg1_core*" in include
-    assert (REPO / "cellseg1_core" / "predict_controller.py").exists()
-    assert (REPO / "cellseg1_core" / "engine_registry.py").exists()
+    assert "velum_core*" in include
+    assert (REPO / "velum_core" / "predict_controller.py").exists()
+    assert (REPO / "velum_core" / "engine_registry.py").exists()
 
 
 def test_declared_py_modules_all_exist():

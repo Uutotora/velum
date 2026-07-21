@@ -170,13 +170,13 @@ def test_f1_bars_oldest_first(dash, project_ctrl):
 
 # ── open_in_aim ──────────────────────────────────────────────────────────────
 def test_open_in_aim_delegates_to_experiment_tracking(dash, monkeypatch):
-    from cellseg1_core import experiment_tracking as tracking
+    from velum_core import experiment_tracking as tracking
     monkeypatch.setattr(tracking, "ensure_dashboard_running", lambda: "http://127.0.0.1:1234")
     assert dash.open_in_aim() == "http://127.0.0.1:1234"
 
 
 def test_open_in_aim_propagates_runtime_error_when_aim_missing(dash, monkeypatch):
-    from cellseg1_core import experiment_tracking as tracking
+    from velum_core import experiment_tracking as tracking
 
     def _raise():
         raise RuntimeError("Aim is not installed — run: pip install aim")

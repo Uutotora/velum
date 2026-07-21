@@ -1,16 +1,16 @@
-"""Unit tests for cellseg1_core.engine_registry.
+"""Unit tests for velum_core.engine_registry.
 
 Covers the registry mechanism in isolation (register/get/all_engines,
 EngineSpec label defaulting) plus a regression check that importing
-cellseg1_core.engines — the module owning the two built-in engines — registers
+velum_core.engines — the module owning the two built-in engines — registers
 them with the exact label strings the rest of the app (predict_widget's
 combo/benchmark UI, predict_controller.ENGINE_LABELS) depends on. Pure
 Python, no Qt/torch/cellpose needed — runs in the lightweight CI job too.
 """
 import pytest
 
-from cellseg1_core import engine_registry
-from cellseg1_core.engine_registry import EngineSpec
+from velum_core import engine_registry
+from velum_core.engine_registry import EngineSpec
 
 
 @pytest.fixture
@@ -95,16 +95,16 @@ def test_status_line_defaults_to_none():
     assert EngineSpec(key="x", label="X", predict=_fake_predict).status_line is None
 
 
-# ── Built-in engines (cellseg1_core.engines) ─────────────────────────────────────
+# ── Built-in engines (velum_core.engines) ─────────────────────────────────────
 
 def test_builtin_engines_are_registered():
-    import cellseg1_core.engines  # noqa: F401 — triggers registration
+    import velum_core.engines  # noqa: F401 — triggers registration
     assert engine_registry.is_registered("cellseg1")
     assert engine_registry.is_registered("cellpose")
 
 
 def test_builtin_cellseg1_labels():
-    import cellseg1_core.engines  # noqa: F401
+    import velum_core.engines  # noqa: F401
     spec = engine_registry.get("cellseg1")
     assert spec.label == "CellSeg1 · LoRA (one-shot, fine-tuned)"
     assert spec.bench_label == "CellSeg1 · LoRA (current checkpoint)"
@@ -113,7 +113,7 @@ def test_builtin_cellseg1_labels():
 
 
 def test_builtin_cellpose_labels():
-    import cellseg1_core.engines  # noqa: F401
+    import velum_core.engines  # noqa: F401
     spec = engine_registry.get("cellpose")
     assert spec.label == "Cellpose-SAM (zero-shot, generalist)"
     assert spec.bench_label == "Cellpose-SAM (zero-shot)"
@@ -121,12 +121,12 @@ def test_builtin_cellpose_labels():
 
 
 def test_builtin_cellseg1_status_line_reports_cache_status():
-    import cellseg1_core.engines  # noqa: F401
+    import velum_core.engines  # noqa: F401
     spec = engine_registry.get("cellseg1")
     assert spec.status_line is not None
     assert "model:" in spec.status_line()
 
 
 def test_builtin_cellpose_status_line_is_unset():
-    import cellseg1_core.engines  # noqa: F401
+    import velum_core.engines  # noqa: F401
     assert engine_registry.get("cellpose").status_line is None

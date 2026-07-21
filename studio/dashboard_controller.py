@@ -10,7 +10,7 @@ data even for the real, 484-run ``data_store/aim_repo`` this app has already
 produced — ``get_run()`` returns ``None`` for every hash and ``query_runs``
 raises ``NotImplementedError`` outside of Aim's own ``aim up`` server
 process. "Open in Aim" still shells out to that real server (via
-``cellseg1_core.experiment_tracking``) for the full cross-run UI; Studio's
+``velum_core.experiment_tracking``) for the full cross-run UI; Studio's
 own charts stay fed by the robust, no-extra-process JSON files instead.
 """
 from __future__ import annotations
@@ -133,5 +133,5 @@ class DashboardController:
         """Start (if needed) and return the URL of Aim's own dashboard
         server. Raises ``RuntimeError`` if the optional ``aim`` package isn't
         installed — callers should show that message rather than crash."""
-        from cellseg1_core import experiment_tracking as tracking
+        from velum_core import experiment_tracking as tracking
         return tracking.ensure_dashboard_running()

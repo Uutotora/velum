@@ -1,7 +1,7 @@
-"""Unit tests for cellseg1_core.benchmark (instance-level scoring vs GT)."""
+"""Unit tests for velum_core.benchmark (instance-level scoring vs GT)."""
 import numpy as np
 
-from cellseg1_core.benchmark import evaluate, results_table, summarize
+from velum_core.benchmark import evaluate, results_table, summarize
 
 
 def _two_cells(offset=0):

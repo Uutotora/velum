@@ -6,7 +6,7 @@ favourites, the "active project" shared with the Workspace tab, and seeding a
 fresh install with the same sample projects the mockup has always shown (now
 real, persisted ``Project`` records instead of hard-coded ``demo`` content).
 
-Mirrors ``cellseg1_core/predict_controller.py``'s shape — plain data in,
+Mirrors ``velum_core/predict_controller.py``'s shape — plain data in,
 plain callbacks out, no Qt — so it is unit-tested without PyQt6.
 """
 from __future__ import annotations

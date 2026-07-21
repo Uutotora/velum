@@ -1,7 +1,7 @@
 """Velum — the Assistant drawer: a real chat, not a static mockup.
 
 Own UI, reuse the logic: everything here is Studio's own Qt (its own chat
-view, its own icons/tokens — no import of ``cellseg1_core.widgets.chat`` or
+view, its own icons/tokens — no import of ``velum_core.widgets.chat`` or
 ``assistant_widget``), talking to ``AssistantController``
 (``studio/assistant_controller.py``) for the actual diagnostics/chat/model
 logic, and to a ``workspace`` object (a ``WorkspaceScreen``, or anything
@@ -66,7 +66,7 @@ def _field(caption: str, control: QWidget, t: dict) -> QWidget:
     return w
 
 
-# ── chat surface (own port of the chat idiom — studio tokens, not cellseg1_core's) ──
+# ── chat surface (own port of the chat idiom — studio tokens, not velum_core's) ──
 
 class _TypingDots(QLabel):
     """A tiny animated "assistant is typing" indicator."""
@@ -307,7 +307,7 @@ class ChangeCard(QFrame):
         trow.setSpacing(9)
         # A fixed-size dot added with AlignTop (not a nested widget+layout
         # with its own addStretch() to "push it up") -- that nested-stretch
-        # version is what cellseg1_core's own ChangeCard uses, and it turns out
+        # version is what velum_core's own ChangeCard uses, and it turns out
         # to have a real bug specific to living inside a QScrollArea's
         # dynamically-inserted content: Qt propagates the inner stretch's
         # "wants to expand" all the way up through the wrapper widget's

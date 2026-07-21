@@ -71,7 +71,7 @@ class VolumeStack:
     ``data`` is ``Z×H×W×C`` float32 (channel-last, never normalised); ``names``
     labels each channel (shared across every plane — channel identity doesn't
     vary slice to slice). Used by the z-stack / time-lapse prediction path
-    (:mod:`cellseg1_core.volume_stitch` stitches the resulting per-plane
+    (:mod:`velum_core.volume_stitch` stitches the resulting per-plane
     instance masks back into one consistent volume).
     """
     data: np.ndarray

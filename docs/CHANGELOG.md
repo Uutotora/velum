@@ -18,6 +18,22 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-21 — Rename the ML core package `cellseg1_core` → `velum_core`
+
+Follows the product rename to **Velum**: the engine-agnostic ML-core package
+now matches the product name. A pure, mechanical identifier rename — no logic
+changed.
+
+- `git mv cellseg1_core/ velum_core/` and replaced all 266 occurrences of the
+  exact token `cellseg1_core` across 51 files (imports in `studio/`, `tests/`,
+  the core itself; `pyproject.toml`'s `packages.find` include; docs; comments).
+- The bare `cellseg1` name is deliberately untouched — it's still the console
+  command / distribution alias and the conda env name. Only the `_core`
+  package moved.
+
+Verified: full offscreen `pytest` green; `velum_core.*` and `studio.*` import
+cleanly after clearing stale bytecode.
+
 ## 2026-07-21 — Docs: one tree, no more top-level `docstudio/`
 
 The repo had **two** top-level doc folders — `docs/` (project-wide) and

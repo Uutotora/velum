@@ -1,4 +1,4 @@
-"""Unit tests for cellseg1_core.predict_controller.PredictController.
+"""Unit tests for velum_core.predict_controller.PredictController.
 
 Covers what PredictWidget used to do inline and untested: config building
 (engine dispatch, LoRA/SAM path resolution, validation errors) and the
@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from scipy import ndimage
 
-from cellseg1_core.predict_controller import PredictController, ENGINE_LABELS
+from velum_core.predict_controller import PredictController, ENGINE_LABELS
 
 
 def _cc(tile_img: np.ndarray) -> np.ndarray:
@@ -80,7 +80,7 @@ def _spy_tracking(monkeypatch):
     """Monkeypatch experiment_tracking.start_run to record every call
     instead of touching Aim. Returns the list of (experiment, hparams,
     fake_run) tuples captured, in call order."""
-    from cellseg1_core import experiment_tracking as tracking
+    from velum_core import experiment_tracking as tracking
     calls = []
 
     def fake_start_run(experiment, hparams=None):
@@ -102,7 +102,7 @@ def test_build_config_missing_image_raises(tmp_path):
 
 
 def test_build_config_cellpose_shape(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "cellpose_available", lambda: True)
     params = _base_params(tmp_path, engine="cellpose", resize_size=256)
     cfg = PredictController.build_config(params)
@@ -120,7 +120,7 @@ def test_build_config_cellpose_shape(tmp_path, monkeypatch):
 
 
 def test_build_config_cellpose_threads_zstack_through(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "cellpose_available", lambda: True)
     params = _base_params(tmp_path, engine="cellpose", zstack=True, stitch_iou=0.4)
     cfg = PredictController.build_config(params)
@@ -129,7 +129,7 @@ def test_build_config_cellpose_threads_zstack_through(tmp_path, monkeypatch):
 
 
 def test_build_config_cellpose_unavailable_raises(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "cellpose_available", lambda: False)
     params = _base_params(tmp_path, engine="cellpose")
     with pytest.raises(ValueError, match="Cellpose is not installed"):
@@ -210,7 +210,7 @@ def test_sam_config_threads_perf_flags_through(tmp_path):
 # ── sam2_config ───────────────────────────────────────────────────────────────
 
 def _fake_sam2_available(monkeypatch, value=True):
-    import cellseg1_core.engines_sam2 as es2
+    import velum_core.engines_sam2 as es2
     monkeypatch.setattr(es2, "sam2_available", lambda: value)
 
 
@@ -292,7 +292,7 @@ def test_resolve_sam_raises_when_nothing_found(tmp_path):
 
 def test_run_prediction_async_success_sequences_callbacks(tmp_path, monkeypatch):
     import cv2
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     img = np.zeros((40, 40, 3), dtype=np.uint8)
@@ -320,7 +320,7 @@ def test_run_prediction_async_success_sequences_callbacks(tmp_path, monkeypatch)
 
 def test_run_prediction_async_hints_when_large_and_not_tiled(tmp_path, monkeypatch):
     import cv2
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     img = np.zeros((160, 480, 3), dtype=np.uint8)
@@ -339,7 +339,7 @@ def test_run_prediction_async_hints_when_large_and_not_tiled(tmp_path, monkeypat
 
 def test_run_prediction_async_no_hint_when_tiled(tmp_path, monkeypatch):
     import cv2
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     img = np.zeros((160, 480, 3), dtype=np.uint8)
@@ -359,7 +359,7 @@ def test_run_prediction_async_no_hint_when_tiled(tmp_path, monkeypatch):
 
 def test_run_prediction_async_no_hint_when_small(tmp_path, monkeypatch):
     import cv2
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     img = np.zeros((40, 40, 3), dtype=np.uint8)
@@ -379,7 +379,7 @@ def test_run_prediction_async_no_hint_when_small(tmp_path, monkeypatch):
 
 def test_run_prediction_async_sam_branch_logs_cache_status(tmp_path, monkeypatch):
     import cv2
-    import cellseg1_core.inference_cache as ic
+    import velum_core.inference_cache as ic
     monkeypatch.setattr(ic, "predict_cached", lambda cfg, t: _cc(t))
 
     img = np.zeros((40, 40, 3), dtype=np.uint8)
@@ -413,7 +413,7 @@ def test_run_prediction_async_error_still_calls_log_and_finish(tmp_path):
 
 def test_run_prediction_async_forwards_on_tile(tmp_path, monkeypatch):
     import cv2
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     img = np.zeros((160, 480, 3), dtype=np.uint8)
@@ -433,7 +433,7 @@ def test_run_prediction_async_forwards_on_tile(tmp_path, monkeypatch):
 
 def test_run_prediction_async_logs_a_tracked_run(tmp_path, monkeypatch):
     import cv2
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
     tracked = _spy_tracking(monkeypatch)
 
@@ -474,7 +474,7 @@ def _cellpose_blob_setup(tmp_path):
 
 
 def test_run_tuning_loop_async_sequences_steps_then_finish(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
     monkeypatch.setattr(engines, "cellpose_available", lambda: True)
     path, gt = _cellpose_blob_setup(tmp_path)
@@ -518,7 +518,7 @@ def test_run_tuning_loop_async_error_still_calls_log_and_finish(tmp_path):
 
 
 def test_run_tuning_loop_async_stop_tuning_halts_the_loop(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
     monkeypatch.setattr(engines, "cellpose_available", lambda: True)
     path, gt = _cellpose_blob_setup(tmp_path)
@@ -550,8 +550,8 @@ def test_run_tuning_loop_async_llm_strategy_calls_ollama_chat(tmp_path, monkeypa
     STOP reply, so the loop is short and deterministic). The model's own
     stop rationale ("looks fine already.") must reach on_finish's
     stop_detail, not just the generic stop_reason code."""
-    import cellseg1_core.engines as engines
-    from cellseg1_core import advisor
+    import velum_core.engines as engines
+    from velum_core import advisor
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
     monkeypatch.setattr(engines, "cellpose_available", lambda: True)
     calls = []
@@ -580,7 +580,7 @@ def test_run_tuning_loop_async_llm_strategy_without_model_falls_back_to_advisor(
     """strategy="llm" with no model name given (e.g. the UI's own guard
     failed to catch it) must not crash — it degrades to the rule-based
     advisor, same as if strategy="advisor" had been requested."""
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
     monkeypatch.setattr(engines, "cellpose_available", lambda: True)
     path, gt = _cellpose_blob_setup(tmp_path)
@@ -598,7 +598,7 @@ def test_run_tuning_loop_async_llm_strategy_without_model_falls_back_to_advisor(
 
 
 def test_run_tuning_loop_async_logs_one_run_with_score_per_round(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
     monkeypatch.setattr(engines, "cellpose_available", lambda: True)
     tracked = _spy_tracking(monkeypatch)
@@ -639,8 +639,8 @@ def _write_zstack(tmp_path):
 
 
 def test_predict_volume_stitches_across_planes(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
-    from cellseg1_core.predict_controller import _predict_volume
+    import velum_core.engines as engines
+    from velum_core.predict_controller import _predict_volume
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     path = _write_zstack(tmp_path)
@@ -658,8 +658,8 @@ def test_predict_volume_stitches_across_planes(tmp_path, monkeypatch):
 
 
 def test_predict_volume_reports_on_slice_progress(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
-    from cellseg1_core.predict_controller import _predict_volume
+    import velum_core.engines as engines
+    from velum_core.predict_controller import _predict_volume
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     path = _write_zstack(tmp_path)
@@ -675,8 +675,8 @@ def test_predict_volume_composes_with_tiling_for_large_planes(tmp_path, monkeypa
     must go through _predict_tiled instead of a plain resize+predict — the
     z-stack path composes with the existing tiling feature instead of
     ignoring config["tiled"]."""
-    import cellseg1_core.engines as engines
-    from cellseg1_core import predict_controller as pc
+    import velum_core.engines as engines
+    from velum_core import predict_controller as pc
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     calls = []
@@ -702,8 +702,8 @@ def test_predict_volume_composes_with_tiling_for_large_planes(tmp_path, monkeypa
 
 
 def test_predict_volume_untiled_when_tiled_flag_off_even_if_large(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
-    from cellseg1_core import predict_controller as pc
+    import velum_core.engines as engines
+    from velum_core import predict_controller as pc
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     calls = []
@@ -720,8 +720,8 @@ def test_predict_volume_dispatches_to_sam2_propagate_mode(tmp_path, monkeypatch)
     """engine=sam2 + sam2_tracking_mode=propagate must call
     predict_sam2_propagate directly and skip the generic per-plane-predict +
     stitch_slices path entirely (no per-plane spec.predict, no stitching)."""
-    import cellseg1_core.engines_sam2 as es2
-    from cellseg1_core import predict_controller as pc
+    import velum_core.engines_sam2 as es2
+    from velum_core import predict_controller as pc
 
     calls = []
 
@@ -748,8 +748,8 @@ def test_predict_volume_dispatches_to_sam2_propagate_mode(tmp_path, monkeypatch)
 
 
 def test_predict_volume_sam2_automatic_mode_never_calls_propagate(tmp_path, monkeypatch):
-    import cellseg1_core.engines_sam2 as es2
-    from cellseg1_core import predict_controller as pc
+    import velum_core.engines_sam2 as es2
+    from velum_core import predict_controller as pc
 
     calls = []
     monkeypatch.setattr(es2, "predict_sam2_propagate", lambda *a, **k: calls.append(1))
@@ -764,7 +764,7 @@ def test_predict_volume_sam2_automatic_mode_never_calls_propagate(tmp_path, monk
 
 
 def test_run_volume_prediction_async_success_sequences_callbacks(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     path = _write_zstack(tmp_path)
@@ -790,7 +790,7 @@ def test_run_volume_prediction_async_success_sequences_callbacks(tmp_path, monke
 
 
 def test_run_volume_prediction_async_forwards_on_slice(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     path = _write_zstack(tmp_path)
@@ -834,7 +834,7 @@ def _write_images(tmp_path, n, size=30):
 
 
 def test_run_batch_async_processes_all_and_writes_cohort(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     images = _write_images(tmp_path, 3)
@@ -864,7 +864,7 @@ def test_run_batch_async_processes_all_and_writes_cohort(tmp_path, monkeypatch):
 
 
 def test_run_batch_async_stop_skips_cohort_step(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     controller = PredictController()
 
     call_count = {"n": 0}
@@ -895,7 +895,7 @@ def test_run_batch_async_stop_skips_cohort_step(tmp_path, monkeypatch):
 
 
 def test_run_batch_async_continues_after_a_per_image_error(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
 
     calls = {"n": 0}
 
@@ -928,7 +928,7 @@ def test_run_batch_async_continues_after_a_per_image_error(tmp_path, monkeypatch
 
 
 def test_run_batch_async_logs_one_tracked_run_per_image(tmp_path, monkeypatch):
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
     tracked = _spy_tracking(monkeypatch)
 
@@ -952,7 +952,7 @@ def test_run_batch_async_logs_one_tracked_run_per_image(tmp_path, monkeypatch):
 
 def test_run_benchmark_async_aggregates_and_calls_on_done(tmp_path, monkeypatch):
     import cv2
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
 
     img_dir = tmp_path / "images"; img_dir.mkdir()
@@ -989,7 +989,7 @@ def test_run_benchmark_async_aggregates_and_calls_on_done(tmp_path, monkeypatch)
 
 def test_run_benchmark_async_logs_a_tracked_run_per_pair_with_metrics(tmp_path, monkeypatch):
     import cv2
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
     tracked = _spy_tracking(monkeypatch)
 
@@ -1022,7 +1022,7 @@ def test_run_benchmark_async_logs_a_tracked_run_per_pair_with_metrics(tmp_path, 
 
 def test_run_benchmark_async_logs_per_pair_errors(tmp_path, monkeypatch):
     import cv2
-    import cellseg1_core.engines as engines
+    import velum_core.engines as engines
     monkeypatch.setattr(engines, "predict_cellpose",
                         lambda t, **k: (_ for _ in ()).throw(RuntimeError("boom")))
 

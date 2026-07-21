@@ -1,8 +1,8 @@
-"""Unit tests for cellseg1_core.cohort (batch/population aggregation)."""
+"""Unit tests for velum_core.cohort (batch/population aggregation)."""
 import numpy as np
 
-from cellseg1_core.analysis import compute_measurements
-from cellseg1_core.cohort import (
+from velum_core.analysis import compute_measurements
+from velum_core.cohort import (
     per_cell_long,
     per_image_summary,
     pooled_values,

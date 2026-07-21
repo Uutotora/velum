@@ -18,7 +18,7 @@ the release artifacts (`Velum.dmg`, `Velum-linux-x86_64.tar.gz`), the log file
 (`~/Library/Logs/Velum.log`), README (broadened the pitch to "one-shot instance
 segmentation of any object"), and the docs. Added a `velum` console launcher
 (`cellseg1`/`cellseg1-studio` kept as aliases). Deliberately NOT renamed: the
-Python packages `studio/` and `cellseg1_core/`, and the **CellSeg1 engine** (one
+Python packages `studio/` and `velum_core/`, and the **CellSeg1 engine** (one
 of the three engines — that's its method name, not the product).
 
 ---

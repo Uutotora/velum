@@ -1,4 +1,4 @@
-"""Unit tests for cellseg1_core.engines_sam2.
+"""Unit tests for velum_core.engines_sam2.
 
 Covers everything that doesn't need torch or a real sam2/checkpoint install:
 availability gating, checkpoint/config resolution, cache-key/state bookkeeping,
@@ -27,7 +27,7 @@ import types
 import numpy as np
 import pytest
 
-from cellseg1_core import engine_registry
+from velum_core import engine_registry
 # Import predict_controller (not engines_sam2 directly) first, so engine
 # registration always happens in the app's real order — engines.py's
 # cellseg1/cellpose before engines_sam2.py's sam2 — regardless of which test
@@ -37,8 +37,8 @@ from cellseg1_core import engine_registry
 # (e.g. the predict_widget wiring tests), silently reordering
 # PredictWidget's engine combo (sam2 first, not cellseg1) for every other test
 # in the same run — exactly the failure this comment exists to prevent.
-import cellseg1_core.predict_controller as _predict_controller  # noqa: F401
-import cellseg1_core.engines_sam2 as es2
+import velum_core.predict_controller as _predict_controller  # noqa: F401
+import velum_core.engines_sam2 as es2
 
 
 @pytest.fixture(autouse=True)
@@ -160,7 +160,7 @@ def test_sam2_engine_labels():
 def test_sam2_available_check_reflects_monkeypatched_function(monkeypatch):
     # EngineSpec.available must call through live, not a frozen reference
     # captured at register() time (see the cellpose regression this class of
-    # bug already caused, per cellseg1_core.engines's own comment).
+    # bug already caused, per velum_core.engines's own comment).
     monkeypatch.setattr(es2, "sam2_available", lambda: True)
     assert engine_registry.get("sam2").available() is True
     monkeypatch.setattr(es2, "sam2_available", lambda: False)

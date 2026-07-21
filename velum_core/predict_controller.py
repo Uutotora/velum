@@ -13,9 +13,9 @@ from pathlib import Path
 
 import numpy as np
 
-from cellseg1_core import engines as _builtin_engines  # noqa: F401 — registers built-in engines
-from cellseg1_core import engines_sam2 as _sam2_engine  # noqa: F401 — registers the SAM2 engine
-from cellseg1_core.engine_registry import get as get_engine, all_engines
+from velum_core import engines as _builtin_engines  # noqa: F401 — registers built-in engines
+from velum_core import engines_sam2 as _sam2_engine  # noqa: F401 — registers the SAM2 engine
+from velum_core.engine_registry import get as get_engine, all_engines
 
 ENGINE_LABELS = {spec.key: spec.result_label for spec in all_engines()}
 
@@ -52,7 +52,7 @@ def _read_for_predict(config):
     unchanged. Multi-channel path (opt-in via a ``channels`` list of channel
     indices): read the full-depth stack with tifffile, percentile-normalise and
     project the selected channels to the RGB frame the engine expects, and also
-    return the raw :class:`~cellseg1_core.channels.ChannelStack` for per-channel
+    return the raw :class:`~velum_core.channels.ChannelStack` for per-channel
     intensity measurement.
     """
     channels = config.get("channels")
@@ -61,7 +61,7 @@ def _read_for_predict(config):
     # by default when the user hasn't picked any explicitly.
     is_native = Path(config["image_path"]).suffix.lower() in (".nd2", ".czi", ".lif")
     if channels or is_native:
-        from cellseg1_core.channels import read_channel_stack, project_to_rgb
+        from velum_core.channels import read_channel_stack, project_to_rgb
         stack = read_channel_stack(config["image_path"])
         rgb = project_to_rgb(stack, channels,
                              low=float(config.get("channel_low", 1.0)),
@@ -94,7 +94,7 @@ def _predict_cached(config, on_tile=None, sink=None):
 
     # Large-image path: tile at native resolution instead of shrinking the
     # whole image (which loses small cells). Opt-in via the "Large image" box.
-    from cellseg1_core.tiling import should_tile
+    from velum_core.tiling import should_tile
     if config.get("tiled") and should_tile(img.shape, tile=int(config.get("tile_size") or 1024)):
         return img, _predict_tiled(config, img, on_tile=on_tile)
 
@@ -122,7 +122,7 @@ def _predict_tiled(config, img, on_tile=None):
     a full-resolution instance mask the same H×W as ``img``. ``on_tile(done,
     total)`` is forwarded to the tiler for per-tile progress reporting.
     """
-    from cellseg1_core.tiling import recommend_overlap, tiled_predict
+    from velum_core.tiling import recommend_overlap, tiled_predict
 
     tile = int(config.get("tile_size") or 1024)
     overlap = int(config.get("tile_overlap") or 0)
@@ -155,7 +155,7 @@ def _predict_volume(config, on_slice=None, sink=None):
     """Segment a z-stack/time-lapse (``config['image_path']`` has more than
     one Z/T plane) into one consistent (Z, H, W) instance volume.
 
-    Reads every plane once (:func:`cellseg1_core.channels.read_volume_stack`,
+    Reads every plane once (:func:`velum_core.channels.read_volume_stack`,
     which keeps the Z/T axis instead of reducing it), then dispatches to one
     of two tracking modes:
 
@@ -165,7 +165,7 @@ def _predict_volume(config, on_slice=None, sink=None):
         registered engine works here unchanged, since this only ever calls
         ``spec.predict(frame, config)`` — and the per-plane masks are linked
         afterwards by adjacent-plane overlap
-        (:func:`cellseg1_core.volume_stitch.stitch_slices`). Composed with
+        (:func:`velum_core.volume_stitch.stitch_slices`). Composed with
         tiling: a plane large enough that ``should_tile`` recommends it (and
         ``config["tiled"]`` is on) is segmented tile-by-tile via
         ``_predict_tiled`` instead of being shrunk to ``resize_size`` — the
@@ -177,10 +177,10 @@ def _predict_volume(config, on_slice=None, sink=None):
         ``config["sam2_tracking_mode"] == "propagate"``): SAM2's video
         predictor tracks objects seeded on the first plane across every
         other plane via its memory bank
-        (:func:`cellseg1_core.engines_sam2.predict_sam2_propagate`) — no
+        (:func:`velum_core.engines_sam2.predict_sam2_propagate`) — no
         separate stitching step, and not available for any other engine.
     """
-    from cellseg1_core.channels import read_volume_stack, project_to_rgb
+    from velum_core.channels import read_volume_stack, project_to_rgb
 
     vstack = read_volume_stack(config["image_path"])
     if sink is not None:
@@ -197,14 +197,14 @@ def _predict_volume(config, on_slice=None, sink=None):
     image_volume = np.stack(frames, axis=0)
 
     if config.get("engine") == "sam2" and config.get("sam2_tracking_mode") == "propagate":
-        from cellseg1_core.engines_sam2 import predict_sam2_propagate
+        from velum_core.engines_sam2 import predict_sam2_propagate
         volume_mask = predict_sam2_propagate(frames, config, on_slice=on_slice)
         return image_volume, volume_mask
 
     from data.utils import resize_image
     import cv2
-    from cellseg1_core.volume_stitch import stitch_slices
-    from cellseg1_core.tiling import should_tile
+    from velum_core.volume_stitch import stitch_slices
+    from velum_core.tiling import should_tile
 
     spec = get_engine(config.get("engine") or "cellseg1")
     slice_masks = []
@@ -236,8 +236,8 @@ def _predict_volume(config, on_slice=None, sink=None):
 def _log_predict_run(config: dict, mask: np.ndarray, *, experiment: str = "predict",
                      extra: dict | None = None) -> None:
     """Log one prediction to the optional experiment tracker (a no-op unless
-    Aim is installed — see :mod:`cellseg1_core.experiment_tracking`)."""
-    from cellseg1_core import experiment_tracking as tracking
+    Aim is installed — see :mod:`velum_core.experiment_tracking`)."""
+    from velum_core import experiment_tracking as tracking
     hparams = dict(config)
     if extra:
         hparams.update(extra)
@@ -366,7 +366,7 @@ class PredictController:
     def sam2_config(params: dict) -> dict:
         """SAM2 config: zero-shot, like Cellpose-SAM — no LoRA checkpoint —
         but needs its own checkpoint + Hydra config name instead (see
-        :mod:`cellseg1_core.engines_sam2`)."""
+        :mod:`velum_core.engines_sam2`)."""
         img = params["image_path"]
         if not img or not Path(img).exists():
             raise ValueError(f"Image not found: {img}")
@@ -374,7 +374,7 @@ class PredictController:
             raise ValueError(
                 "SAM2 is not installed — run: pip install sam2  "
                 "(see github.com/facebookresearch/sam2)")
-        from cellseg1_core.engines_sam2 import resolve_sam2
+        from velum_core.engines_sam2 import resolve_sam2
         model_type = params.get("sam2_model_type") or "large"
         ckpt, config_name = resolve_sam2(
             params.get("sam2_checkpoint_text", ""), params.get("sam2_config_text", ""),
@@ -455,7 +455,7 @@ class PredictController:
                     spec = get_engine(config.get("engine") or "cellseg1")
                     status = spec.status_line() if spec.status_line else spec.result_label
                     on_log(f"✓ {int(mask.max())} cells  [{status}]")
-                    from cellseg1_core.tiling import should_warn_no_tiling
+                    from velum_core.tiling import should_warn_no_tiling
                     tile = int(config.get("tile_size") or 1024)
                     if should_warn_no_tiling(img_arr.shape, bool(config.get("tiled")), tile=tile):
                         on_log(
@@ -523,7 +523,7 @@ class PredictController:
 
         def run():
             import cv2
-            from cellseg1_core import analysis
+            from velum_core import analysis
             n = len(images)
             done = 0
             records = []
@@ -552,7 +552,7 @@ class PredictController:
                     on_progress(done, n)
             else:
                 try:
-                    from cellseg1_core import cohort
+                    from velum_core import cohort
                     cohort.write_cohort_csvs(out_dir, records)
                     pop = cohort.population_stats(records)
                     if on_log:
@@ -586,7 +586,7 @@ class PredictController:
         total = len(pairs) * len(engines)
 
         def run():
-            from cellseg1_core import benchmark
+            from velum_core import benchmark
             import cv2
             per_engine = {e: [] for e in engines}
             done = 0
@@ -606,7 +606,7 @@ class PredictController:
                                             interpolation=cv2.INTER_NEAREST).astype(np.int32)
                         metrics = benchmark.evaluate(gt, pred)
                         per_engine[eng].append(metrics)
-                        from cellseg1_core import experiment_tracking as tracking
+                        from velum_core import experiment_tracking as tracking
                         brun = tracking.start_run(
                             "benchmark", {**cfg, "engine_label": ENGINE_LABELS[eng],
                                          "image": img_path.name})
@@ -644,7 +644,7 @@ class PredictController:
 
         This is the same predict/score/adjust cycle a user already runs by
         hand from the Assistant tab (Diagnose -> Apply & re-run -> Evaluate
-        against ground truth); see :mod:`cellseg1_core.tuning_loop` for the
+        against ground truth); see :mod:`velum_core.tuning_loop` for the
         actual loop and its stopping rule. ``strategy="advisor"`` (default)
         uses the deterministic rule-based diagnostic engine;
         ``strategy="llm"`` (with a connected Ollama ``model`` name) hands
@@ -659,7 +659,7 @@ class PredictController:
         (potentially slow) round starts predicting.
         ``on_finish(stop_reason, stop_detail)`` always fires last, success or
         failure — ``stop_reason`` is one of
-        :data:`cellseg1_core.tuning_loop.STOP_REASONS` (``"error"`` on an
+        :data:`velum_core.tuning_loop.STOP_REASONS` (``"error"`` on an
         exception); ``stop_detail`` is free text when the stop had one worth
         keeping (e.g. the advisor's or the local model's own words for why
         it had nothing left to suggest), else ``""``. :meth:`stop_tuning`
@@ -670,11 +670,11 @@ class PredictController:
         def run():
             stop_reason = "error"
             stop_detail = ""
-            from cellseg1_core import experiment_tracking as tracking
+            from velum_core import experiment_tracking as tracking
             tracked = tracking.start_run(
                 "auto-tune", {**initial_params, "strategy": strategy, "model": model})
             try:
-                from cellseg1_core import tuning_loop
+                from velum_core import tuning_loop
 
                 def predict_fn(p):
                     return _predict_cached(self.build_config(p))

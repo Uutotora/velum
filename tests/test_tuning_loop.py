@@ -1,4 +1,4 @@
-"""Unit tests for cellseg1_core.tuning_loop (the agentic predict -> score ->
+"""Unit tests for velum_core.tuning_loop (the agentic predict -> score ->
 adjust loop).
 
 ``run_tuning_loop`` itself is tested with fully scripted fakes so the
@@ -14,8 +14,8 @@ and tests/test_advisor.py. ``parameter_importance``/``write_trajectory_csv``/
 import numpy as np
 import pytest
 
-from cellseg1_core import tuning_loop
-from cellseg1_core.tuning_loop import (
+from velum_core import tuning_loop
+from velum_core.tuning_loop import (
     Proposal,
     TuningStep,
     best_step,
@@ -292,7 +292,7 @@ def test_default_propose_fn_filters_out_current_values():
 #    advisor.ollama_chat — no real network/model involved) ──────────────────
 
 def test_llm_propose_fn_parses_a_suggest_line(monkeypatch):
-    from cellseg1_core import advisor
+    from velum_core import advisor
     monkeypatch.setattr(
         advisor, "ollama_chat",
         lambda model, messages, on_token: "Cells look merged.\nSUGGEST: box_nms_thresh=0.02")
@@ -305,7 +305,7 @@ def test_llm_propose_fn_parses_a_suggest_line(monkeypatch):
 
 
 def test_llm_propose_fn_parses_a_stop_line(monkeypatch):
-    from cellseg1_core import advisor
+    from velum_core import advisor
     monkeypatch.setattr(
         advisor, "ollama_chat",
         lambda model, messages, on_token: "Looks converged.\nSTOP: further rounds unlikely to help.")
@@ -318,7 +318,7 @@ def test_llm_propose_fn_parses_a_stop_line(monkeypatch):
 
 
 def test_llm_propose_fn_ignores_a_suggest_line_matching_the_current_value(monkeypatch):
-    from cellseg1_core import advisor
+    from velum_core import advisor
     monkeypatch.setattr(
         advisor, "ollama_chat",
         lambda model, messages, on_token: f"SUGGEST: pred_iou_thresh={BASE_PARAMS['pred_iou_thresh']}")
@@ -331,7 +331,7 @@ def test_llm_propose_fn_ignores_a_suggest_line_matching_the_current_value(monkey
 
 
 def test_llm_propose_fn_falls_back_to_advisor_when_model_errors(monkeypatch):
-    from cellseg1_core import advisor
+    from velum_core import advisor
 
     def boom(*a, **k):
         raise RuntimeError("connection refused")
@@ -347,7 +347,7 @@ def test_llm_propose_fn_falls_back_to_advisor_when_model_errors(monkeypatch):
 
 
 def test_llm_propose_fn_falls_back_when_reply_has_no_usable_suggestion(monkeypatch):
-    from cellseg1_core import advisor
+    from velum_core import advisor
     monkeypatch.setattr(
         advisor, "ollama_chat",
         lambda model, messages, on_token: "I think it looks fine, no changes needed.")
@@ -360,7 +360,7 @@ def test_llm_propose_fn_falls_back_when_reply_has_no_usable_suggestion(monkeypat
 
 
 def test_run_tuning_loop_with_llm_propose_fn_end_to_end(monkeypatch):
-    from cellseg1_core import advisor
+    from velum_core import advisor
     replies = iter([
         "Try raising the minimum area.\nSUGGEST: min_mask_area=40",
         "That's enough.\nSTOP: the score has plateaued.",

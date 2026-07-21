@@ -5,12 +5,12 @@ plain data in, plain callbacks out, background threads for anything that
 touches the network) behind three interchangeable chat backends:
 
   * **"offline"** — the deterministic diagnostic engine
-    (``cellseg1_core.advisor.diagnose``). Always available, no model, no
+    (``velum_core.advisor.diagnose``). Always available, no model, no
     network call — reused read-only, imported lazily, exactly like
     ``segment_controller.py`` reuses ``predict_controller`` without ever
     modifying it.
   * **"ollama"** — a locally running Ollama server. Reuses
-    ``cellseg1_core.advisor``'s existing Ollama bridge verbatim (model
+    ``velum_core.advisor``'s existing Ollama bridge verbatim (model
     discovery, pull, the task-specialised "bake an agent" flow, streaming
     chat) — again read-only.
   * **"custom"** — any OpenAI-compatible HTTP endpoint: local (LM Studio,
@@ -19,7 +19,7 @@ touches the network) behind three interchangeable chat backends:
     capability the classic app doesn't have, so it's Studio's own — the
     bridge functions below (``custom_api_available``/``custom_api_models``/
     ``custom_api_chat``), stdlib ``urllib`` only, no new dependency, same
-    idiom as ``cellseg1_core.advisor.ollama_chat``.
+    idiom as ``velum_core.advisor.ollama_chat``.
 
 Settings (which backend, which model, the custom endpoint + key) persist to
 one small JSON file under the shared storage dir — a machine-level choice,
@@ -94,7 +94,7 @@ def custom_api_chat(base_url: str, api_key: str, model: str, messages: list[dict
                     temperature: float = 0.2, timeout: float = 120.0) -> str:
     """Stream a chat completion from an OpenAI-compatible ``/chat/completions``
     endpoint. Returns the full text — the Custom-API sibling of
-    ``cellseg1_core.advisor.ollama_chat``, same contract (streams tokens via
+    ``velum_core.advisor.ollama_chat``, same contract (streams tokens via
     ``on_token``, cooperatively cancellable via ``stop``, propagates
     exceptions to the caller rather than swallowing them).
 
@@ -207,15 +207,15 @@ class AssistantController:
     def save_settings(self) -> None:
         self.settings_store.save(self.settings)
 
-    # ── diagnostics (reuses cellseg1_core.advisor's engine, read-only) ─────────
+    # ── diagnostics (reuses velum_core.advisor's engine, read-only) ─────────
     @staticmethod
     def diagnose(image, mask, params: dict) -> dict:
-        from cellseg1_core import advisor
+        from velum_core import advisor
         return advisor.diagnose(image, mask, params)
 
     @staticmethod
     def findings_to_text(diag: dict) -> str:
-        from cellseg1_core import advisor
+        from velum_core import advisor
         return advisor.findings_to_text(diag)
 
     @staticmethod
@@ -230,7 +230,7 @@ class AssistantController:
 
     @staticmethod
     def parse_suggestions(text: str) -> dict[str, Any]:
-        from cellseg1_core import advisor
+        from velum_core import advisor
         return advisor.parse_suggestions(text)
 
     # ── backend readiness (cheap, local — no network) ────────────────────────
@@ -245,25 +245,25 @@ class AssistantController:
             return bool(self.settings.custom_base_url.strip() and self.settings.custom_model.strip())
         return False
 
-    # ── Ollama model management (reuses cellseg1_core.advisor verbatim) ────────
+    # ── Ollama model management (reuses velum_core.advisor verbatim) ────────
     @staticmethod
     def ollama_available() -> bool:
-        from cellseg1_core import advisor
+        from velum_core import advisor
         return advisor.ollama_available()
 
     @staticmethod
     def ollama_models() -> list[str]:
-        from cellseg1_core import advisor
+        from velum_core import advisor
         return advisor.ollama_models()
 
     @property
     def recommended_models(self) -> list[dict]:
-        from cellseg1_core import advisor
+        from velum_core import advisor
         return advisor.RECOMMENDED_MODELS
 
     @property
     def agent_model_name(self) -> str:
-        from cellseg1_core import advisor
+        from velum_core import advisor
         return advisor.AGENT_MODEL_NAME
 
     def model_op_busy(self) -> bool:
@@ -273,7 +273,7 @@ class AssistantController:
                                 on_done: Callable[[str, bool], None]) -> Optional[threading.Thread]:
         if self.model_op_busy():
             return None
-        from cellseg1_core import advisor
+        from velum_core import advisor
 
         def run():
             ok = advisor.ollama_pull(name, on_progress)
@@ -288,7 +288,7 @@ class AssistantController:
                            on_done: Callable[[bool], None]) -> Optional[threading.Thread]:
         if self.model_op_busy():
             return None
-        from cellseg1_core import advisor
+        from velum_core import advisor
 
         def run():
             ok = advisor.ollama_create_agent(base_model, on_status)
@@ -356,7 +356,7 @@ class AssistantController:
         so the caller (the UI) tells the two cases apart by whether it gets a
         thread back, rather than needing its own offline/online branch.
         """
-        from cellseg1_core import advisor
+        from velum_core import advisor
 
         if self.settings.backend == "offline" or not self.backend_ready():
             on_done(advisor.findings_to_text(diag))

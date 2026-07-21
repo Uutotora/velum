@@ -42,7 +42,7 @@ the common cases:
 The app owns its whole window — Home · Projects · **Segment** · Models & Train ·
 Dashboard — with its **own** Qt image canvas and layer model (it is *not* an
 embedded napari; nothing imports napari at runtime). The engine-agnostic ML core
-lives in a separate, Qt-free package, [`cellseg1_core/`](cellseg1_core/).
+lives in a separate, Qt-free package, [`velum_core/`](velum_core/).
 
 ## Screenshots
 
@@ -118,7 +118,7 @@ Studio is built so you add features by describing them, without re-packaging:
 1. **Once:** build the dev-launcher `.app` (above). Keep it in the Dock.
 2. **Each feature:** edit code under `studio/` (UI) — screens wire to plain,
    unit-tested controllers in `studio/*_controller.py`; the ML core is
-   `cellseg1_core/`.
+   `velum_core/`.
 3. **See it:** quit and relaunch from the Dock (or `bash run_studio.sh` for a
    terminal loop with live logs). Same `.app`, new code.
 4. **Keep it green:** run the tests (below); add one for new logic.
@@ -131,7 +131,7 @@ architecture and how to wire a tab: **[docs/velum/](docs/velum/)**.
 ```
 studio/            The desktop app (PyQt6): screens, own canvas + layer model,
                    per-tab controllers. No napari.
-cellseg1_core/     Engine-agnostic ML core (Qt-free): predict controller,
+velum_core/     Engine-agnostic ML core (Qt-free): predict controller,
                    engines (CellSeg1 / Cellpose-SAM / SAM2), analysis,
                    benchmark, cohort, training, tiling, volume stitching.
 server/            Optional multi-user backend foundation (accounts, RBAC,

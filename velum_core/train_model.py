@@ -77,7 +77,7 @@ def train_model(config, state_manager, progress_queue=None, stop_event=None):
     save_model = config["result_pth_path"]
     started_at = datetime.now().isoformat()
 
-    from cellseg1_core import experiment_tracking as tracking
+    from velum_core import experiment_tracking as tracking
     tracked = tracking.start_run("train", config)
 
     try:

@@ -844,8 +844,8 @@ def test_predicting_in_workspace_shows_up_on_the_dashboard(
         mask[h // 2: h - h // 8, w // 2: w - w // 8] = 2
         return mask
 
-    monkeypatch.setattr("cellseg1_core.inference_cache.predict_cached", _fake_predict_cached)
-    monkeypatch.setattr("cellseg1_core.engines.cellpose_available", lambda: False)
+    monkeypatch.setattr("velum_core.inference_cache.predict_cached", _fake_predict_cached)
+    monkeypatch.setattr("velum_core.engines.cellpose_available", lambda: False)
 
     storage = tmp_path / "storage"
     (storage / "sam_backbone").mkdir(parents=True)
@@ -1092,8 +1092,8 @@ def test_running_run_segmentation_through_the_real_palette_predicts_for_real(
         mask[h // 8: h // 2, w // 8: w // 2] = 1
         return mask
 
-    monkeypatch.setattr("cellseg1_core.inference_cache.predict_cached", _fake_predict_cached)
-    monkeypatch.setattr("cellseg1_core.engines.cellpose_available", lambda: False)
+    monkeypatch.setattr("velum_core.inference_cache.predict_cached", _fake_predict_cached)
+    monkeypatch.setattr("velum_core.engines.cellpose_available", lambda: False)
 
     storage = tmp_path / "storage"
     (storage / "sam_backbone").mkdir(parents=True)

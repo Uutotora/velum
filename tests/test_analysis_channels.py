@@ -5,7 +5,7 @@ column per channel and that the default (single-image) behaviour is unchanged.
 """
 import numpy as np
 
-from cellseg1_core import analysis
+from velum_core import analysis
 
 
 def _two_cell_mask():

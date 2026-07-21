@@ -2,7 +2,7 @@
 
 Qt-free glue between a ``Project``'s settings (``studio/project.py``) and the
 real segmentation pipeline — reuses the classic app's proven ML core
-(``cellseg1_core.predict_controller.PredictController``, ``analysis``,
+(``velum_core.predict_controller.PredictController``, ``analysis``,
 ``benchmark``, ``cohort``) exactly as ``docs/velum/ARCHITECTURE.md`` prescribes
 for this tab, imported lazily so this module itself never pulls in torch.
 
@@ -76,20 +76,20 @@ class SegmentController:
 
     def _pc(self):
         if self.__predict_controller is None:
-            from cellseg1_core.predict_controller import PredictController
+            from velum_core.predict_controller import PredictController
             self.__predict_controller = PredictController()
         return self.__predict_controller
 
     @staticmethod
     def _ensure_engines_registered() -> None:
-        import cellseg1_core.engines  # noqa: F401 — registers cellseg1 + cellpose
-        import cellseg1_core.engines_sam2  # noqa: F401 — registers sam2
+        import velum_core.engines  # noqa: F401 — registers cellseg1 + cellpose
+        import velum_core.engines_sam2  # noqa: F401 — registers sam2
 
     # ── engines ──────────────────────────────────────────────────────────────
     def list_available_engines(self) -> list[tuple[str, str, bool]]:
         """``[(key, label, available)]`` for every registered engine."""
         self._ensure_engines_registered()
-        from cellseg1_core.engine_registry import all_engines
+        from velum_core.engine_registry import all_engines
         return [(spec.key, spec.label, spec.available()) for spec in all_engines()]
 
     def list_lora_models(self):
@@ -154,7 +154,7 @@ class SegmentController:
         }
 
     def build_config(self, project: Project, image_path: str | Path) -> dict:
-        from cellseg1_core.predict_controller import PredictController
+        from velum_core.predict_controller import PredictController
         self._ensure_engines_registered()
         return PredictController.build_config(self.build_params(project, image_path))
 
@@ -164,7 +164,7 @@ class SegmentController:
         """RGB uint8 array for ``image_path`` — the exact read/normalise path
         a real predict run would see, reused so what you preview is what you
         segment (channel projection, 16-bit stretch, native-format support)."""
-        from cellseg1_core.predict_controller import _read_for_predict
+        from velum_core.predict_controller import _read_for_predict
         rgb, _stack = _read_for_predict({"image_path": str(image_path)})
         return rgb
 
@@ -182,22 +182,22 @@ class SegmentController:
     @staticmethod
     def compute_measurements(mask: np.ndarray, image: Optional[np.ndarray] = None,
                              pixel_size_um: float = 0.0) -> dict:
-        from cellseg1_core import analysis
+        from velum_core import analysis
         return analysis.compute_measurements(mask, intensity_image=image, pixel_size_um=pixel_size_um)
 
     @staticmethod
     def color_overrides_for(result: dict, key: str) -> dict[int, tuple]:
-        from cellseg1_core import analysis
+        from velum_core import analysis
         return analysis.label_colormap_from_measurement(result, key)
 
     @staticmethod
     def measurement_range(result: dict, key: str):
-        from cellseg1_core import analysis
+        from velum_core import analysis
         return analysis.measurement_range(result, key)
 
     @staticmethod
     def summary_line(result: dict) -> str:
-        from cellseg1_core import analysis
+        from velum_core import analysis
         return analysis.summary_line(result)
 
     # ── save / export ────────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ class SegmentController:
         return out_path
 
     def export_measurements_csv(self, result: dict, out_path: str | Path) -> Path:
-        from cellseg1_core import analysis
+        from velum_core import analysis
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(analysis.rows_as_csv(result), encoding="utf-8")
@@ -284,7 +284,7 @@ class SegmentController:
         """Like :meth:`evaluate_against_gt`, but for a GT mask already loaded
         into memory (e.g. as a workspace Ground-truth layer) — no file path
         or resizing involved, just the metrics."""
-        from cellseg1_core import benchmark
+        from velum_core import benchmark
         return benchmark.evaluate(gt_mask, pred_mask)
 
     def discover_gt_pairs(self, project: Project) -> list[tuple[Path, Path]]:
@@ -343,7 +343,7 @@ class SegmentController:
 
     @staticmethod
     def population_stats(records: list) -> dict:
-        from cellseg1_core import cohort
+        from velum_core import cohort
         return cohort.population_stats(records)
 
     # ── benchmark engines vs GT ──────────────────────────────────────────────
@@ -352,7 +352,7 @@ class SegmentController:
                             on_log: Optional[Callable[[str], None]] = None,
                             on_done: Optional[Callable] = None) -> threading.Thread:
         self._ensure_engines_registered()
-        from cellseg1_core.engine_registry import all_engines
+        from velum_core.engine_registry import all_engines
 
         pairs = self.discover_gt_pairs(project)
         if not pairs:
@@ -370,7 +370,7 @@ class SegmentController:
             try:
                 params = self.build_params(project, pairs[0][0])
                 params["engine"] = spec.key
-                from cellseg1_core.predict_controller import PredictController
+                from velum_core.predict_controller import PredictController
                 bases[spec.key] = PredictController.build_config(params)
                 engines.append(spec.key)
             except ValueError as e:

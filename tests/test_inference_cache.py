@@ -1,4 +1,4 @@
-"""Pure-logic tests for cellseg1_core.inference_cache's fp16/torch.compile gating.
+"""Pure-logic tests for velum_core.inference_cache's fp16/torch.compile gating.
 
 inference_cache.py keeps torch imports lazy inside its functions specifically
 so it (and its config-only helpers) can be imported and tested without torch
@@ -7,7 +7,7 @@ touch a real SAM model and aren't covered here (no GPU/checkpoint in this
 suite); that mirrors every other test in this repo, none of which unit-test
 those two functions directly — only the pure decision logic around them.
 """
-import cellseg1_core.inference_cache as ic
+import velum_core.inference_cache as ic
 
 
 # ── _is_cuda_device ───────────────────────────────────────────────────────────

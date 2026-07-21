@@ -1,4 +1,4 @@
-"""Unit tests for cellseg1_core.analysis (per-cell morphometry).
+"""Unit tests for velum_core.analysis (per-cell morphometry).
 
 These are regression guards: they pin the numeric contract of
 compute_measurements so refactors of the measurement pipeline cannot
@@ -9,7 +9,7 @@ import math
 import numpy as np
 import pytest
 
-from cellseg1_core.analysis import (
+from velum_core.analysis import (
     compute_measurements,
     label_colormap_from_measurement,
     measurement_range,

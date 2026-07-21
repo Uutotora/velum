@@ -6,7 +6,7 @@ imaging modalities with no checkpoint of your own required — but unlike SAM1
 and Cellpose it was trained for *video* (and by extension volumetric z-stack)
 segmentation with temporal/depth consistency as a first-class goal, which is
 why it is CellSeg1's flagship engine for z-stacks and time-lapse (see
-:mod:`cellseg1_core.predict_controller`'s ``_predict_volume`` for the
+:mod:`velum_core.predict_controller`'s ``_predict_volume`` for the
 plane-by-plane-plus-stitch orchestration that actually drives a stack through
 this engine).
 
@@ -36,7 +36,7 @@ experimental until confirmed against a real install — the automatic mode
 remains the default and the well-verified choice.
 
 The ``sam2`` package is never imported at module level — only lazily inside
-the functions that need it, exactly like ``cellseg1_core.engines`` does for
+the functions that need it, exactly like ``velum_core.engines`` does for
 ``cellpose`` — so this module (and the registry it populates at import time)
 stays free of the dependency, and ``available()`` reports the plain truth of
 whether it's installed rather than crashing the app on import when it isn't.
@@ -47,7 +47,7 @@ from pathlib import Path
 
 import numpy as np
 
-from cellseg1_core.engine_registry import EngineSpec, register
+from velum_core.engine_registry import EngineSpec, register
 
 # Best-effort filename/config conventions for the official checkpoints
 # (github.com/facebookresearch/sam2). A user whose installed sam2 package
@@ -216,7 +216,7 @@ def predict_sam2_propagate(frames: list, config: dict, on_slice=None) -> np.ndar
     propagates each one's mask across every subsequent plane via the memory-
     bank-conditioned video model — stronger temporal/depth consistency than
     the default independent-per-plane + IoU-stitch mode
-    (:mod:`cellseg1_core.volume_stitch`), at the cost of a fundamentally
+    (:mod:`velum_core.volume_stitch`), at the cost of a fundamentally
     different — and, see the module docstring, unverified — code path.
 
     frames : list of Z ``H×W×3`` uint8 RGB planes, already read/projected
@@ -303,9 +303,9 @@ def _predict_sam2_engine(image: np.ndarray, config: dict) -> np.ndarray:
 
 def _sam2_available_check() -> bool:
     # A thin wrapper (not sam2_available directly) so tests that monkeypatch
-    # cellseg1_core.engines_sam2.sam2_available still take effect — EngineSpec
+    # velum_core.engines_sam2.sam2_available still take effect — EngineSpec
     # would otherwise hold a frozen reference to whatever function object
-    # existed at register() time (see cellseg1_core.engines for the same fix).
+    # existed at register() time (see velum_core.engines for the same fix).
     return sam2_available()
 
 

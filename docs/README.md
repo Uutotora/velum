@@ -31,6 +31,6 @@ There are two of each on purpose:
   screens, UI, design, tab wiring.
 
 When in doubt, a change to `studio/` goes in the Velum docs; anything else
-(engines, `cellseg1_core/`, `server/`, build) goes in the project-wide docs.
+(engines, `velum_core/`, `server/`, build) goes in the project-wide docs.
 The authoritative "read this first" for agents is still the root
 [`AGENTS.md`](../AGENTS.md).

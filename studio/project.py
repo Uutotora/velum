@@ -19,7 +19,7 @@ Persistence layout (under ``<store_root>/<project-id>/``)::
         (masks/, exports/, …  # future: per-project artefacts live here)
 
 ``ProjectSettings`` mirrors **every** knob the predict/train pipeline reads
-(see ``cellseg1_core/predict_controller.py``'s ``build_config`` /
+(see ``velum_core/predict_controller.py``'s ``build_config`` /
 ``sam_config``). Keeping them here, per-project and versioned on disk, is what
 lets a microscopist reopen a cohort weeks later and get byte-identical
 segmentation — and it is the single source of truth for "don't lose any
@@ -40,7 +40,7 @@ from typing import Any, Optional
 # defaulted), so this is for explicit migrations, not routine compatibility.
 SCHEMA_VERSION = 1
 
-# The three interchangeable engines (keys match cellseg1_core.engine_registry).
+# The three interchangeable engines (keys match velum_core.engine_registry).
 ENGINES = ("cellseg1", "cellpose", "sam2")
 
 # Display name and design-token "kind" (see theme.py / components.Chip) for

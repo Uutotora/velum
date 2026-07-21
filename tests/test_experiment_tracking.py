@@ -1,4 +1,4 @@
-"""Unit tests for cellseg1_core.experiment_tracking (optional Aim logging).
+"""Unit tests for velum_core.experiment_tracking (optional Aim logging).
 
 Aim itself is never installed in this sandbox (it's an optional `tracking`
 extra, not part of the pure-logic `test` dependency-group), so the
@@ -19,7 +19,7 @@ import types
 
 import pytest
 
-from cellseg1_core import experiment_tracking as tracking
+from velum_core import experiment_tracking as tracking
 
 
 @pytest.fixture(autouse=True)

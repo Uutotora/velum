@@ -19,18 +19,18 @@ cohort stats, the Assistant, export) is engine-agnostic:
 - **CellSeg1** — SAM ViT backbone + **LoRA**, one-shot fine-tuning from a
   single annotated image (`cellseg1_train.py`, `peft/`, `predict.py`).
 - **Cellpose-SAM** — zero-shot generalist, no training required
-  (`cellseg1_core/engines.py`).
+  (`velum_core/engines.py`).
 - **SAM 2** — zero-shot, the flagship choice for z-stacks/time-lapse
-  (`cellseg1_core/engines_sam2.py`; optional dependency, degrades gracefully
+  (`velum_core/engines_sam2.py`; optional dependency, degrades gracefully
   when not installed — see `docs/BACKLOG.md`'s "SAM 2 engine" entry).
 
 > **2026-07-21 — the app is now `studio/`, not `napari_app/`.** Studio (its own
 > PyQt6 app, its own canvas — never embedded napari) is THE product. The old
 > `napari_app/` napari-plugin UI has been **deleted**; its engine-agnostic ML
-> core moved to a new Qt-free package **`cellseg1_core/`**. Wherever this doc
+> core moved to a new Qt-free package **`velum_core/`**. Wherever this doc
 > still says `napari_app/…` for a *core* module (engines, analysis, benchmark,
 > cohort, advisor, tiling, volume_stitch, inference_cache, engine_registry, or
-> anything under `core/`), read `cellseg1_core/…`. The repo map below is updated;
+> anything under `core/`), read `velum_core/…`. The repo map below is updated;
 > some prose further down may still lag.
 
 Target users are microscopists and cell biologists, **not** ML engineers.
@@ -65,7 +65,7 @@ studio/                THE PRODUCT (PyQt6 desktop app — NOT napari)
   components.py theme.py icons.py motion.py overlays.py   the UI kit
   assets/icon.png      the app icon (see docs/app_icon/, docs/velum/PACKAGING.md)
 
-cellseg1_core/         THE ML CORE (engine-agnostic, Qt-free, no napari) — what
+velum_core/         THE ML CORE (engine-agnostic, Qt-free, no napari) — what
                        studio imports as its backend. Extracted 2026-07-21 from
                        the deleted napari_app/.
   predict_controller.py  THE single prediction choke point: config build +
@@ -91,7 +91,7 @@ cellseg1_core/         THE ML CORE (engine-agnostic, Qt-free, no napari) — wha
   tuning_loop.py       (multi-channel IO · training entry + state · Aim tracking
                        · auto-tune loop)
 
-repo-root ML libs (shared, imported by cellseg1_core — do not delete):
+repo-root ML libs (shared, imported by velum_core — do not delete):
   segment_anything/    vendored SAM fork (incl. the mask-NMS generators)
   peft/                LoRA implementation for SAM
   data/                dataset + image IO (data/utils.py has read/resize)
@@ -207,7 +207,7 @@ throwaway venv that installs *only* the declared group — run from the repo
 root, **no trailing `.`**: that would also pull in the project's own
 `[project.dependencies]` (torch/napari/PyQt6 — everything this check exists
 to exclude), silently turning it back into the full-env check it's supposed
-to replace (`pytest.ini`'s `pythonpath = .` is what makes `cellseg1_core`/`data`/
+to replace (`pytest.ini`'s `pythonpath = .` is what makes `velum_core`/`data`/
 etc. importable with nothing installed, so the package itself never needs to
 be):
 ```
@@ -233,7 +233,7 @@ python3.12 -m venv /tmp/civenv && /tmp/civenv/bin/pip install --group test \
   here (GUI, model) goes behind an **opt-in flag, off by default**, so existing
   behaviour is byte-for-byte unchanged (see the `tiled` toggle for the pattern).
 - **The single prediction choke point** is `_predict_cached(config)` in
-  `cellseg1_core/predict_controller.py`. `PredictController` in the same module owns config
+  `velum_core/predict_controller.py`. `PredictController` in the same module owns config
   building (`build_config`/`sam_config`) and predict/batch/benchmark
   orchestration; it takes plain dicts and plain callbacks, not Qt widgets/
   signals, so it's unit-tested without PyQt6/torch (`tests/

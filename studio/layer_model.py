@@ -152,7 +152,7 @@ class LabelsLayer(Layer):
         # its 0.35/0.7 defaults, matched here as fill_opacity/opacity so our
         # single layer reproduces that exact look without the two-layer
         # trick. contour=0 still means "fill only, no outline" — a real,
-        # selectable state, not removed. 2px (not cellseg1_core's 1px): ours is
+        # selectable state, not removed. 2px (not velum_core's 1px): ours is
         # a per-pixel boundary mask, not a GPU-rendered line, and a 1px-wide
         # mask is easy to lose entirely once the canvas is zoomed out below
         # 1:1 — confirmed by direct pixel sampling of a real render, not

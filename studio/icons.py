@@ -3,7 +3,7 @@
 Studio has its **own** icons — the ones drawn for the north-star mockup, not
 the classic app's. Every icon is a 24×24 stroke path recoloured on demand so it
 can pick up the accent on hover/active states. Purely presentational and
-self-contained (no dependency on the classic ``cellseg1_core``).
+self-contained (no dependency on the classic ``velum_core``).
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Pure-logic tests for cellseg1_core.volume_stitch (z-stack/time-lapse linking).
+"""Pure-logic tests for velum_core.volume_stitch (z-stack/time-lapse linking).
 
 No torch/napari/GPU/engine of any kind — every test feeds hand-built 2-D
 label arrays directly to stitch_slices(), the same shape any registered
@@ -7,7 +7,7 @@ engine's per-plane predict() output would have.
 import numpy as np
 import pytest
 
-from cellseg1_core.volume_stitch import stitch_slices
+from velum_core.volume_stitch import stitch_slices
 
 
 def _blank(h=10, w=20):

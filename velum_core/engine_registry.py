@@ -2,12 +2,12 @@
 
 A registered engine is a small :class:`EngineSpec`: a stable ``key``, a
 display ``label``, and a ``predict(image, config) -> label_mask`` callable —
-the one interface :mod:`cellseg1_core.predict_controller` needs to run
+the one interface :mod:`velum_core.predict_controller` needs to run
 inference, regardless of which engine is selected. The Predict tab's engine
 selector and benchmark checklist both list whatever is registered here
 instead of hardcoding engine names, so adding a new engine (StarDist,
 InstanSeg, Micro-SAM, DeepCell, ...) is a single :func:`register` call in the
-module that defines it — see :mod:`cellseg1_core.engines` for the two built-in
+module that defines it — see :mod:`velum_core.engines` for the two built-in
 engines.
 
 Heavy per-engine dependencies (torch, cellpose, ...) are never imported here;

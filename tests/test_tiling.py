@@ -1,4 +1,4 @@
-"""Unit tests for cellseg1_core.tiling (tiled large-image segmentation).
+"""Unit tests for velum_core.tiling (tiled large-image segmentation).
 
 The stitching logic is the load-bearing part — it decides whether a cell cut
 by a tile boundary comes back as one cell or two. These tests pin that with a
@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from scipy import ndimage
 
-from cellseg1_core.tiling import (
+from velum_core.tiling import (
     Tile,
     plan_tiles,
     recommend_overlap,

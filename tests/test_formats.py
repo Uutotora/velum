@@ -1,4 +1,4 @@
-"""Pure-logic tests for microscopy format reading (cellseg1_core.channels).
+"""Pure-logic tests for microscopy format reading (velum_core.channels).
 
 Covers physical pixel-size extraction (OME-TIFF + baseline TIFF resolution
 tags), unit conversion, the shared axes→stack transform, and graceful
@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from cellseg1_core import channels as ch
+from velum_core import channels as ch
 
 
 # ── unit conversion ─────────────────────────────────────────────────────────

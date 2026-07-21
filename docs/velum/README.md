@@ -46,7 +46,7 @@ see [`../README.md`](../README.md) for the map). Read in this order:
   a Settings screen, native rounded corners, packaging — tracked in
   `BACKLOG.md`.
 - **Velum is THE product.** The old `napari_app/` plugin UI has been deleted;
-  its engine-agnostic ML core moved to `cellseg1_core/` (Qt-free, no napari),
+  its engine-agnostic ML core moved to `velum_core/` (Qt-free, no napari),
   which Velum imports as its backend. There is no separate "classic app" any
   more — this is it.
 

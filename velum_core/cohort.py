@@ -3,7 +3,7 @@ Cohort-level aggregation for batch runs.
 
 Scientists rarely analyse one image — they process a plate/condition and report
 population statistics. This module turns a batch of per-image measurement
-results (from :mod:`cellseg1_core.analysis`) into:
+results (from :mod:`velum_core.analysis`) into:
 
   • a long per-cell table (every cell, tagged with its source image),
   • a per-image summary table (counts + central tendencies),

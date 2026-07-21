@@ -1,16 +1,16 @@
 """Velum — the Models & Train tab controller.
 
 Qt-free glue between the real one-shot LoRA training pipeline
-(``cellseg1_core/train_model.py`` + ``train_state_manager.py`` — the exact
+(``velum_core/train_model.py`` + ``train_state_manager.py`` — the exact
 code the classic app's Train tab already uses) and Studio's Models & Train
 screen: resolving a SAM backbone, validating an annotated image has a mask,
 running training on a background thread with live progress, and listing
 trained models / recent runs from disk.
 
-Mirrors ``cellseg1_core/predict_controller.py``'s shape — plain data in,
+Mirrors ``velum_core/predict_controller.py``'s shape — plain data in,
 plain callbacks out, no Qt — so it is unit-tested without PyQt6. Heavy deps
 (torch, cellseg1_train) are never imported at module top level; they're
-pulled in lazily inside ``cellseg1_core.train_model.train_model`` itself,
+pulled in lazily inside ``velum_core.train_model.train_model`` itself,
 exactly as the classic Train tab already relies on.
 
 Data-directory design: unlike the classic Train tab (whose "Images folder" /
@@ -41,7 +41,7 @@ import numpy as np
 MASK_EXTS = (".png", ".tif", ".tiff", ".npy", ".bmp")
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".npy")
 
-# SAM backbone checkpoint filenames, keyed the same as cellseg1_core's engines.
+# SAM backbone checkpoint filenames, keyed the same as velum_core's engines.
 BACKBONE_FILES = {
     "vit_h": "sam_vit_h_4b8939.pth",
     "vit_l": "sam_vit_l_0b3195.pth",
@@ -167,7 +167,7 @@ def parse_iso(ts: str) -> Optional[datetime]:
 @dataclass
 class TrainedModel:
     """One row of the "Trained models" list — real data from a checkpoint's
-    JSON sidecar (``cellseg1_core.train_model._save_config_sidecar``)."""
+    JSON sidecar (``velum_core.train_model._save_config_sidecar``)."""
 
     name: str
     checkpoint: Path
@@ -250,7 +250,7 @@ class TrainController:
         self.sam_backbone_dir = self.storage_dir / "sam_backbone"
         self.lora_out_dir.mkdir(parents=True, exist_ok=True)
 
-        from cellseg1_core.train_state_manager import TrainingStateManager
+        from velum_core.train_state_manager import TrainingStateManager
         self.state_manager = TrainingStateManager(str(self.storage_dir))
 
         self._thread: Optional[threading.Thread] = None
@@ -436,7 +436,7 @@ class TrainController:
         pq, se = self._progress_queue, self._stop_event
 
         def run():
-            from cellseg1_core.train_model import train_model
+            from velum_core.train_model import train_model
             try:
                 train_model(config, self.state_manager, progress_queue=pq, stop_event=se)
                 if on_log:

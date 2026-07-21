@@ -1,7 +1,7 @@
 """Tests for the Segment workspace screen, wired for real (studio/workspace.py).
 
 Offscreen Qt. Every predict/batch/benchmark test monkeypatches
-cellseg1_core.inference_cache.predict_cached (same seam as
+velum_core.inference_cache.predict_cached (same seam as
 test_segment_controller.py) so the real UI -> controller -> engine chain
 runs end to end without a GPU/SAM weights/torch actually loading anything.
 """
@@ -58,12 +58,12 @@ def _fake_predict_cached(config, image_rgb):
 
 @pytest.fixture(autouse=True)
 def _fake_engine(monkeypatch):
-    monkeypatch.setattr("cellseg1_core.inference_cache.predict_cached", _fake_predict_cached)
+    monkeypatch.setattr("velum_core.inference_cache.predict_cached", _fake_predict_cached)
     # cellpose may be genuinely installed in whatever env runs these tests —
     # without this, the benchmark test sees it as available and actually
     # runs real Cellpose inference instead of treating it as absent (see the
     # identical note in test_segment_controller.py's own _fake_engine).
-    monkeypatch.setattr("cellseg1_core.engines.cellpose_available", lambda: False)
+    monkeypatch.setattr("velum_core.engines.cellpose_available", lambda: False)
 
 
 @pytest.fixture

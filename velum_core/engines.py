@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from cellseg1_core.engine_registry import EngineSpec, register
+from velum_core.engine_registry import EngineSpec, register
 
 _cp_model = None
 _cp_key: str | None = None
@@ -86,7 +86,7 @@ def invalidate_cellpose():
 # as before this registry existed.
 
 def _predict_cellseg1_engine(image: np.ndarray, config: dict) -> np.ndarray:
-    from cellseg1_core.inference_cache import predict_cached
+    from velum_core.inference_cache import predict_cached
     return predict_cached(config, image)
 
 
@@ -101,13 +101,13 @@ def _predict_cellpose_engine(image: np.ndarray, config: dict) -> np.ndarray:
 
 
 def _cellseg1_status_line() -> str:
-    from cellseg1_core.inference_cache import cache_status
+    from velum_core.inference_cache import cache_status
     return cache_status()
 
 
 def _cellpose_available_check() -> bool:
     # A thin wrapper (rather than passing cellpose_available directly) so
-    # tests that monkeypatch cellseg1_core.engines.cellpose_available still take
+    # tests that monkeypatch velum_core.engines.cellpose_available still take
     # effect — EngineSpec.available would otherwise hold a frozen reference to
     # whichever function object existed at register() time.
     return cellpose_available()
