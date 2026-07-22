@@ -383,6 +383,8 @@ class StudioWindow(QMainWindow):
                     icon="save", emoji="💾", handler=ws.save_masks, enabled=project is not None),
             Command(id="segment.export_csv", label="Export measurements → CSV", section="Segment",
                     icon="csv", emoji="📤", handler=ws.export_measurements, enabled=project is not None),
+            Command(id="segment.export_dataset", label="Export dataset (images + masks)", section="Segment",
+                    icon="download", emoji="📦", handler=ws.export_dataset, enabled=project is not None),
         ]
         if project is not None:
             current_engine = project.settings.engine

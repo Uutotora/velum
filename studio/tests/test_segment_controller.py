@@ -441,3 +441,46 @@ def test_record_run_only_touches_given_fields():
     assert project.stats.n_cells == 9
     assert project.stats.last_f1 == 0.5
     assert project.stats.progress == 50
+
+
+# ── dataset export wiring ────────────────────────────────────────────────────
+
+def test_dataset_items_only_returns_segmented_images(ctrl, tmp_path):
+    a, b, c = (tmp_path / f"i{n}.png" for n in range(3))
+    for p in (a, b, c):
+        _write_image(p)
+    project = Project(id="dp", name="DP", image_paths=[str(a), str(b), str(c)])
+    ctrl.save_result_mask(project, a, np.array([[0, 1], [2, 2]], np.int32))
+    ctrl.save_result_mask(project, c, np.array([[0, 5], [0, 5]], np.int32))
+    items = ctrl.dataset_items(project)           # b was never segmented
+    paths = [p for p, _ in items]
+    assert paths == [str(a), str(c)]
+    assert all(isinstance(m, np.ndarray) for _, m in items)
+
+
+def test_export_project_dataset_writes_and_reports(ctrl, tmp_path):
+    a, b = tmp_path / "cellA.png", tmp_path / "cellB.png"
+    _write_image(a); _write_image(b)
+    settings = ProjectSettings(engine="cellseg1", pixel_size_um=0.3)
+    project = Project(id="dp", name="Hela Cohort",
+                      image_paths=[str(a), str(b)], settings=settings)
+    ctrl.save_result_mask(project, a, np.array([[0, 1], [2, 3]], np.int32))
+    ctrl.save_result_mask(project, b, np.array([[4, 4], [0, 0]], np.int32))
+
+    out = tmp_path / "export"
+    manifest = ctrl.export_project_dataset(project, out, include_measurements=True)
+
+    assert manifest["counts"]["n_images"] == 2
+    assert manifest["counts"]["n_cells"] == 4        # 3 in A + 1 in B
+    assert manifest["source"]["engine"] == "cellseg1"
+    assert manifest["source"]["pixel_size_um"] == 0.3
+    assert (out / "dataset.json").is_file()
+    assert (out / "images" / "cellA.png").is_file()
+    assert (out / "masks" / "cellA.png").is_file()
+    assert (out / "measurements" / "cellA.csv").is_file()
+
+
+def test_export_project_dataset_raises_when_nothing_segmented(ctrl, tmp_path):
+    project = Project(id="dp", name="Empty", image_paths=[str(tmp_path / "x.png")])
+    with pytest.raises(ValueError):
+        ctrl.export_project_dataset(project, tmp_path / "out")

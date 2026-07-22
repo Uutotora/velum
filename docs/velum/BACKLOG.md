@@ -314,6 +314,17 @@ palette) is real. See `ROADMAP.md`.
 
 ## P2 — polish & platform
 
+- [x] **Export a project as a re-trainable dataset** · M · done (2026-07-22).
+  `studio/dataset_export.py` (Qt/torch-free) writes `images/` + `masks/<stem>.png`
+  (uint16 instance labels) + optional `measurements/` + a `dataset.json`
+  manifest/README with full provenance (engine, model, calibration, counts,
+  optional train/val split). Layout matches what `train_controller` discovers,
+  so the export re-trains with zero conversion — closing the *collect → segment
+  → proofread → export → train* loop. Wired via `SegmentController.
+  export_project_dataset()`, a Results-pane "Export dataset…" button, and a ⌘K
+  command. 17 tests. Follow-ups worth doing: a real end-to-end "train on an
+  exported dataset" path in the Train tab, and a COCO/CSV export variant for
+  non-Velum trainers.
 - [ ] Live theme repaint without a full rebuild; persist the choice.
 - [x] **Projects tab v2 — deletion, trash, rename/duplicate, real scroll
   performance** · L · done (2026-07-20). The Projects tab was marked

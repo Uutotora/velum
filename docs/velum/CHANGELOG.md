@@ -5,6 +5,51 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-22 — Export a project as a re-trainable dataset (the "collect your own dataset" loop)
+
+Velum's whole point is that a project is a growing, proofread collection of
+segmented microscopy images — but there was no way to get that *out* as a
+dataset. You could Save one mask or Export one image's CSV; you could not turn
+the project into something you (or Velum's own Train tab) could train on. This
+closes the loop: **collect real images → segment → proofread → export a dataset
+→ train on it.**
+
+- **`studio/dataset_export.py`** (new, Qt-free, torch-free — numpy + cv2 +
+  stdlib, so it runs in CI's light group) — `export_dataset()` writes a
+  standard, self-describing folder:
+  ```
+  images/<stem><ext>        source image, copied verbatim (ND2/CZI/OME-TIFF
+                            preserved byte-for-byte — no re-encode)
+  masks/<stem>.png          uint16 instance mask, one id per cell, 0 = bg
+                            (the exact encoding segment_controller already uses)
+  measurements/<stem>.csv   per-cell morphometry (optional)
+  dataset.json + README.md  manifest / dataset card (provenance below)
+  ```
+  The manifest records engine, model/LoRA, SAM backbone, pixel calibration,
+  per-image cell counts + dims + source path, and totals. Stems are deduped so
+  two same-named images in different folders can't clobber each other, and
+  image↔mask stay paired by stem. Optional deterministic train/val split.
+- **Why this layout:** it's the one Velum's training already discovers
+  (`train_controller.find_mask_for_image` looks for `masks/<stem>.*`), so
+  pointing the Train tab's *images* at `images/` and *masks* at `masks/` trains
+  on the export with zero conversion. The README says exactly that.
+- **`SegmentController.dataset_items()` / `export_project_dataset()`** — gather
+  every image in the project that has a persisted (proofread) result mask and
+  export it; raises if nothing's been segmented yet.
+- **UI:** an "Export dataset…" button in the Results pane (project-level,
+  distinct from the single-image Save/Export CSV above it) and an
+  "Export dataset (images + masks)" ⌘K command. Both toast the resulting
+  image/cell counts and target path, or a friendly reason when there's nothing
+  to export.
+- **Verified:** 17 new tests (14 pure-logic in `test_dataset_export.py` —
+  layout, manifest round-trip, collision-safe stems, deterministic splits,
+  verbatim-copy of an exotic-extension source, mask label round-trip; 3 wiring
+  in `test_segment_controller.py`). Full `studio/` suite green; offscreen
+  screenshot confirms the button renders in context. **Not verified here:** the
+  live GUI click-through and a real end-to-end train *on* an exported dataset.
+
+---
+
 ## 2026-07-22 — Microscopy formats now work through the complete Studio import flow
 
 Studio's import copy was inconsistent with the core: the new-project dialog

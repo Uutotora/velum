@@ -38,7 +38,7 @@ from studio import icons
 from studio import theme, demo
 from studio.project import (
     ENGINE_LABELS, ENGINE_KIND, IMAGE_FILE_FILTER, Project, ProjectSettings,
-    is_supported_image_path,
+    is_supported_image_path, slugify,
 )
 from studio.paint import nuclei_pixmap
 from studio.components import (
@@ -2175,6 +2175,9 @@ class WorkspaceScreen(QWidget):
     def export_measurements(self) -> None:
         self._export_csv()
 
+    def export_dataset(self) -> None:
+        self._export_dataset()
+
     def switch_engine(self, key: str) -> None:
         """Set the active engine by registry key — the palette already has
         the key straight from ``segment_controller.list_available_engines()``,
@@ -2266,6 +2269,14 @@ class WorkspaceScreen(QWidget):
         for i, b in enumerate([save_btn, export_btn, refine_btn, measure_btn]):
             btns.addWidget(b, i // 2, i % 2)
         layout.addLayout(btns)
+
+        # Project-level: bundle every segmented image + mask into a standard,
+        # re-trainable dataset (studio.dataset_export) — this is the "collect
+        # your own dataset with the product" loop, distinct from the single-
+        # image Save/Export above.
+        dataset_btn = PillButton("Export dataset…", t, "ghost", "download", small=True)
+        dataset_btn.clicked.connect(self._export_dataset)
+        layout.addWidget(dataset_btn)
 
         layout.addWidget(hline(t))
         layout.addWidget(GroupLabel("Display · colour cells by", t))
@@ -2397,6 +2408,32 @@ class WorkspaceScreen(QWidget):
             return
         self._segment.export_measurements_csv(self._last_result, path)
         self._toast("Measurements exported", path)
+
+    def _export_dataset(self) -> None:
+        """Bundle every segmented image in the project into a standard,
+        re-trainable dataset folder (studio.dataset_export)."""
+        if self._project is None:
+            self._toast("No project open", "Open or create a project first.")
+            return
+        items = self._segment.dataset_items(self._project)
+        if not items:
+            self._toast("Nothing to export",
+                        "Segment at least one image in this project first.")
+            return
+        target = QFileDialog.getExistingDirectory(
+            self, "Choose a folder for the dataset", "", options=_DLG)
+        if not target:
+            return
+        out_dir = Path(target) / slugify(self._project.name)
+        try:
+            manifest = self._segment.export_project_dataset(
+                self._project, out_dir, include_measurements=True)
+        except Exception as exc:  # noqa: BLE001 - surface any IO/encode failure
+            self._toast("Export failed", str(exc))
+            return
+        c = manifest["counts"]
+        self._toast("Dataset exported",
+                    f"{c['n_images']} images · {c['n_cells']} cells → {out_dir}")
 
     def _refine_coming_soon(self) -> None:
         self._toast("Refine — coming soon", "Interactive point-prompt refinement isn't wired up yet.")

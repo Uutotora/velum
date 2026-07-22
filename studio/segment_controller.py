@@ -243,6 +243,39 @@ class SegmentController:
         out_path.write_text(analysis.rows_as_csv(result), encoding="utf-8")
         return out_path
 
+    # ── dataset export (collect the whole project into a re-trainable set) ────
+    def dataset_items(self, project: Project) -> list[tuple[str, np.ndarray]]:
+        """Every ``(image_path, instance_mask)`` in the project that already
+        has a saved segmentation — the raw material for a dataset. Reads the
+        same persisted per-image masks the workspace reloads on reopen, so an
+        export reflects the user's proofread results, not just the last live
+        run."""
+        items: list[tuple[str, np.ndarray]] = []
+        for p in project.image_paths:
+            mask = self.load_result_mask(project, p)
+            if mask is not None:
+                items.append((str(p), mask))
+        return items
+
+    def export_project_dataset(
+        self, project: Project, output_dir: str | Path, *,
+        include_measurements: bool = False, val_fraction: float = 0.0,
+        on_progress: Optional[Callable[[int, int], None]] = None,
+    ) -> dict:
+        """Write the project's segmented images as a standard, re-trainable
+        dataset under ``output_dir`` (see ``studio.dataset_export``). Raises
+        ``ValueError`` if nothing in the project has been segmented yet."""
+        from studio import dataset_export
+        s = project.settings
+        return dataset_export.export_dataset(
+            output_dir, self.dataset_items(project),
+            name=project.name, project_id=project.id,
+            engine=s.engine, model_name=s.model_name, vit_name=s.vit_name,
+            pixel_size_um=(s.pixel_size_um or None),
+            include_measurements=include_measurements,
+            val_fraction=val_fraction, on_progress=on_progress,
+        )
+
     # ── persisted per-(project, image) results ───────────────────────────────
     # A predict run previously only ever lived in the in-memory LayerList —
     # navigate away (or close and reopen the project) and it was gone, with
