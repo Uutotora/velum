@@ -36,7 +36,10 @@ from PyQt6.QtWidgets import (
 
 from studio import icons
 from studio import theme, demo
-from studio.project import ENGINE_LABELS, ENGINE_KIND, Project, ProjectSettings
+from studio.project import (
+    ENGINE_LABELS, ENGINE_KIND, IMAGE_FILE_FILTER, Project, ProjectSettings,
+    is_supported_image_path,
+)
 from studio.paint import nuclei_pixmap
 from studio.components import (
     Chip, Badge, EngineChip, PillButton, IconButton, SelectBox, Toggle, Slider, Stepper,
@@ -74,7 +77,6 @@ COLOR_BY_OPTIONS = ["Instance ID (default)", "Area (heatmap)", "Diameter (heatma
 _COLOR_BY_KEYS = {"Area (heatmap)": "area", "Diameter (heatmap)": "diameter",
                   "Solidity (heatmap)": "solidity", "Mean intensity (heatmap)": "mean_intensity"}
 _DLG = QFileDialog.Option.DontUseNativeDialog
-_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".npy")
 # Ground truth's fixed colour — matches the classic app's own GT convention
 # (predict_widget.py's solid_rgba=(0.0, 1.0, 0.35, 1.0)): a uniform green,
 # not per-instance random hues, so GT and predictions read as visually
@@ -594,8 +596,8 @@ class WorkspaceScreen(QWidget):
         if self._project is None:
             self._toast("No project open", "Open or create a project first.")
             return
-        filt = "Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.npy);;All files (*)"
-        paths, _ = QFileDialog.getOpenFileNames(self, "Add images to project", "", filt, options=_DLG)
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Add images to project", "", IMAGE_FILE_FILTER, options=_DLG)
         if paths:
             self._add_image_paths(paths)
 
@@ -607,7 +609,7 @@ class WorkspaceScreen(QWidget):
         if self._project is None:
             return
         existing = set(self._project.image_paths)
-        new = [p for p in paths if p not in existing and Path(p).suffix.lower() in _IMAGE_EXTS]
+        new = [p for p in paths if p not in existing and is_supported_image_path(p)]
         if not new:
             self._toast("No new images",
                        "Those are already in this project, or aren't a supported image format.")
@@ -631,7 +633,7 @@ class WorkspaceScreen(QWidget):
 
     def _images_drop(self, e) -> None:
         paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
-        paths = [p for p in paths if Path(p).suffix.lower() in _IMAGE_EXTS]
+        paths = [p for p in paths if is_supported_image_path(p)]
         if paths:
             self._add_image_paths(paths)
         e.acceptProposedAction()
@@ -725,14 +727,10 @@ class WorkspaceScreen(QWidget):
         if cached is not None:
             return cached
         try:
+            # Use the same controller path as the canvas. OpenCV cannot read
+            # ND2/CZI/LIF and mishandles many OME-TIFF channel layouts.
+            img = self._segment.load_preview_image(path)
             import cv2
-            img = cv2.imread(path, cv2.IMREAD_COLOR)
-            if img is None:
-                # cv2 fails silently (returns None) on a permission-blocked or
-                # missing file -- fall through to the synthetic placeholder,
-                # cached below so we never re-hit the unreadable file.
-                raise ValueError("unreadable")
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             img = cv2.resize(img, (38, 30), interpolation=cv2.INTER_AREA)
             img = np.ascontiguousarray(img)
             qimg = QImage(img.data, 38, 30, 38 * 3, QImage.Format.Format_RGB888).copy()
@@ -768,13 +766,18 @@ class WorkspaceScreen(QWidget):
         if path == self._current_image_path:
             return
         try:
-            img = self._segment.load_preview_image(path)
+            img, pixel_size_um = self._segment.load_preview_with_metadata(path)
         except Exception as e:
             hint = self._read_error_hint(path)
             self._toast("Can't load image", hint or str(e))
             return
         self._current_image_path = path
         self._current_image_array = img
+        # Never replace a deliberate manual calibration, but use microscope
+        # metadata as the sensible default for a new, uncalibrated project.
+        if pixel_size_um is not None and self._project is not None and self._project.settings.pixel_size_um <= 0:
+            self._project.settings.pixel_size_um = pixel_size_um
+            self._projects.store.save(self._project)
         self._last_result = None
         self._gt_metrics = None
         self._layers.clear()

@@ -346,6 +346,19 @@ def test_add_image_paths_dedupes_and_filters_unsupported(app, segment, projects,
     assert any("No new images" in t[0] for t in toasts)
 
 
+@pytest.mark.parametrize("suffix", [".nd2", ".czi", ".lif"])
+def test_add_image_paths_accepts_native_microscopy_formats(
+        app, segment, projects, toasts, tmp_path, storage, suffix):
+    project = _make_project(tmp_path, projects, storage, n_images=1)
+    source = tmp_path / f"field{suffix}"
+    source.write_bytes(b"microscopy fixture")
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    ws._add_image_paths([str(source)])
+    assert len(project.image_paths) == 2
+    assert Path(project.image_paths[-1]).suffix == suffix
+
+
 def test_add_image_paths_auto_selects_first_image_for_empty_project(
         app, segment, projects, toasts, tmp_path, storage):
     project = projects.store.create(

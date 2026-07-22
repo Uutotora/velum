@@ -5,6 +5,23 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-22 — Microscopy formats now work through the complete Studio import flow
+
+Studio's import copy was inconsistent with the core: the new-project dialog
+promised ND2/CZI, but the Workspace rejected those extensions and then used
+OpenCV for previews (which cannot decode ND2/CZI/LIF or robustly preserve
+OME-TIFF channel layouts). Every Studio entry point now shares one supported
+format contract: TIFF/OME-TIFF, ND2, CZI, LIF and standard image formats.
+
+- New-project browse/drag-drop, Workspace picker and Workspace drag-drop all
+  accept the same extensions, including `.lif`.
+- Canvas thumbnails and full previews use the controller's channel-aware core
+  path, not OpenCV-only decoding; optional-reader errors remain clear install
+  instructions rather than a false “unreadable image”.
+- TIFF/OME-TIFF prediction configuration now explicitly uses the same
+  channel-stack reader as preview, and embedded physical pixel calibration is
+  filled into an uncalibrated project without replacing a manual value.
+
 ---
 
 ## 2026-07-22 — Bundled "Sample — Fluorescence Nuclei" demo project (the hero moment)

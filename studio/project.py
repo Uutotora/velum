@@ -53,6 +53,24 @@ ENGINE_KIND = {"cellseg1": "primary", "cellpose": "signal", "sam2": "primary"}
 # default categorical map; the rest drive a per-cell heatmap over a morphometry.
 COLOR_BY = ("instance", "area", "diameter", "solidity", "intensity")
 
+# One source of truth for every place a user can bring microscopy data into a
+# Studio project. ``.ome.tiff`` has the ordinary ``.tiff`` suffix, so it needs
+# no special case. Optional decoder packages are intentionally not required to
+# import/copy a file; the reader gives an actionable hint on open instead.
+SUPPORTED_IMAGE_EXTENSIONS = (
+    ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".npy",
+    ".nd2", ".czi", ".lif",
+)
+IMAGE_FILE_FILTER = (
+    "Microscopy images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.npy "
+    "*.nd2 *.czi *.lif);;All files (*)"
+)
+
+
+def is_supported_image_path(path: str | Path) -> bool:
+    """Whether ``path`` is a file type Studio can import as an image."""
+    return Path(path).suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+
 
 def _now_iso() -> str:
     """Current UTC time as an ISO-8601 string (stable, sortable, tz-aware)."""

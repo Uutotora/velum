@@ -121,7 +121,34 @@ def test_build_params_maps_every_settings_field(ctrl, project_with_image):
     assert params["resize_size"] == project_with_image.settings.resize_size
     assert params["storage_dir"] == str(ctrl.storage_dir)
     assert params["zstack"] is False
+    assert params["microscopy_stack"] is False
     assert params["device"] in ("cpu", "mps", "0")
+
+
+def test_build_params_routes_tiff_through_microscopy_reader(ctrl, project_with_image, tmp_path):
+    ome = tmp_path / "field.ome.tiff"
+    ome.write_bytes(b"not decoded by this config-only test")
+    params = ctrl.build_params(project_with_image, ome)
+    assert params["microscopy_stack"] is True
+
+
+def test_preview_uses_microscopy_reader_and_returns_calibration(ctrl, monkeypatch, tmp_path):
+    nd2 = tmp_path / "field.nd2"
+    nd2.write_bytes(b"fixture")
+    seen = {}
+
+    class Stack:
+        pixel_size_um = 0.42
+
+    def fake_read(config):
+        seen.update(config)
+        return np.zeros((5, 7, 3), dtype=np.uint8), Stack()
+
+    monkeypatch.setattr("velum_core.predict_controller._read_for_predict", fake_read)
+    image, calibration = ctrl.load_preview_with_metadata(nd2)
+    assert image.shape == (5, 7, 3)
+    assert calibration == pytest.approx(0.42)
+    assert seen["microscopy_stack"] is True
 
 
 def test_build_config_resolves_a_real_engine_config(ctrl, project_with_image):

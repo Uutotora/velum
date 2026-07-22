@@ -109,6 +109,12 @@ def test_add_and_remove_files(dialog):
     assert dialog._image_paths == ["/a/img2.tif"]
 
 
+def test_add_files_keeps_only_studio_supported_microscopy_formats(dialog):
+    dialog.open()
+    dialog._add_files(["/a/field.nd2", "/a/field.czi", "/a/field.lif", "/a/notes.txt"])
+    assert dialog._image_paths == ["/a/field.nd2", "/a/field.czi", "/a/field.lif"]
+
+
 def test_engine_selection_updates_index(dialog):
     dialog.open()
     dialog._set_engine(2)

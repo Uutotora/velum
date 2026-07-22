@@ -60,7 +60,7 @@ def _read_for_predict(config):
     # always go through the channel-stack path — projecting the first channels
     # by default when the user hasn't picked any explicitly.
     is_native = Path(config["image_path"]).suffix.lower() in (".nd2", ".czi", ".lif")
-    if channels or is_native:
+    if channels or is_native or config.get("microscopy_stack"):
         from velum_core.channels import read_channel_stack, project_to_rgb
         stack = read_channel_stack(config["image_path"])
         rgb = project_to_rgb(stack, channels,

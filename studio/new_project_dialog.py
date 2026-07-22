@@ -24,7 +24,10 @@ from studio import icons, theme
 from studio.components import (
     PillButton, IconButton, SegControl, GroupLabel, hline, label, soft_shadow,
 )
-from studio.project import ENGINES, ENGINE_LABELS, ProjectSettings, ProjectStore
+from studio.project import (
+    ENGINES, ENGINE_LABELS, IMAGE_FILE_FILTER, ProjectSettings, ProjectStore,
+    is_supported_image_path,
+)
 
 STEP_TITLES = ["Name your project", "Import images", "Choose an engine"]
 
@@ -70,7 +73,7 @@ class _DropZone(QFrame):
         head = label("Drag & drop images here", 12.5, t["text_subtle"], 600)
         head.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(head)
-        sub = label("TIFF · OME-TIFF · ND2 · CZI · PNG", 11, t["text_muted"])
+        sub = label("TIFF · OME-TIFF · ND2 · CZI · LIF · PNG", 11, t["text_muted"])
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(sub)
         browse = PillButton("Browse files…", t, "ghost", small=True)
@@ -92,7 +95,7 @@ class _DropZone(QFrame):
     def _browse(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Import images", "",
-            "Microscopy images (*.tif *.tiff *.png *.nd2 *.czi);;All files (*)")
+            IMAGE_FILE_FILTER)
         if paths:
             self._on_files(paths)
 
@@ -275,7 +278,7 @@ class NewProjectDialog(QWidget):
 
     def _add_files(self, paths: list[str]) -> None:
         for p in paths:
-            if p not in self._image_paths:
+            if p not in self._image_paths and is_supported_image_path(p):
                 self._image_paths.append(p)
         self._render_step()
 

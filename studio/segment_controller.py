@@ -151,6 +151,11 @@ class SegmentController:
             # triggers volume prediction on one yet).
             "zstack": False,
             "stitch_iou": float(s.stitch_iou),
+            # TIFF/OME-TIFF needs the channel-aware path just as much as
+            # ND2/CZI/LIF.  Otherwise OpenCV can silently flatten or reject
+            # the microscopy layout before an engine ever sees it.
+            "microscopy_stack": Path(image_path).suffix.lower()
+            in (".tif", ".tiff", ".nd2", ".czi", ".lif"),
         }
 
     def build_config(self, project: Project, image_path: str | Path) -> dict:
@@ -160,13 +165,31 @@ class SegmentController:
 
     # ── image loading (for the canvas, before/without a predict run) ────────
     @staticmethod
-    def load_preview_image(image_path: str | Path) -> np.ndarray:
+    def load_preview_with_metadata(image_path: str | Path) -> tuple[np.ndarray, float | None]:
+        """Read a canvas image through the microscopy-aware core path.
+
+        The optional-reader ``MissingReaderError`` deliberately reaches the
+        workspace unchanged, where it becomes the reader's actionable install
+        instruction instead of an OpenCV-style generic decode failure.
+        """
+        from velum_core.channels import read_pixel_size_um
+        from velum_core.predict_controller import _read_for_predict
+
+        suffix = Path(image_path).suffix.lower()
+        microscopy_stack = suffix in (".tif", ".tiff", ".nd2", ".czi", ".lif")
+        rgb, stack = _read_for_predict({
+            "image_path": str(image_path),
+            "microscopy_stack": microscopy_stack,
+        })
+        pixel_size_um = stack.pixel_size_um if stack is not None else read_pixel_size_um(image_path)
+        return rgb, pixel_size_um
+
+    @classmethod
+    def load_preview_image(cls, image_path: str | Path) -> np.ndarray:
         """RGB uint8 array for ``image_path`` — the exact read/normalise path
         a real predict run would see, reused so what you preview is what you
         segment (channel projection, 16-bit stretch, native-format support)."""
-        from velum_core.predict_controller import _read_for_predict
-        rgb, _stack = _read_for_predict({"image_path": str(image_path)})
-        return rgb
+        return cls.load_preview_with_metadata(image_path)[0]
 
     # ── single-image predict ─────────────────────────────────────────────────
     def run_predict_async(self, project: Project, image_path: str | Path, *,
