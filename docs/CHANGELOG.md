@@ -18,6 +18,48 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-22 — Model Library: a browsable model hub + sample data
+
+A new top-level **Model Library** tab (`studio/model_library.py` +
+`model_library_controller.py` + `model_library_screen.py`) makes "find any
+model, download it, or bring your own — all local" a first-class surface,
+directly serving the product's local-first / open positioning (nothing leaves
+the machine).
+
+- **Curated catalog** of real, publicly-downloadable weights: SAM backbones
+  (ViT-B/L/H, for the CellSeg1 one-shot engine), SAM 2.1 checkpoints
+  (Tiny/Small/Base+/Large, for z-stack/time-lapse), and the built-in
+  Cellpose models (cpsam/cyto3/nuclei, which Cellpose fetches itself). Each
+  card shows family, domain, size, license, and an install state
+  (Download / ✓ Installed / Reveal / Ready-to-use).
+- **Downloads land where the engines already look** — `sam_backbone/`,
+  `sam2_checkpoints/`, `loras/` — so a model installed here is immediately
+  selectable in Segment with no extra wiring. Streamed to a `.part` file and
+  renamed on success (an interrupted/cancelled download never leaves a
+  truncated file), with a live progress bar and Download↔Cancel toggle.
+- **Import your own** (`Import model` / ⌘K "Import a model…") for a LoRA
+  (writes/copies a sidecar so it lists as a trained model), a SAM backbone
+  (renamed to the canonical filename the engine expects), a SAM 2 checkpoint,
+  or a Cellpose `.pth`. A **"Your models"** section lists everything trained
+  here or imported.
+- Wired into the sidebar nav (`cube3d` icon), the screen stack, and ⌘K
+  ("Go to Model Library", "Import a model…").
+- **`scripts/fetch_samples.py`** — drops a few bundled scikit-image samples
+  (human-mitosis nuclei + coins + synthetic blobs — a deliberate cell /
+  non-cell mix that shows the app segments *any* objects) into
+  `data_store/test_images/samples/` and creates a ready-to-run
+  "Sample — cells & objects" project on the zero-shot Cellpose engine, so a
+  fresh install has something to segment with no data or model download.
+- **Tests:** 20 pure-logic tests (`studio/tests/test_model_library.py`) cover
+  the catalog, install-status, dest-path conventions, download (network
+  faked) + partial-file cleanup, import/remove round-trip, and the controller;
+  the whole `test_app_wiring.py` (79) and `test_command_registry.py` (11)
+  suites stay green with the new tab. Screen verified by an offscreen render
+  (screenshot), not just import.
+- **Not verified here:** a real large-weight download end-to-end (only a faked
+  stream in tests; the mechanism is standard `urllib`), and live click-through
+  on a real display (offscreen screenshot only).
+
 ## 2026-07-22 — Cell Population Analytics: distribution explorer
 
 The engines already measure *every* labelled cell (area, diameter,
