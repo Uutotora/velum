@@ -95,3 +95,64 @@ def test_train_target_points_at_images_and_masks(ctrl, tmp_path):
     assert images_dir == info.path / "images"
     assert masks_dir == info.path / "masks"
     assert (masks_dir / "cell0.png").is_file()   # <stem>.png beside images/
+
+
+# ── import from disk ─────────────────────────────────────────────────────────
+
+def test_scan_import_pairs_images_with_sibling_masks(ctrl, tmp_path):
+    folder = tmp_path / "incoming"; folder.mkdir()
+    for n in ("a", "b"):
+        _img(folder / f"{n}.png")
+        cv2.imwrite(str(folder / f"{n}_mask.png"),
+                    np.array([[0, 1], [2, 2]], np.uint16))  # 2 cells
+    _img(folder / "c.png")   # no mask sibling
+    scan = ctrl.scan_import([str(folder)])
+    assert not scan.is_velum_dataset
+    assert scan.n_images == 3 and scan.n_with_mask == 2
+    by = {c.name: c for c in scan.candidates}
+    assert by["a.png"].mask_path and by["a.png"].cells == 2
+    assert by["c.png"].mask_path is None and by["c.png"].cells == 0
+
+
+def test_scan_import_recognises_a_velum_dataset_folder(ctrl, tmp_path):
+    project, (a, b, c) = _project_with_masks(ctrl, tmp_path)
+    info = ctrl.build_from_project(project, [str(a), str(c)], name="Built")
+    scan = ctrl.scan_import([str(info.path)])
+    assert scan.is_velum_dataset
+    assert scan.source_dir == str(info.path)
+    assert scan.n_images == 2 and scan.n_with_mask == 2
+
+
+def test_import_as_dataset_from_generic_folder(ctrl, tmp_path):
+    folder = tmp_path / "incoming"; folder.mkdir()
+    _img(folder / "a.png"); cv2.imwrite(str(folder / "a_mask.png"),
+                                        np.array([[0, 1, 3]], np.uint16))
+    _img(folder / "b.png")  # unmatched -> excluded
+    scan = ctrl.scan_import([str(folder)])
+    info = ctrl.import_as_dataset(scan, name="Imported set")
+    assert info.n_images == 1 and info.n_cells == 2
+    assert info.engine == "imported"
+    assert (info.path / "images" / "a.png").is_file()
+    assert (info.path / "masks" / "a.png").is_file()
+
+
+def test_import_velum_dataset_is_copied_verbatim(ctrl, tmp_path):
+    project, (a, b, c) = _project_with_masks(ctrl, tmp_path)
+    src = ctrl.build_from_project(project, [str(a), str(c)], name="Original",
+                                  val_fraction=0.5)
+    scan = ctrl.scan_import([str(src.path)])
+    copy = ctrl.import_as_dataset(scan, name="Copied set")
+    assert copy.id != src.id
+    assert copy.name == "Copied set"
+    assert copy.n_images == src.n_images and copy.n_cells == src.n_cells
+    assert copy.n_val == src.n_val           # split preserved (lossless copy)
+    assert copy.engine == src.engine         # provenance preserved
+
+
+def test_import_as_dataset_raises_without_pairs(ctrl, tmp_path):
+    folder = tmp_path / "incoming"; folder.mkdir()
+    _img(folder / "lonely.png")              # no mask anywhere
+    scan = ctrl.scan_import([str(folder)])
+    assert scan.n_with_mask == 0
+    with pytest.raises(ValueError):
+        ctrl.import_as_dataset(scan, name="Empty")

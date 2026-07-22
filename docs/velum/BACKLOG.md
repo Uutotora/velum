@@ -326,6 +326,12 @@ palette) is real. See `ROADMAP.md`.
   screenshots. Follow-up: fold real folder-training on a dataset into the Train
   tab (today it points training at the dataset's images/ + masks/ dirs via a
   toast; `train_target()` already returns them).
+  **Update (2026-07-22):** the New-dataset modal was redesigned (fixed a panel
+  stretch/spacing bug; compact `SegControl` Val split) and gained an **"Import
+  from disk"** mode — drag-drop / pick a folder or files, auto-detect image+mask
+  pairs or an exported Velum dataset, preview, create. Researched against
+  Roboflow / Label Studio upload UX. See `CHANGELOG.md`. Remaining: `.zip`
+  import and cloud-storage sources (S3/GCS) are still open.
 - [x] **Export a project as a re-trainable dataset** · M · done (2026-07-22).
   `studio/dataset_export.py` (Qt/torch-free) writes `images/` + `masks/<stem>.png`
   (uint16 instance labels) + optional `measurements/` + a `dataset.json`

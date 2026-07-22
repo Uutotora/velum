@@ -109,3 +109,45 @@ def test_dialog_no_eligible_projects_message(parent, tmp_path):
     screen.open_new_dialog()
     assert screen._dialog._eligible_projects() == []
     assert screen._dialog._create_btn.isEnabled() is False
+
+
+# ── import-from-disk mode ────────────────────────────────────────────────────
+
+def _external_folder(tmp_path):
+    ext = tmp_path / "external"; ext.mkdir()
+    for n in ("A", "B"):
+        cv2.imwrite(str(ext / f"{n}.png"),
+                    (np.random.default_rng(0).random((16, 16)) * 255).astype(np.uint8))
+        cv2.imwrite(str(ext / f"{n}_mask.png"), np.array([[0, 1], [2, 3]], np.uint16))
+    cv2.imwrite(str(ext / "lonely.png"),
+                (np.random.default_rng(1).random((16, 16)) * 255).astype(np.uint8))
+    return str(ext)
+
+
+def test_dialog_defaults_to_import_when_no_projects(parent, tmp_path):
+    pc = ProjectController(store_root=tmp_path / "p")   # no segmented projects
+    dc = DatasetController(segment=SegmentController(storage_dir=tmp_path / "s"),
+                           datasets_root=tmp_path / "d")
+    screen = DatasetsScreen(theme.DARK, dc, pc, on_toast=lambda *a: None,
+                            on_open_project=lambda p: None, on_navigate=lambda k: None)
+    screen.setParent(parent); screen.show()
+    screen.open_new_dialog()
+    assert screen._dialog._mode == "import"        # bring-your-own is offered first
+
+
+def test_import_scan_and_create(parent, tmp_path):
+    pc, dc, project = _seed_project(tmp_path)
+    screen = DatasetsScreen(theme.DARK, dc, pc, on_toast=lambda *a: None,
+                            on_open_project=lambda p: None, on_navigate=lambda k: None)
+    screen.setParent(parent); screen.show()
+    screen.open_new_dialog()
+    dlg = screen._dialog
+    dlg._set_mode("import")
+    assert dlg._mode == "import"
+    dlg._on_import_paths([_external_folder(tmp_path)])
+    assert dlg._scan is not None
+    assert dlg._scan.n_with_mask == 2 and dlg._scan.n_images == 3
+    assert dlg._ready_count() == 2 and dlg._create_btn.isEnabled()
+    dlg._create()
+    assert dlg.isHidden()
+    assert any(d.engine == "imported" for d in dc.list_datasets())

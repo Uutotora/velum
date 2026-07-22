@@ -27,16 +27,19 @@ from typing import Callable, Optional
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QFrame, QGridLayout, QHBoxLayout, QLineEdit, QVBoxLayout, QWidget,
+    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from studio import icons, theme
 from studio.components import (
-    Badge, Chip, EngineChip, GroupLabel, IconButton, PillButton, SelectBox,
-    StatTile, Toggle, bare_widget, hline, label, soft_shadow,
+    Badge, Chip, EngineChip, GroupLabel, IconButton, PillButton, SegControl,
+    SelectBox, StatTile, Toggle, bare_widget, hline, label, soft_shadow,
 )
 from studio.dataset import DatasetInfo
-from studio.dataset_controller import BuildCandidate, DatasetController
+from studio.dataset_controller import (
+    BuildCandidate, DatasetController, ImportScan,
+)
 from studio.project import ENGINE_KIND, ENGINE_LABELS, Project
 from studio.project_controller import ProjectController, relative_time
 from studio.screens import page_header, scroll
@@ -342,10 +345,88 @@ class DatasetsScreen(QWidget):
         self._show_detail(info)
 
 
-# ── interactive build modal ──────────────────────────────────────────────────
+class _ImportDropZone(QFrame):
+    """Drag-and-drop target (folder or files) + native pickers — the
+    upload-first entry point every comparable tool leads with (Roboflow's
+    drop panel, Label Studio's Upload Files)."""
+
+    def __init__(self, t: dict, on_paths: Callable[[list[str]], None]):
+        super().__init__()
+        self._t = t
+        self._on_paths = on_paths
+        self.setAcceptDrops(True)
+        self.setMinimumHeight(118)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setObjectName("ImportDrop")
+        self._style(False)
+        v = QVBoxLayout(self)
+        v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        v.setSpacing(7)
+        ic = QLabel()
+        ic.setPixmap(icons.pixmap("download", t["text_muted"], 22))
+        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ic.setStyleSheet("background:transparent;")
+        v.addWidget(ic)
+        head = label("Drop a folder or images here", 12.5, t["text_subtle"], 600)
+        head.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        v.addWidget(head)
+        sub = label("A folder of images + masks, or an exported Velum dataset",
+                    11, t["text_muted"])
+        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        v.addWidget(sub)
+        btns = QHBoxLayout()
+        btns.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btns.setSpacing(8)
+        folder = PillButton("Choose folder…", t, "ghost", "folder", small=True)
+        folder.clicked.connect(self._pick_folder)
+        files = PillButton("Choose files…", t, "ghost", "image", small=True)
+        files.clicked.connect(self._pick_files)
+        btns.addWidget(folder)
+        btns.addWidget(files)
+        v.addLayout(btns)
+
+    def _style(self, active: bool) -> None:
+        t = self._t
+        border = t["primary_line"] if active else t["border_strong"]
+        bg = t["primary_weak"] if active else "transparent"
+        self.setStyleSheet(
+            f"QFrame#ImportDrop{{background:{bg};border:1px dashed {border};"
+            f"border-radius:12px;}}")
+
+    def _pick_folder(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Choose a folder to import")
+        if d:
+            self._on_paths([d])
+
+    def _pick_files(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Choose images to import", "",
+            "Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.npy *.nd2 *.czi);;"
+            "All files (*)")
+        if paths:
+            self._on_paths(paths)
+
+    def dragEnterEvent(self, e) -> None:
+        if e.mimeData().hasUrls():
+            self._style(True)
+            e.acceptProposedAction()
+
+    def dragLeaveEvent(self, e) -> None:
+        self._style(False)
+
+    def dropEvent(self, e) -> None:
+        self._style(False)
+        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.toLocalFile()]
+        if paths:
+            self._on_paths(paths)
+
+
+# ── create-dataset modal (build from a project OR import from disk) ───────────
 class NewDatasetDialog(QWidget):
-    """Pick a project, tick which segmented images to include, name it, set an
-    optional val split, and build — over a scrim, like ``NewProjectDialog``."""
+    """Create a dataset two ways — curate a project's segmented images, or
+    **import image+mask pairs from disk** — over a scrim, like
+    ``NewProjectDialog``. A compact, fixed-height panel (never stretches to the
+    window: the panel's vertical policy is ``Maximum``)."""
 
     def __init__(self, parent: QWidget, t: dict, datasets: DatasetController,
                  projects: ProjectController, *,
@@ -357,16 +438,23 @@ class NewDatasetDialog(QWidget):
         self._projects = projects
         self._toast = on_toast
         self._on_built = on_built
+        self._mode = "project"                       # "project" | "import"
+        # project-mode state
         self._project: Optional[Project] = None
         self._candidates: list[BuildCandidate] = []
         self._selected: set[str] = set()
+        # import-mode state
+        self._scan: Optional[ImportScan] = None
+        # shared
         self._include_measurements = True
         self._val_pct = 0
+        self._name_input: Optional[QLineEdit] = None
+        self._name_override: Optional[str] = None
 
         self.setStyleSheet(f"background:{theme.SCRIM};")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 64, 0, 0)
+        outer.setContentsMargins(0, 56, 0, 40)
         outer.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         outer.addWidget(self._build_panel())
         self.hide()
@@ -374,7 +462,12 @@ class NewDatasetDialog(QWidget):
     def _build_panel(self) -> QFrame:
         t = self._t
         panel = QFrame()
-        panel.setFixedWidth(520)
+        panel.setFixedWidth(560)
+        # Maximum vertical policy is the fix for the "huge gaps" bug: without it
+        # the fullscreen scrim's layout stretched the panel to the window height
+        # and the inner QVBoxLayout distributed the slack into gaps + ballooned
+        # the SelectBoxes. Now the panel sits at its own sizeHint.
+        panel.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Maximum)
         panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         panel.setObjectName("NewDatasetPanel")
         panel.setStyleSheet(
@@ -385,29 +478,41 @@ class NewDatasetDialog(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
 
+        # header
         header = bare_widget()
         hrow = QHBoxLayout(header)
-        hrow.setContentsMargins(20, 16, 14, 16)
+        hrow.setContentsMargins(22, 15, 14, 14)
         hcol = QVBoxLayout()
-        hcol.setSpacing(2)
-        hcol.addWidget(label("New dataset", 15, t["text"], 600))
-        hcol.addWidget(label("Curate a project's segmented images.", 11, t["text_muted"]))
+        hcol.setSpacing(1)
+        hcol.addWidget(label("New dataset", 15.5, t["text"], 600))
+        hcol.addWidget(label("Build from a project, or import your own from disk.",
+                             11, t["text_muted"]))
         hrow.addLayout(hcol)
         hrow.addStretch(1)
         hrow.addWidget(IconButton("close", t, 27, "Close", self.hide))
         v.addWidget(header)
         v.addWidget(hline(t))
 
+        # mode switch
+        modewrap = bare_widget()
+        mrow = QHBoxLayout(modewrap)
+        mrow.setContentsMargins(22, 12, 22, 2)
+        self._mode_seg = SegControl(["From a project", "Import from disk"], t, active=0)
+        self._mode_seg.changed.connect(self._on_mode_changed)
+        mrow.addWidget(self._mode_seg)
+        v.addWidget(modewrap)
+
+        # mode-specific + shared body
         body = bare_widget()
         self._body = QVBoxLayout(body)
-        self._body.setContentsMargins(22, 18, 22, 8)
-        self._body.setSpacing(14)
+        self._body.setContentsMargins(22, 12, 22, 8)
+        self._body.setSpacing(11)
         v.addWidget(body)
 
         v.addWidget(hline(t))
         footer = bare_widget()
         frow = QHBoxLayout(footer)
-        frow.setContentsMargins(20, 12, 20, 14)
+        frow.setContentsMargins(22, 11, 20, 13)
         self._summary = label("", 11.5, t["text_muted"])
         frow.addWidget(self._summary)
         frow.addStretch(1)
@@ -421,38 +526,64 @@ class NewDatasetDialog(QWidget):
         self._panel = panel
         return panel
 
-    # ── build the body for the currently-selected project ────────────────────
+    # ── render ────────────────────────────────────────────────────────────────
     def _render(self) -> None:
-        t = self._t
         _clear_layout(self._body)
+        if self._mode == "project":
+            self._render_project_mode()
+        else:
+            self._render_import_mode()
+        self._render_name_and_options()
+        self._update_summary()
 
+    def _section_label(self, text: str) -> None:
+        self._body.addWidget(GroupLabel(text, self._t))
+
+    def _list_scroll(self, rows: list[QWidget], row_h: int = 44,
+                     max_h: int = 196) -> QWidget:
+        t = self._t
+        frame = QFrame()
+        frame.setObjectName("DSChecklist")
+        frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        frame.setStyleSheet(
+            f"QFrame#DSChecklist{{background:{t['inset']};border:1px solid "
+            f"{t['border']};border-radius:10px;}}")
+        lv = QVBoxLayout(frame)
+        lv.setContentsMargins(6, 6, 6, 6)
+        lv.setSpacing(2)
+        for r in rows:
+            lv.addWidget(r)
+        wrapped = scroll(frame)
+        wrapped.setFixedHeight(min(max_h, row_h * max(1, len(rows)) + 14))
+        wrapped.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        return wrapped
+
+    # ── project mode ──────────────────────────────────────────────────────────
+    def _render_project_mode(self) -> None:
+        t = self._t
         eligible = self._eligible_projects()
         if not eligible:
             self._body.addWidget(label(
-                "No project has segmented images yet. Segment some images in a "
-                "project first, then build a dataset from them.",
-                12.5, t["text_muted"]))
-            self._name_input = None
-            self._create_btn.setEnabled(False)
-            self._summary.setText("")
+                "No project has segmented images yet — segment some first, or "
+                "import a dataset you already have:", 12.5, t["text_muted"]))
+            switch = PillButton("Import from disk instead", t, "ghost", "download",
+                                small=True)
+            switch.clicked.connect(lambda: self._set_mode("import"))
+            row = QHBoxLayout()
+            row.addWidget(switch)
+            row.addStretch(1)
+            self._body.addLayout(row)
             return
 
-        # Project picker
-        picker = bare_widget()
-        pv = QVBoxLayout(picker)
-        pv.setContentsMargins(0, 0, 0, 0)
-        pv.setSpacing(7)
-        pv.addWidget(GroupLabel("SOURCE PROJECT", t))
+        self._section_label("SOURCE PROJECT")
         names = [p.name for p in eligible]
         cur = self._project.name if self._project else names[0]
-        pv.addWidget(SelectBox(cur, t, lead_icon="projects", options=names,
-                               on_select=self._on_project_selected))
+        picker = SelectBox(cur, t, lead_icon="projects", options=names,
+                           on_select=self._on_project_selected)
+        picker.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self._body.addWidget(picker)
 
-        # Candidate checklist
-        self._body.addWidget(GroupLabel("IMAGES TO INCLUDE", t))
         seg = [c for c in self._candidates if c.segmented]
-        others = [c for c in self._candidates if not c.segmented]
         head = QHBoxLayout()
         head.addWidget(label(f"{len(seg)} segmented · {len(self._selected)} selected",
                              11.5, t["text_muted"]))
@@ -463,49 +594,11 @@ class NewDatasetDialog(QWidget):
         none_btn.clicked.connect(self._clear_all)
         head.addWidget(all_btn)
         head.addWidget(none_btn)
+        self._section_label("IMAGES TO INCLUDE")
         self._body.addLayout(head)
-
-        list_frame = QFrame()
-        list_frame.setObjectName("DSChecklist")
-        list_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        list_frame.setStyleSheet(
-            f"QFrame#DSChecklist{{background:{t['inset']};border:1px solid {t['border']};"
-            f"border-radius:10px;}}")
-        lv = QVBoxLayout(list_frame)
-        lv.setContentsMargins(6, 6, 6, 6)
-        lv.setSpacing(2)
-        for c in seg + others:
-            lv.addWidget(self._candidate_row(c))
-        wrapped = scroll(list_frame)
-        wrapped.setFixedHeight(min(232, 46 * max(1, len(self._candidates)) + 14))
-        self._body.addWidget(wrapped)
-
-        # Name + options
-        self._name_input = QLineEdit(self._default_name())
-        self._name_input.setPlaceholderText("Dataset name")
-        name_field = bare_widget()
-        nf = QVBoxLayout(name_field)
-        nf.setContentsMargins(0, 0, 0, 0)
-        nf.setSpacing(7)
-        nf.addWidget(GroupLabel("NAME", t))
-        nf.addWidget(self._name_input)
-        self._body.addWidget(name_field)
-
-        opts = QHBoxLayout()
-        opts.setSpacing(12)
-        meas_toggle = Toggle(t, on=self._include_measurements)
-        meas_toggle.toggled.connect(self._set_measurements)
-        opts.addWidget(label("Include per-cell measurements", 12.5, t["text"]))
-        opts.addWidget(meas_toggle)
-        opts.addStretch(1)
-        opts.addWidget(label("Val split", 12.5, t["text"]))
-        val_box = SelectBox(f"{self._val_pct}%", t,
-                            options=["0%", "10%", "20%", "30%"],
-                            on_select=self._set_val)
-        val_box.setFixedWidth(88)     # SelectBox has no width of its own; don't let it get crushed
-        opts.addWidget(val_box)
-        self._body.addLayout(opts)
-        self._update_summary()
+        rows = [self._candidate_row(c)
+                for c in seg + [c for c in self._candidates if not c.segmented]]
+        self._body.addWidget(self._list_scroll(rows))
 
     def _candidate_row(self, c: BuildCandidate) -> QWidget:
         t = self._t
@@ -521,8 +614,7 @@ class NewDatasetDialog(QWidget):
         else:
             check.setEnabled(False)
         h.addWidget(check)
-        name = label(c.name, 12.5, t["text"] if c.segmented else t["text_muted"])
-        h.addWidget(name)
+        h.addWidget(label(c.name, 12.5, t["text"] if c.segmented else t["text_muted"]))
         h.addStretch(1)
         if c.has_gt:
             h.addWidget(Badge("GT", t))
@@ -532,13 +624,87 @@ class NewDatasetDialog(QWidget):
             h.addWidget(Chip("not segmented", t, "default"))
         return row
 
+    # ── import mode ───────────────────────────────────────────────────────────
+    def _render_import_mode(self) -> None:
+        t = self._t
+        self._body.addWidget(_ImportDropZone(t, self._on_import_paths))
+        if self._scan is None:
+            return
+        s = self._scan
+        self._section_label("FOUND")
+        if s.is_velum_dataset:
+            total_cells = sum(c.cells for c in s.candidates)
+            summary = (f"Velum dataset · {s.n_images} image"
+                       f"{'' if s.n_images == 1 else 's'} · {total_cells} cells")
+        else:
+            skipped = s.n_images - s.n_with_mask
+            summary = (f"{s.source_label} · {s.n_with_mask} with masks"
+                       + (f" · {skipped} skipped (no mask)" if skipped else ""))
+        self._body.addWidget(label(summary, 11.5, t["text_muted"]))
+        rows = [self._import_row(c) for c in s.candidates]
+        if rows:
+            self._body.addWidget(self._list_scroll(rows))
+
+    def _import_row(self, c) -> QWidget:
+        t = self._t
+        row = bare_widget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(8, 5, 8, 5)
+        h.setSpacing(9)
+        has = c.mask_path is not None
+        check = IconButton("check_square" if has else "square", t, 26, "", None)
+        check.setEnabled(False)
+        h.addWidget(check)
+        h.addWidget(label(c.name, 12.5, t["text"] if has else t["text_muted"]))
+        h.addStretch(1)
+        if has:
+            h.addWidget(label(f"{c.cells} cells", 11, t["text_muted"]))
+        else:
+            h.addWidget(Chip("no mask", t, "default"))
+        return row
+
+    def _on_import_paths(self, paths: list[str]) -> None:
+        try:
+            self._scan = self._datasets.scan_import(paths)
+        except Exception as exc:   # noqa: BLE001
+            self._toast("Couldn't read that", str(exc))
+            return
+        self._name_override = None    # let the name default to the new source
+        self._render()
+
+    # ── shared: name + options ────────────────────────────────────────────────
+    def _render_name_and_options(self) -> None:
+        t = self._t
+        self._section_label("NAME")
+        self._name_input = QLineEdit(self._default_name())
+        self._name_input.setPlaceholderText("Dataset name")
+        self._name_input.textEdited.connect(self._set_name_override)
+        self._body.addWidget(self._name_input)
+
+        meas = QHBoxLayout()
+        meas.setSpacing(10)
+        toggle = Toggle(t, on=self._include_measurements)
+        toggle.toggled.connect(self._set_measurements)
+        meas.addWidget(toggle)
+        meas.addWidget(label("Include per-cell measurements", 12.5, t["text"]))
+        meas.addStretch(1)
+        self._body.addLayout(meas)
+
+        val = QHBoxLayout()
+        val.setSpacing(10)
+        val.addWidget(label("Validation split", 12.5, t["text"]))
+        val.addStretch(1)
+        opts = ["0%", "10%", "20%", "30%"]
+        seg = SegControl(opts, t, active=opts.index(f"{self._val_pct}%")
+                         if f"{self._val_pct}%" in opts else 0, compact=True)
+        seg.changed.connect(self._set_val)
+        val.addWidget(seg)
+        self._body.addLayout(val)
+
     # ── state ────────────────────────────────────────────────────────────────
     def _eligible_projects(self) -> list[Project]:
-        out = []
-        for p in self._projects.list_projects():
-            if self._datasets.segmented_count(p) > 0:
-                out.append(p)
-        return out
+        return [p for p in self._projects.list_projects()
+                if self._datasets.segmented_count(p) > 0]
 
     def _select_project(self, project: Project) -> None:
         self._project = project
@@ -550,13 +716,24 @@ class NewDatasetDialog(QWidget):
             if p.name == name:
                 self._select_project(p)
                 break
+        self._name_override = None
+        self._render()
+
+    def _on_mode_changed(self, idx: int) -> None:
+        self._mode = "project" if idx == 0 else "import"
+        self._name_override = None
+        self._render()
+
+    def _set_mode(self, mode: str) -> None:
+        self._mode = mode
+        self._mode_seg.blockSignals(True)
+        self._mode_seg._select(0 if mode == "project" else 1)
+        self._mode_seg.blockSignals(False)
+        self._name_override = None
         self._render()
 
     def _toggle(self, path: str) -> None:
-        if path in self._selected:
-            self._selected.discard(path)
-        else:
-            self._selected.add(path)
+        self._selected.symmetric_difference_update({path})
         self._render()
 
     def _select_all(self) -> None:
@@ -570,41 +747,68 @@ class NewDatasetDialog(QWidget):
     def _set_measurements(self, on: bool) -> None:
         self._include_measurements = on
 
-    def _set_val(self, text: str) -> None:
-        self._val_pct = int(text.rstrip("%") or "0")
+    def _set_val(self, idx: int) -> None:
+        self._val_pct = [0, 10, 20, 30][idx] if 0 <= idx < 4 else 0
         self._update_summary()
 
+    def _set_name_override(self, text: str) -> None:
+        self._name_override = text
+
     def _default_name(self) -> str:
-        base = self._project.name if self._project else "Dataset"
-        return f"{base} dataset"
+        if self._name_override:
+            return self._name_override
+        if self._mode == "project":
+            base = self._project.name if self._project else "Dataset"
+            return f"{base} dataset"
+        if self._scan is not None:
+            if self._scan.is_velum_dataset:
+                return f"{self._scan.source_label.split('· ', 1)[-1]} (copy)"
+            return f"{self._scan.source_label} dataset"
+        return "Imported dataset"
+
+    def _ready_count(self) -> int:
+        if self._mode == "project":
+            return len(self._selected)
+        return self._scan.n_with_mask if self._scan else 0
 
     def _update_summary(self) -> None:
-        n = len(self._selected)
-        self._summary.setText(f"{n} image{'s' if n != 1 else ''} selected")
+        n = self._ready_count()
+        verb = "selected" if self._mode == "project" else "ready"
+        self._summary.setText(f"{n} image{'' if n == 1 else 's'} {verb}")
         self._create_btn.setEnabled(n > 0)
 
     # ── create ───────────────────────────────────────────────────────────────
     def _create(self) -> None:
-        if self._project is None or not self._selected:
-            return
         name = (self._name_input.text().strip() if self._name_input else "") \
             or self._default_name()
         try:
-            info = self._datasets.build_from_project(
-                self._project, sorted(self._selected), name=name,
-                include_measurements=self._include_measurements,
-                val_fraction=self._val_pct / 100.0)
+            if self._mode == "project":
+                if self._project is None or not self._selected:
+                    return
+                info = self._datasets.build_from_project(
+                    self._project, sorted(self._selected), name=name,
+                    include_measurements=self._include_measurements,
+                    val_fraction=self._val_pct / 100.0)
+            else:
+                if self._scan is None or self._scan.n_with_mask == 0:
+                    return
+                info = self._datasets.import_as_dataset(
+                    self._scan, name=name,
+                    include_measurements=self._include_measurements,
+                    val_fraction=self._val_pct / 100.0)
         except ValueError as exc:
-            self._toast("Nothing to build", str(exc))
+            self._toast("Nothing to create", str(exc))
             return
         except Exception as exc:   # noqa: BLE001
-            self._toast("Build failed", str(exc))
+            self._toast("Failed", str(exc))
             return
         self.hide()
         self._on_built(info)
 
     # ── open / place (mirrors NewProjectDialog) ──────────────────────────────
     def open(self) -> None:
+        self._scan = None
+        self._name_override = None
         eligible = self._eligible_projects()
         active = self._projects.get_active()
         if active is not None and self._datasets.segmented_count(active) > 0:
@@ -615,7 +819,9 @@ class NewDatasetDialog(QWidget):
             self._project = None
             self._candidates = []
             self._selected = set()
-        self._render()
+        # Default to import mode when there's nothing to curate — so "bring your
+        # own dataset" is the first thing offered, not a dead end.
+        self._set_mode("project" if eligible else "import")
         self.place()
         self.show()
         self.raise_()

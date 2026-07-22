@@ -19,7 +19,9 @@ lazily imported inside the methods that read masks.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -27,6 +29,11 @@ from studio import dataset_export
 from studio.dataset import DatasetInfo, DatasetStore, default_datasets_root
 from studio.project import Project, ProjectStore
 from studio.segment_controller import SegmentController
+
+# Image extensions Studio can import from disk (mirrors the project importer +
+# the optional microscopy readers).
+IMPORT_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".npy",
+                     ".nd2", ".czi", ".lif"}
 
 
 @dataclass
@@ -38,6 +45,33 @@ class BuildCandidate:
     segmented: bool
     cells: int
     has_gt: bool
+
+
+@dataclass
+class ImportCandidate:
+    """One image found on disk during an import scan, with its matched mask
+    (if any) — the row the import preview shows."""
+    image_path: str
+    name: str
+    mask_path: Optional[str]
+    cells: int
+
+
+@dataclass
+class ImportScan:
+    """The result of scanning a folder / file selection for import."""
+    candidates: list[ImportCandidate] = field(default_factory=list)
+    is_velum_dataset: bool = False
+    source_label: str = ""
+    source_dir: Optional[str] = None
+
+    @property
+    def n_images(self) -> int:
+        return len(self.candidates)
+
+    @property
+    def n_with_mask(self) -> int:
+        return sum(1 for c in self.candidates if c.mask_path)
 
 
 class DatasetController:
@@ -109,6 +143,115 @@ class DatasetController:
             raise
         info = self.store.get(dataset_id)
         assert info is not None             # just written
+        return info
+
+    # ── import from disk (bring your own dataset) ────────────────────────────
+    @staticmethod
+    def _gather_images(folder: Path) -> list[Path]:
+        """Top-level image files in ``folder`` (or its ``images/`` subdir if it
+        has one), excluding obvious mask files (``*_mask``/``*_masks``)."""
+        base = folder / "images" if (folder / "images").is_dir() else folder
+        out: list[Path] = []
+        for p in sorted(base.iterdir()):
+            if (p.is_file() and p.suffix.lower() in IMPORT_IMAGE_EXTS
+                    and not p.stem.endswith(("_mask", "_masks"))):
+                out.append(p)
+        return out
+
+    @staticmethod
+    def _count_mask_cells(mask_path: str | Path) -> int:
+        import cv2
+        m = cv2.imread(str(mask_path), cv2.IMREAD_UNCHANGED)
+        return dataset_export.count_instances(m) if m is not None else 0
+
+    def scan_import(self, paths: list[str]) -> ImportScan:
+        """Scan a dropped/selected folder or file list and report what would be
+        imported — before committing — the "we parsed your data" preview. A
+        folder holding a Velum ``dataset.json`` is recognised as a whole
+        dataset; otherwise each image is paired with a mask via the same
+        ``<stem>_mask.*`` / ``masks/<stem>.*`` convention training already uses."""
+        from studio.train_controller import find_mask_for_image
+        ps = [Path(p) for p in paths]
+
+        if len(ps) == 1 and ps[0].is_dir():
+            folder = ps[0]
+            velum = DatasetInfo.from_dir(folder)
+            if velum is not None:
+                cands = []
+                for rec in velum.images:
+                    mask = folder / str(rec.get("mask", ""))
+                    cands.append(ImportCandidate(
+                        image_path=str(folder / str(rec.get("image", ""))),
+                        name=Path(str(rec.get("image", "image"))).name,
+                        mask_path=str(mask) if mask.is_file() else None,
+                        cells=int(rec.get("cells", 0))))
+                return ImportScan(cands, True, f"Velum dataset · {folder.name}",
+                                  str(folder))
+            image_files = self._gather_images(folder)
+            source_label = folder.name
+        else:
+            image_files = [p for p in ps
+                           if p.is_file() and p.suffix.lower() in IMPORT_IMAGE_EXTS]
+            source_label = (f"{len(image_files)} file"
+                            f"{'' if len(image_files) == 1 else 's'}")
+
+        cands = []
+        for img in image_files:
+            mp = find_mask_for_image(img)
+            cands.append(ImportCandidate(
+                image_path=str(img), name=img.name,
+                mask_path=str(mp) if mp else None,
+                cells=self._count_mask_cells(mp) if mp else 0))
+        return ImportScan(cands, False, source_label)
+
+    def import_as_dataset(
+        self, scan: ImportScan, *, name: str,
+        include_measurements: bool = True, val_fraction: float = 0.0,
+        on_progress: Optional[Callable[[int, int], None]] = None,
+    ) -> DatasetInfo:
+        """Create a dataset from an ``ImportScan``. A recognised Velum dataset
+        folder is copied in verbatim (lossless — keeps its manifest/provenance);
+        a generic folder/file selection builds a dataset from every image that
+        has a matched mask. Raises ``ValueError`` if nothing pairs up."""
+        if scan.is_velum_dataset and scan.source_dir:
+            dataset_id, out_dir = self.store.allocate(name)
+            try:
+                shutil.copytree(scan.source_dir, out_dir, dirs_exist_ok=True)
+                mf = out_dir / "dataset.json"
+                data = json.loads(mf.read_text(encoding="utf-8"))
+                data["name"] = name
+                mf.write_text(json.dumps(data, indent=2, ensure_ascii=False),
+                              encoding="utf-8")
+            except Exception:
+                self.store.delete(dataset_id)
+                raise
+            info = self.store.get(dataset_id)
+            assert info is not None
+            return info
+
+        import cv2
+        import numpy as np
+        items: list[tuple[str, Any]] = []
+        for c in scan.candidates:
+            if not c.mask_path:
+                continue
+            m = cv2.imread(str(c.mask_path), cv2.IMREAD_UNCHANGED)
+            if m is not None:
+                items.append((c.image_path, np.ascontiguousarray(m).astype(np.int32)))
+        if not items:
+            raise ValueError("No image + mask pairs found to import.")
+
+        dataset_id, out_dir = self.store.allocate(name)
+        try:
+            dataset_export.export_dataset(
+                out_dir, items, name=name, project_id="", engine="imported",
+                include_measurements=include_measurements,
+                val_fraction=val_fraction, on_progress=on_progress)
+        except Exception:
+            self.store.delete(dataset_id)
+            raise
+        info = self.store.get(dataset_id)
+        assert info is not None
         return info
 
     # ── datasets → project (import for further proofreading) ─────────────────

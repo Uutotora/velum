@@ -5,6 +5,43 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-22 — New-dataset modal redesign + import your own dataset from disk
+
+Two problems with the "New dataset" modal, reported from the real app: the
+layout had huge gaps / a ballooned Val-split box (it looked broken), and there
+was **no way to load a dataset you already have** — you could only curate from a
+project's segmented images. Researched how comparable tools do dataset upload
+([Roboflow](https://docs.roboflow.com/datasets/adding-data) — a drag-and-drop
+panel that auto-parses images+annotations; [Label Studio](https://labelstud.io/guide/tasks.html)
+— Upload Files / Cloud Storage) and rebuilt the modal around **upload-first**.
+
+- **Fixed the "huge gaps" bug.** Root cause: the fullscreen scrim's layout
+  stretched the panel to the window height and the inner `QVBoxLayout`
+  distributed the slack into gaps + ballooned the `SelectBox`es. Fix: the panel
+  now has a `Maximum` vertical size policy, so it sits at its own `sizeHint`
+  (compact) regardless of window height. Tightened all spacing; replaced the
+  stretchy Val-split `SelectBox` with a compact `SegControl` (0/10/20/30%).
+  Verified with offscreen screenshots at a tall (1560px) window — the exact
+  scenario that triggered it — in both themes.
+- **Import your own dataset from disk** — a new **"Import from disk"** mode
+  (`SegControl` at the top switches "From a project" ↔ "Import from disk"): a
+  drag-and-drop zone (folder *or* files) + native "Choose folder…/files…"
+  pickers. `DatasetController.scan_import()` recognises an exported **Velum
+  dataset** folder (copied in verbatim, lossless) or pairs each image with a
+  mask via the same `<stem>_mask.*` / `masks/<stem>.*` convention training uses,
+  then shows a **preview** ("*external · 3 with masks · 1 skipped (no mask)*")
+  with per-image ✓/cell-count status — the "we parsed your data" step Roboflow
+  leads with. `import_as_dataset()` builds the dataset from the matched pairs.
+  The modal **defaults to Import mode when there are no segmented projects**, so
+  bring-your-own is offered first instead of being a dead end.
+- **Verified:** 11 new tests (6 controller: scan/pair/velum-detect/import/copy/
+  raise; 5 screen: import default, scan+create, mode switch) + offscreen
+  screenshots of both modes at a tall window in both themes. Full `studio/`
+  suite green. **Not verified here:** real drag-and-drop (needs a live pointer)
+  and real ND2/CZI import (no such files in the sandbox).
+
+---
+
 ## 2026-07-22 — Removed the synthetic "sample dataset" (fabricated F1 hurt credibility)
 
 The bundled demo project (`studio/sample_data.py`, shipped earlier the same
