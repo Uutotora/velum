@@ -49,7 +49,6 @@ from studio.segment_controller import SegmentController
 from studio.dataset_controller import DatasetController
 from studio.dataset_screen import DatasetsScreen
 from studio.model_library_controller import ModelLibraryController
-from studio.model_library_screen import ModelLibraryScreen
 from studio.assistant_controller import AssistantController, PROVIDERS
 from studio.new_project_dialog import NewProjectDialog
 from studio.screens import HomeScreen, ProjectsScreen
@@ -78,7 +77,6 @@ _NAV = [
     ("home",      "home",      "Home",           ""),
     ("projects",  "projects",  "Projects",       ""),
     ("datasets",  "grid",      "Datasets",       ""),
-    ("library",   "cube3d",    "Model Library",  ""),
     ("workspace", "workspace", "Segment",        "Current project"),
     ("train",     "models",    "Models & Train", "Current project"),
     ("dashboard", "dashboard", "Dashboard",      "Current project"),
@@ -88,7 +86,7 @@ _NAV = [
 # "settings" is a real stack screen too, but it's reached from the sidebar
 # *footer* (built inside Sidebar, next to Guide & Docs / Appearance) and a
 # title-bar icon — not from the Tools nav list above.
-_STACK_KEYS = ("home", "projects", "datasets", "library", "workspace", "train", "dashboard", "settings", "guide")
+_STACK_KEYS = ("home", "projects", "datasets", "workspace", "train", "dashboard", "settings", "guide")
 
 
 def load_fonts() -> str:
@@ -240,13 +238,12 @@ class StudioWindow(QMainWindow):
                                        self._toast.announce,
                                        on_open_project=lambda p: self._open_project(p.id),
                                        on_navigate=self.navigate),
-            "library": ModelLibraryScreen(t, self._library, self._toast.announce,
-                                          on_navigate=self.navigate),
             "workspace": WorkspaceScreen(t, self._segment, self._projects, self._toast.announce,
                                         on_toggle_logs=lambda: self._toggle_drawer(self._logs),
                                         on_navigate=self.navigate,
                                         on_new_project=self._new_project_dialog.open),
-            "train": ModelsScreen(t, self._train, self._projects, self._toast.announce),
+            "train": ModelsScreen(t, self._train, self._projects, self._toast.announce,
+                                  library_controller=self._library),
             "dashboard": DashboardScreen(t, self._train, self._projects, self._toast.announce),
             "settings": SettingsScreen(t, self._assistant_controller, self._toast.announce),
             "guide": GuideScreen(t, self._projects, self.navigate, self._open_project,
@@ -358,7 +355,7 @@ class StudioWindow(QMainWindow):
         # drawer via navigate() itself, same as a sidebar click would.
         _SHORTCUT_HINTS = {"assistant": "⌘T", "logs": "⌘L"}
         _NAV_EMOJI = {
-            "home": "🏠", "projects": "🗂️", "datasets": "🗃️", "library": "🧊",
+            "home": "🏠", "projects": "🗂️", "datasets": "🗃️",
             "workspace": "🔬", "train": "🧠", "dashboard": "📊",
             "assistant": "💬", "logs": "📜",
         }
@@ -424,6 +421,10 @@ class StudioWindow(QMainWindow):
                     enabled=is_training),
             Command(id="train.import", label="Import a trained model…", section="Models & Train",
                     icon="folder", emoji="📥", handler=train_screen.import_model),
+            Command(id="train.library", label="Browse Model Library (download models)",
+                    section="Models & Train", icon="cube3d", emoji="🧊",
+                    keywords="download models catalog sam sam2 cellpose",
+                    handler=self._open_library),
         ]
 
         # Dashboard
@@ -463,9 +464,6 @@ class StudioWindow(QMainWindow):
         commands.append(Command(
             id="datasets.new", label="New dataset…", section="Datasets",
             icon="grid", emoji="🗂️", handler=self._screens["datasets"].open_new_dialog))
-        commands.append(Command(
-            id="library.import", label="Import a model…", section="Model Library",
-            icon="download", emoji="📥", handler=self._screens["library"].open_import))
 
         # Help -- mirrors Home's own Resources links exactly (see
         # screens.py's HomeScreen._resources_card), including the
@@ -481,6 +479,10 @@ class StudioWindow(QMainWindow):
                     icon="settings", emoji="🐙", handler=screens._open_github),
         ]
         return commands
+
+    def _open_library(self) -> None:
+        self.navigate("train")
+        self._screens["train"].open_library()
 
     def _cmd_diagnose(self) -> None:
         self.navigate("assistant")

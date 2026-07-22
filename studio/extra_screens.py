@@ -34,6 +34,8 @@ from studio.project_controller import ProjectController
 from studio.dashboard_controller import DashboardController
 from studio.components import bare_widget
 from studio.log_bus import get_log_bus, emit_prefixed
+from studio.model_library_controller import ModelLibraryController
+from studio.model_library_screen import ModelCatalogView
 
 _DLG = QFileDialog.Option.DontUseNativeDialog
 
@@ -52,12 +54,17 @@ class ModelsScreen(QWidget):
 
     def __init__(self, t: dict, train_controller: TrainController,
                  project_controller: ProjectController,
-                 on_toast: Callable[[str, str], None]):
+                 on_toast: Callable[[str, str], None],
+                 library_controller: Optional[ModelLibraryController] = None):
         super().__init__()
         self._t = t
         self._train = train_controller
         self._projects = project_controller
         self._toast = on_toast
+        # The Model Library catalog used to be a separate top-level tab; it now
+        # lives here as the "Library" section, so everything about models —
+        # download, train, your models, engines — is in one place.
+        self._library = library_controller or ModelLibraryController()
 
         self._image_path: Optional[Path] = None
         self._mask_path: Optional[Path] = None
@@ -66,8 +73,8 @@ class ModelsScreen(QWidget):
         self._backbone_path: Optional[Path] = None
         self._lora_rank = tc.DEFAULT_RANK
         self._epochs = tc.DEFAULT_EPOCHS
-        # Which of the three sections is showing: 0 Train · 1 My models ·
-        # 2 Engines. Train is the default so every pre-existing test (which
+        # Which section is showing: 0 Train · 1 Library · 2 My models ·
+        # 3 Engines. Train is the default so every pre-existing test (which
         # calls refresh() without touching this) still renders the form.
         self._section = 0
 
@@ -112,8 +119,10 @@ class ModelsScreen(QWidget):
         self._outer.addWidget(self._section_bar())
 
         if self._section == 1:
-            body = self._models_body(models)
+            body = self._library_body()
         elif self._section == 2:
+            body = self._models_body(models)
+        elif self._section == 3:
             body = self._engines_body()
         else:
             body = self._train_body(models)
@@ -127,14 +136,14 @@ class ModelsScreen(QWidget):
 
     # ── section navigation ──────────────────────────────────────────────────
     def _section_bar(self) -> QWidget:
-        """The Train · My models · Engines segmented switch, in its own row
-        under the page header."""
+        """The Train · Library · My models · Engines segmented switch, in its
+        own row under the page header."""
         t = self._t
         wrap = bare_widget()
         row = QHBoxLayout(wrap)
         row.setContentsMargins(34, 2, 34, 14)
-        seg = SegControl(["Train", "My models", "Engines"], t, active=self._section)
-        seg.setFixedWidth(340)
+        seg = SegControl(["Train", "Library", "My models", "Engines"], t, active=self._section)
+        seg.setFixedWidth(420)
         seg.changed.connect(self._set_section)
         row.addWidget(seg)
         row.addStretch(1)
@@ -144,18 +153,25 @@ class ModelsScreen(QWidget):
         self._section = idx
         self.refresh()
 
+    def open_library(self) -> None:
+        """Public entry (⌘K) — show the Library section."""
+        self._set_section(1)
+
     def _header_action(self) -> Optional[QWidget]:
         """The header's right-hand action, chosen per section — Import model on
-        the models tab, Register engine on the engines tab, nothing on Train
-        (its primary action is Start training, in the card)."""
+        the Library and My models sections, nothing on Train (its primary
+        action is Start training, in the card) or Engines (which has its own
+        Register button in its intro card)."""
         t = self._t
-        if self._section == 1:
+        if self._section in (1, 2):
             btn = PillButton("Import model", t, "ghost", "download")
             btn.clicked.connect(self._import_model)
             return btn
-        # Engines section has its own prominent Register button in the intro
-        # card, so the header stays clean there.
         return None
+
+    # ── Library section body (the model catalog) ─────────────────────────────
+    def _library_body(self) -> QWidget:
+        return ModelCatalogView(self._t, self._library, self._toast)
 
     # ── Train section body ───────────────────────────────────────────────────
     def _train_body(self, models: list[TrainedModel]) -> QWidget:

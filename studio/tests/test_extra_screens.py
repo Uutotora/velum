@@ -405,7 +405,7 @@ def test_dashboard_screen_open_in_aim_missing_aim_toasts_hint(
     assert any("Aim isn't installed" in t for t, _ in toasts)
 
 
-# ── ModelsScreen sections (Train · My models · Engines) ──────────────────────
+# ── ModelsScreen sections (Train · Library · My models · Engines) ────────────
 def test_models_screen_defaults_to_train_section(parent, train_ctrl, project_ctrl, on_toast):
     scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
     assert scr._section == 0
@@ -413,13 +413,23 @@ def test_models_screen_defaults_to_train_section(parent, train_ctrl, project_ctr
 
 def test_set_section_switches_and_rebuilds(parent, train_ctrl, project_ctrl, on_toast):
     scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
-    scr._set_section(2)
-    assert scr._section == 2
+    scr._set_section(3)
+    assert scr._section == 3
     # engines body lists the built-in engines
     from PyQt6.QtWidgets import QLabel
     texts = [w.text() for w in scr.findChildren(QLabel)]
     assert any("Segmentation engines" in t for t in texts)
     assert any("CellSeg1" in t for t in texts)
+
+
+def test_library_section_shows_catalog(parent, train_ctrl, project_ctrl, on_toast):
+    scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
+    scr.open_library()
+    assert scr._section == 1
+    from PyQt6.QtWidgets import QLabel
+    texts = [w.text() for w in scr.findChildren(QLabel)]
+    assert any("Download a model" in t for t in texts)
+    assert any("SAM" in t for t in texts)  # catalog cards rendered
 
 
 @pytest.fixture
@@ -446,7 +456,7 @@ def test_engines_section_shows_custom_engine_and_can_remove(
         "register(EngineSpec(key='myeng', label='My Engine', predict=lambda i, c: i))\n")
     train_ctrl.add_custom_engine(plugin)
     scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
-    scr._set_section(2)
+    scr._set_section(3)
     from PyQt6.QtWidgets import QLabel
     assert any("My Engine" in w.text() for w in scr.findChildren(QLabel))
     scr._remove_engine("myeng")
@@ -471,7 +481,7 @@ def test_register_engine_success_toasts_and_refreshes(
         "from velum_core.engine_registry import EngineSpec, register\n"
         "register(EngineSpec(key='myeng', label='My Engine', predict=lambda i, c: i))\n")
     scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
-    scr._set_section(2)
+    scr._set_section(3)
     monkeypatch.setattr(es.QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(plugin), "")))
     scr._register_engine()
     assert any("Engine registered" in t for t, _ in toasts)
@@ -480,7 +490,7 @@ def test_register_engine_success_toasts_and_refreshes(
 
 def test_my_models_section_empty_state(parent, train_ctrl, project_ctrl, on_toast):
     scr = es.ModelsScreen(theme.DARK, train_ctrl, project_ctrl, on_toast)
-    scr._set_section(1)
+    scr._set_section(2)
     from PyQt6.QtWidgets import QLabel
     assert any("No trained models yet" in w.text() for w in scr.findChildren(QLabel))
 

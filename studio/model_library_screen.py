@@ -1,11 +1,17 @@
-"""Velum — the Model Library screen.
+"""Velum — the Model Library catalog view.
 
 A browsable catalog of segmentation models: filter by family, download real
 weights straight into the folders the engines read from (so a downloaded model
-is instantly usable in Segment), bring your own checkpoint, and see the models
-you've already trained/imported. The Qt-thin view over
-``ModelLibraryController`` — all catalog/download/import logic lives there and
-is unit-tested without Qt.
+is instantly usable in Segment), and open a "bring your own" import menu. The
+Qt-thin view over ``ModelLibraryController`` — all catalog/download/import
+logic lives there and is unit-tested without Qt.
+
+This is embedded as the **Library** section of the *Models & Train* screen
+(``studio/extra_screens.py``'s ``ModelsScreen``), not a standalone tab — the
+two used to be separate top-level tabs with overlapping "your models" / import
+surfaces, which read as an odd split; they now live in one place. This widget
+deliberately renders only the discover/download grid (no page header, no
+"your models" list — that's the Models screen's own "My models" section).
 """
 from __future__ import annotations
 
@@ -20,21 +26,8 @@ from PyQt6.QtWidgets import (
 )
 
 from studio import model_library as ml
-from studio.components import (
-    Chip, PillButton, IconButton, hline, soft_shadow, bare_widget, label,
-)
+from studio.components import Chip, PillButton, hline, soft_shadow, bare_widget, label
 from studio.model_library_controller import ModelLibraryController, CatalogEntry
-from studio.screens import page_header, scroll
-
-
-def _clear_layout(layout) -> None:
-    while layout.count():
-        item = layout.takeAt(0)
-        w = item.widget()
-        if w is not None:
-            w.setParent(None)
-        elif item.layout() is not None:
-            _clear_layout(item.layout())
 
 
 class _DL(QObject):
@@ -44,57 +37,72 @@ class _DL(QObject):
     error = pyqtSignal(str)
 
 
-class ModelLibraryScreen(QWidget):
+class ModelCatalogView(QWidget):
+    """The discover/download grid — filter chips + catalog cards. Embeddable
+    (no header/scroll of its own; the host wraps it)."""
+
     def __init__(self, t: dict, controller: ModelLibraryController,
-                 on_toast: Callable[[str, str], None],
-                 on_navigate: Optional[Callable[[str], None]] = None):
+                 on_toast: Callable[[str, str], None]):
         super().__init__()
         self._t = t
         self._c = controller
         self._toast = on_toast
-        self._on_navigate = on_navigate
-        self._family: Optional[str] = None          # active filter (None = all)
-        self._cards: dict[str, QWidget] = {}         # model_id → card (for progress)
-        self._action_btns: dict[str, PillButton] = {}  # model_id → its action button
-        self._active: dict[str, _DL] = {}            # model_id → live download signals
+        self._family: Optional[str] = None           # active filter (None = all)
+        self._cards: dict[str, QWidget] = {}
+        self._action_btns: dict[str, PillButton] = {}
+        self._active: dict[str, _DL] = {}
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        self._body = QVBoxLayout(self)
+        self._body.setContentsMargins(34, 4, 34, 40)
+        self._body.setSpacing(16)
+        self._render()
 
-        import_btn = PillButton("Import model", t, "ghost", "download", small=True)
-        import_btn.clicked.connect(self._import_menu)
-        root.addWidget(page_header(
-            "Model Library",
-            "Find and download any segmentation model, or bring your own — "
-            "everything runs locally on your machine.", t, action=import_btn))
-
-        self._body = QVBoxLayout()
-        self._body.setContentsMargins(34, 4, 34, 28)
-        self._body.setSpacing(18)
-        body_wrap = bare_widget(self._body)
-        root.addWidget(scroll(body_wrap), 1)
-        self.refresh()
-
-    # ── public API ───────────────────────────────────────────────────────────
-    def refresh(self) -> None:
-        _clear_layout(self._body)
+    # ── (re)build ────────────────────────────────────────────────────────────
+    def _render(self) -> None:
+        while self._body.count():
+            item = self._body.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+            elif item.layout() is not None:
+                self._drop(item.layout())
         self._cards.clear()
         self._action_btns.clear()
+        self._body.addWidget(self._intro())
         self._body.addWidget(self._filter_row())
         self._body.addWidget(self._catalog_grid())
-        local = self._c.local_models()
-        if local:
-            self._body.addWidget(self._your_models(local))
         self._body.addStretch(1)
 
+    def _drop(self, layout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+            elif item.layout() is not None:
+                self._drop(item.layout())
+
+    def _intro(self) -> QWidget:
+        t = self._t
+        wrap = bare_widget()
+        v = QVBoxLayout(wrap)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(3)
+        v.addWidget(label("Download a model", 15, t["text"], 600))
+        sub = label("Real, publicly-available weights — they download straight "
+                    "into the folders the engines read, so an installed model is "
+                    "ready in Segment. Everything stays on your machine.",
+                    12, t["text_muted"])
+        sub.setWordWrap(True)
+        v.addWidget(sub)
+        return wrap
+
     def open_import(self) -> None:
-        """Public entry (⌘K / command palette)."""
+        """Public entry (host header / ⌘K)."""
         self._import_menu()
 
     # ── filter chips ─────────────────────────────────────────────────────────
     def _filter_row(self) -> QWidget:
-        t = self._t
         wrap = bare_widget()
         row = QHBoxLayout(wrap)
         row.setContentsMargins(0, 0, 0, 0)
@@ -112,7 +120,7 @@ class ModelLibraryScreen(QWidget):
 
         def _pick(_e, k=key):
             self._family = k
-            self.refresh()
+            self._render()
         chip.mousePressEvent = _pick
         row.addWidget(chip)
 
@@ -123,8 +131,7 @@ class ModelLibraryScreen(QWidget):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(14)
         grid.setVerticalSpacing(14)
-        entries = self._c.catalog_entries(self._family)
-        for i, entry in enumerate(entries):
+        for i, entry in enumerate(self._c.catalog_entries(self._family)):
             card = self._card(entry)
             self._cards[entry.model.id] = card
             grid.addWidget(card, i // 2, i % 2)
@@ -168,9 +175,7 @@ class ModelLibraryScreen(QWidget):
         meta.addStretch(1)
         v.addLayout(meta)
 
-        # per-card progress bar (hidden until a download starts)
         bar = QProgressBar()
-        bar.setObjectName(f"bar_{m.id}")
         bar.setFixedHeight(6)
         bar.setTextVisible(False)
         bar.hide()
@@ -207,12 +212,11 @@ class ModelLibraryScreen(QWidget):
         return btn
 
     # ── download ─────────────────────────────────────────────────────────────
-    # The download runs on a background thread; its callbacks are marshalled to
-    # the GUI thread via a per-download ``_DL`` QObject's signals. The card is
-    # NOT rebuilt while a download is live (that would destroy the progress bar
-    # the worker's closure still writes to) — instead the one action button
-    # flips Download↔Cancel in place, and a full ``refresh()`` runs only once
-    # the download has finished (on done/error), after the last signal fired.
+    # Runs on a background thread; callbacks are marshalled to the GUI thread
+    # via a per-download ``_DL`` QObject. The grid is NOT rebuilt while a
+    # download is live (that would destroy the progress bar the worker still
+    # writes to) — the one action button flips Download↔Cancel in place, and a
+    # full ``_render()`` runs only once the download finishes (on done/error).
     def _start_download(self, model_id: str) -> None:
         if model_id in self._active:
             return
@@ -222,7 +226,7 @@ class ModelLibraryScreen(QWidget):
         sig = _DL()
         self._active[model_id] = sig
         if bar is not None:
-            bar.setRange(0, 0)  # indeterminate until the first byte arrives
+            bar.setRange(0, 0)
             bar.show()
         if btn is not None:
             btn.setText("Cancel")
@@ -255,58 +259,17 @@ class ModelLibraryScreen(QWidget):
         m = self._c.get(model_id)
         self._toast("Model ready", f"{m.name if m else model_id} downloaded — "
                     "you can select it in Segment now.")
-        self.refresh()
+        self._render()
 
     def _on_error(self, model_id: str, msg: str) -> None:
         self._active.pop(model_id, None)
         self._toast("Download stopped", msg)
-        self.refresh()
+        self._render()
 
     def _reveal(self, model_id: str) -> None:
         p = self._c.dest_path(model_id)
         if p and p.exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(p.parent)))
-
-    # ── your models ──────────────────────────────────────────────────────────
-    def _your_models(self, local) -> QWidget:
-        t = self._t
-        wrap = bare_widget()
-        v = QVBoxLayout(wrap)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(10)
-        v.addWidget(label("Your models", 15, t["text"], 600))
-        sub = label("Trained here or imported — usable in Segment as the "
-                    "CellSeg1 “Model”, or as a Cellpose checkpoint.",
-                    12, t["text_muted"])
-        sub.setWordWrap(True)
-        v.addWidget(sub)
-        for lm in local:
-            v.addWidget(self._local_row(lm))
-        return wrap
-
-    def _local_row(self, lm) -> QWidget:
-        t = self._t
-        row = QFrame()
-        row.setObjectName("MLLocal")
-        row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        row.setStyleSheet(
-            f"QFrame#MLLocal{{background:{t['surface']};border:1px solid {t['border']};"
-            f"border-radius:12px;}}")
-        h = QHBoxLayout(row)
-        h.setContentsMargins(16, 11, 14, 11)
-        h.setSpacing(12)
-        h.addWidget(Chip(ml.FAMILY_LABELS.get(lm.family, lm.family), t, "muted"))
-        col = QVBoxLayout()
-        col.setSpacing(2)
-        col.addWidget(label(lm.name, 13.5, t["text"], 600))
-        meta = lm.meta + (f" · {lm.detail}" if lm.detail else "")
-        col.addWidget(label(meta, 11.5, t["text_muted"]))
-        h.addLayout(col, 1)
-        reveal = IconButton("folder", t, tip="Reveal in file manager",
-                            on_click=lambda p=lm.path: QDesktopServices.openUrl(
-                                QUrl.fromLocalFile(str(Path(p).parent))))
-        h.addWidget(reveal)
-        return row
 
     # ── import your own ──────────────────────────────────────────────────────
     def _import_menu(self) -> None:
@@ -338,6 +301,5 @@ class ModelLibraryScreen(QWidget):
         except Exception as e:
             self._toast("Import failed", str(e))
             return
-        self._toast("Model imported",
-                    f"{Path(dest).name} added to your library.")
-        self.refresh()
+        self._toast("Model imported", f"{Path(dest).name} added to your library.")
+        self._render()

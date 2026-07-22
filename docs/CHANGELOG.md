@@ -20,11 +20,19 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ## 2026-07-22 — Model Library: a browsable model hub + sample data
 
-A new top-level **Model Library** tab (`studio/model_library.py` +
-`model_library_controller.py` + `model_library_screen.py`) makes "find any
-model, download it, or bring your own — all local" a first-class surface,
-directly serving the product's local-first / open positioning (nothing leaves
-the machine).
+A **Library** section inside *Models & Train*
+(`studio/model_library.py` + `model_library_controller.py` +
+`model_library_screen.py`'s `ModelCatalogView`) makes "find any model,
+download it, or bring your own — all local" first-class, directly serving the
+product's local-first / open positioning (nothing leaves the machine).
+
+> Consolidation note: this first shipped (same day) as a *separate* top-level
+> "Model Library" tab, but that overlapped the existing Models & Train screen's
+> "My models" / "Import model" surfaces and read as an odd split. It was folded
+> in the same day as a fourth section — **Train · Library · My models ·
+> Engines** — so everything about models lives in one place. The standalone tab
+> and its `ModelLibraryScreen` are gone; the catalog view (`ModelCatalogView`)
+> is embedded. ⌘K keeps "Browse Model Library (download models)".
 
 - **Curated catalog** of real, publicly-downloadable weights: SAM backbones
   (ViT-B/L/H, for the CellSeg1 one-shot engine), SAM 2.1 checkpoints
