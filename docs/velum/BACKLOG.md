@@ -314,6 +314,18 @@ palette) is real. See `ROADMAP.md`.
 
 ## P2 — polish & platform
 
+- [x] **Datasets tab — first-class dataset building** · L · done (2026-07-22).
+  A dedicated **Datasets** sidebar tab (`studio/dataset_screen.py`) backed by a
+  Qt-free model/store (`dataset.py`) + controller (`dataset_controller.py`):
+  browse built datasets (empty state → cards → detail), an **interactive build
+  dialog** (pick a source project, tick which segmented images to include with
+  per-image cell-count/GT status, name + val split + measurements), and
+  **re-import** a dataset back into a fresh project with masks pre-seeded for
+  more proofreading. Promotes the one-button export below into a real
+  collect→segment→proofread→curate→re-use loop. 15 tests + both-theme
+  screenshots. Follow-up: fold real folder-training on a dataset into the Train
+  tab (today it points training at the dataset's images/ + masks/ dirs via a
+  toast; `train_target()` already returns them).
 - [x] **Export a project as a re-trainable dataset** · M · done (2026-07-22).
   `studio/dataset_export.py` (Qt/torch-free) writes `images/` + `masks/<stem>.png`
   (uint16 instance labels) + optional `measurements/` + a `dataset.json`

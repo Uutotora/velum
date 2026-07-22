@@ -46,6 +46,8 @@ from studio.components import Sidebar
 from studio.project_controller import ProjectController
 from studio.train_controller import TrainController
 from studio.segment_controller import SegmentController
+from studio.dataset_controller import DatasetController
+from studio.dataset_screen import DatasetsScreen
 from studio.assistant_controller import AssistantController, PROVIDERS
 from studio.new_project_dialog import NewProjectDialog
 from studio.screens import HomeScreen, ProjectsScreen
@@ -73,6 +75,7 @@ _CORNER_RADIUS = 12
 _NAV = [
     ("home",      "home",      "Home",           ""),
     ("projects",  "projects",  "Projects",       ""),
+    ("datasets",  "grid",      "Datasets",       ""),
     ("workspace", "workspace", "Segment",        "Current project"),
     ("train",     "models",    "Models & Train", "Current project"),
     ("dashboard", "dashboard", "Dashboard",      "Current project"),
@@ -82,7 +85,7 @@ _NAV = [
 # "settings" is a real stack screen too, but it's reached from the sidebar
 # *footer* (built inside Sidebar, next to Guide & Docs / Appearance) and a
 # title-bar icon — not from the Tools nav list above.
-_STACK_KEYS = ("home", "projects", "workspace", "train", "dashboard", "settings", "guide")
+_STACK_KEYS = ("home", "projects", "datasets", "workspace", "train", "dashboard", "settings", "guide")
 
 
 def load_fonts() -> str:
@@ -151,6 +154,7 @@ class StudioWindow(QMainWindow):
         self._projects = project_controller or ProjectController()
         self._train = train_controller or TrainController()
         self._segment = segment_controller or SegmentController()
+        self._datasets = DatasetController(segment=self._segment)
         # Set once, not rebuilt in _build_ui() -- survives toggle_theme()'s
         # full UI teardown/rebuild the same way _projects/_train/_segment do,
         # so a chosen backend/model/API key isn't lost on a theme switch.
@@ -238,6 +242,10 @@ class StudioWindow(QMainWindow):
                                self._new_project_dialog.open),
             "projects": ProjectsScreen(t, self._projects, self.navigate, self._open_project,
                                       self._new_project_dialog.open, on_toast=self._toast.announce),
+            "datasets": DatasetsScreen(t, self._datasets, self._projects,
+                                       self._toast.announce,
+                                       on_open_project=lambda p: self._open_project(p.id),
+                                       on_navigate=self.navigate),
             "workspace": WorkspaceScreen(t, self._segment, self._projects, self._toast.announce,
                                         on_toggle_logs=lambda: self._toggle_drawer(self._logs),
                                         on_navigate=self.navigate,
@@ -459,6 +467,9 @@ class StudioWindow(QMainWindow):
         commands.append(Command(
             id="projects.sample", label="Open Sample", section="Projects",
             icon="chart", emoji="🧪", handler=self._cmd_open_sample))
+        commands.append(Command(
+            id="datasets.new", label="New dataset…", section="Datasets",
+            icon="grid", emoji="🗂️", handler=self._screens["datasets"].open_new_dialog))
 
         # Help -- mirrors Home's own Resources links exactly (see
         # screens.py's HomeScreen._resources_card), including the
