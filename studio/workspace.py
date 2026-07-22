@@ -133,8 +133,7 @@ class WorkspaceScreen(QWidget):
     _bench_done_signal = pyqtSignal(object, object)
 
     def __init__(self, t: dict, segment: SegmentController, projects, on_toast,
-                on_toggle_logs=None, on_navigate=None, on_new_project=None,
-                on_open_sample=None):
+                on_toggle_logs=None, on_navigate=None, on_new_project=None):
         super().__init__()
         self._t = t
         self._segment = segment
@@ -143,7 +142,6 @@ class WorkspaceScreen(QWidget):
         self._on_toggle_logs = on_toggle_logs
         self._on_navigate = on_navigate
         self._on_new_project = on_new_project
-        self._on_open_sample = on_open_sample
 
         self._project: Optional[Project] = None
         self._layers = LayerList()
@@ -388,25 +386,7 @@ class WorkspaceScreen(QWidget):
 
         self._no_project_new_btn = new_btn
         self._no_project_open_btn = open_btn
-
-        # A one-click way into a real, already-segmented field -- the fastest
-        # path from a blank workspace to "oh, *this* is what it does". Only
-        # offered when the host wired a sample handler (the app always does).
-        if self._on_open_sample is not None:
-            v.addSpacing(4)
-            sample_row = QHBoxLayout()
-            sample_row.addStretch(1)
-            sample_btn = PillButton("Explore the sample dataset", t, "ghost", "spark", small=True)
-            sample_btn.clicked.connect(self._trigger_open_sample)
-            sample_row.addWidget(sample_btn)
-            sample_row.addStretch(1)
-            v.addLayout(sample_row)
-            self._no_project_sample_btn = sample_btn
         return w
-
-    def _trigger_open_sample(self) -> None:
-        if self._on_open_sample:
-            self._on_open_sample()
 
     def _trigger_new_project(self) -> None:
         if self._on_new_project:

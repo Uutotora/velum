@@ -6,7 +6,7 @@ CI's light `test` dependency-group same as any other pure-logic test.
 from studio import guide_content as gc
 
 _KNOWN_NAV_KEYS = {"home", "projects", "workspace", "train", "dashboard", "guide", "assistant"}
-_KNOWN_SPECIAL_ACTIONS = {"new_project", "open_sample"}
+_KNOWN_SPECIAL_ACTIONS = {"new_project"}
 
 
 def test_every_article_has_a_unique_id():

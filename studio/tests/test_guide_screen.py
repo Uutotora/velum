@@ -128,21 +128,6 @@ def test_new_project_step_fires_the_real_new_project_callback(app, controller):
     assert seen == [True]
 
 
-def test_open_sample_step_opens_a_real_existing_project(app, controller):
-    opened = []
-    g = _guide(app, controller, on_open=opened.append)
-    g._run_action("open_sample")
-    assert len(opened) == 1
-    assert opened[0] in {p.id for p in controller.list_projects()}
-
-
-def test_open_sample_step_falls_back_to_new_project_when_store_is_empty(app, empty_controller):
-    seen = []
-    g = _guide(app, empty_controller, on_new_project=lambda: seen.append(True))
-    g._run_action("open_sample")
-    assert seen == [True]
-
-
 def test_plain_nav_key_action_calls_on_navigate(app, controller):
     navigated = []
     g = _guide(app, controller, on_navigate=navigated.append)

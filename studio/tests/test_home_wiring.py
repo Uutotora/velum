@@ -81,27 +81,12 @@ def test_train_a_model_card_navigates_to_train(app, controller):
     assert navigated == ["train"]
 
 
-# ── "Open Sample" ────────────────────────────────────────────────────────────
-def test_open_sample_opens_an_existing_project(app, controller):
-    opened = []
-    home = _home(app, controller, on_open=opened.append)
-    home._open_sample()
-    assert len(opened) == 1
-    assert opened[0] in {p.id for p in controller.list_projects()}
-
-
-def test_open_sample_falls_back_to_new_project_when_store_empty(app, empty_controller):
-    seen = []
-    home = _home(app, empty_controller, on_new_project=lambda: seen.append(True))
-    home._open_sample()
-    assert seen == [True]
-
-
-def test_open_sample_card_wired_to_open_sample(app, controller):
-    opened = []
-    home = _home(app, controller, on_open=opened.append)
-    home._quick_grid.itemAt(3).widget().mouseReleaseEvent(None)  # "Open Sample"
-    assert len(opened) == 1
+# ── "Datasets" quick card (replaced the old "Open Sample" card) ──────────────
+def test_datasets_card_navigates_to_datasets(app, controller):
+    navigated = []
+    home = _home(app, controller, on_navigate=navigated.append)
+    home._quick_grid.itemAt(3).widget().mouseReleaseEvent(None)  # "Datasets"
+    assert navigated == ["datasets"]
 
 
 # ── resource links ───────────────────────────────────────────────────────────

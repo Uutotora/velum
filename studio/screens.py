@@ -379,27 +379,11 @@ class HomeScreen(QWidget):
             ("folder", "New Project", "Name it, import images, pick an engine.", "primary", self._new_project),
             ("image", "Import Images", "TIFF · OME-TIFF · ND2 · CZI · PNG. Drag & drop.", "signal", self._new_project),
             ("models", "Train a Model", "One-shot LoRA from a single annotated image.", "warning", lambda: self._nav("train")),
-            ("chart", "Open Sample", "Nuclei, tissue & mitosis datasets to explore.", "success", self._open_sample),
+            ("grid", "Datasets", "Curate & re-use your own image + mask sets.", "success", lambda: self._nav("datasets")),
         ]
         for i, c in enumerate(cards):
             g.addWidget(self._quick_card(*c), i // 2, i % 2)
         return g
-
-    def _open_sample(self) -> None:
-        # Prefer the purpose-built, already-segmented sample so this lands on
-        # the hero experience, not just whichever project sorts first.
-        try:
-            from studio.sample_data import SAMPLE_PROJECT_ID
-            if self._controller.store.exists(SAMPLE_PROJECT_ID):
-                self._open(SAMPLE_PROJECT_ID)
-                return
-        except Exception:
-            pass
-        projects = self._controller.list_projects()
-        if projects:
-            self._open(projects[0].id)
-        else:
-            self._new_project()
 
     def _quick_card(self, icon_name, title, sub, kind, on_click: Callable[[], None]) -> QFrame:
         t = self._t

@@ -435,21 +435,12 @@ class GuideScreen(QWidget):
         for aid in self._nav_rows:
             self._restyle_nav_row(aid)
 
-    def _open_sample(self) -> None:
-        projects = self._controller.list_projects()
-        if projects:
-            self._open(projects[0].id)
-        else:
-            self._new_project()
-
     def _run_action(self, action: Optional[str]) -> None:
         """Dispatch a ``Step.action`` — see ``guide_content.Step`` for the vocabulary."""
         if not action:
             return
         if action == "new_project":
             self._new_project()
-        elif action == "open_sample":
-            self._open_sample()
         elif action.startswith("article:"):
             self.open_article(action.split(":", 1)[1])
         else:

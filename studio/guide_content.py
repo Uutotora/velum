@@ -33,7 +33,7 @@ class Step:
 
     ``action`` is one of: a nav key Studio's ``navigate()`` already handles
     ("workspace" / "train" / "dashboard" / "projects" / "home"), the special
-    tokens "new_project" / "open_sample", or "article:<id>" to jump to
+    token "new_project", or "article:<id>" to jump to
     another guide article — see ``GuideScreen._run_action``.
     """
     title: str
@@ -173,10 +173,6 @@ ARTICLES: list[Article] = [
                      "use the file picker. TIFF, OME-TIFF, ND2, CZI and PNG "
                      "are all supported.",
                      action_label="New Project", action="new_project"),
-                Step("No images ready yet? Open a sample",
-                     "Try the whole workflow on a bundled nuclei, tissue or "
-                     "mitosis dataset — nothing to import.",
-                     action_label="Open a sample", action="open_sample"),
                 Step("Choose an engine",
                      "CellSeg1 · LoRA, Cellpose-SAM or SAM 2 — picked when "
                      "you create the project, changeable any time. Not sure "
