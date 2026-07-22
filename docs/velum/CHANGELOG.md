@@ -5,6 +5,95 @@ What actually shipped in Studio, dated, newest first. (The repo-wide log is
 
 ---
 
+## 2026-07-22 — Datasets are now a first-class tab, not just an export button
+
+The one-click "Export dataset" (shipped earlier the same day) was too thin for
+what the product is *for* — collecting your own datasets. Promoted datasets to
+a **first-class surface**: a new **Datasets** sidebar tab, an **interactive
+build** (curate exactly which images go in), and **re-import** back into a
+project. The loop is now real: *collect → segment → proofread → **curate a
+dataset** → re-use / train.*
+
+- **`studio/dataset.py`** — `DatasetInfo` (a read-only view over a built
+  dataset folder's `dataset.json`) + `DatasetStore` (a registry of dataset
+  folders under `<STORAGE_DIR>/datasets`: list newest-first, unique-id
+  allocation, get/delete, skips non-dataset dirs). Qt/torch-free.
+- **`studio/dataset_controller.py`** — the tab's logic: `list_datasets`,
+  `build_candidates` (each project image annotated with segmented? / cell
+  count / has-GT — so you curate from real status), `build_from_project`
+  (build from a curated selection), **`import_to_project`** (create a fresh
+  project from a dataset, copying images in and *seeding each mask* so it opens
+  ready to keep proofreading — the "datasets → project" direction), and
+  `train_target` (the images/ + masks/ dirs to point training at). Qt-free,
+  unit-tested.
+- **`studio/dataset_screen.py`** — the **Datasets** tab (empty state → cards
+  with a list→detail view; detail offers Open-in-new-project / Train-on-this /
+  Reveal-folder / Delete) and **`NewDatasetDialog`**, the interactive build
+  modal: pick a source project → tick which segmented images to include (per-row
+  cell count + GT badge, Select-all/Clear, non-segmented rows disabled) → name
+  it → optional val split + include-measurements → Create. A scrim modal built
+  on the `NewProjectDialog` pattern (`theme.SCRIM`, `#ObjectName`-scoped styles,
+  transparent wrappers — no rendering-bug-family regressions).
+- **Wired into the shell:** a `Datasets` nav entry (auto-adds its ⌘K navigate
+  command), a `DatasetController` on `StudioWindow`, and a `New dataset…`
+  command. Two new icons (`square`/`check_square`) for the build checklist.
+- **Verified:** 15 new tests (5 model + 5 controller incl. the import
+  round-trip + 5 offscreen screen/dialog wiring), plus offscreen screenshots in
+  **both themes** of the empty state, a dataset card, the detail view, and the
+  build dialog — caught + fixed three real rendering issues before commit
+  (wrong `chip_bg` token, elided StatTile captions, a crushed Val-split
+  dropdown, and an invalid `round` checkbox icon). Full `studio/` suite green.
+  **Not verified here:** the live GUI click-through and a real train on an
+  imported/exported dataset (the Train tab still trains one image+mask pair per
+  run; folder-training on a dataset is the natural next step).
+
+---
+
+## 2026-07-22 — Export a project as a re-trainable dataset (the "collect your own dataset" loop)
+
+Velum's whole point is that a project is a growing, proofread collection of
+segmented microscopy images — but there was no way to get that *out* as a
+dataset. You could Save one mask or Export one image's CSV; you could not turn
+the project into something you (or Velum's own Train tab) could train on. This
+closes the loop: **collect real images → segment → proofread → export a dataset
+→ train on it.**
+
+- **`studio/dataset_export.py`** (new, Qt-free, torch-free — numpy + cv2 +
+  stdlib, so it runs in CI's light group) — `export_dataset()` writes a
+  standard, self-describing folder:
+  ```
+  images/<stem><ext>        source image, copied verbatim (ND2/CZI/OME-TIFF
+                            preserved byte-for-byte — no re-encode)
+  masks/<stem>.png          uint16 instance mask, one id per cell, 0 = bg
+                            (the exact encoding segment_controller already uses)
+  measurements/<stem>.csv   per-cell morphometry (optional)
+  dataset.json + README.md  manifest / dataset card (provenance below)
+  ```
+  The manifest records engine, model/LoRA, SAM backbone, pixel calibration,
+  per-image cell counts + dims + source path, and totals. Stems are deduped so
+  two same-named images in different folders can't clobber each other, and
+  image↔mask stay paired by stem. Optional deterministic train/val split.
+- **Why this layout:** it's the one Velum's training already discovers
+  (`train_controller.find_mask_for_image` looks for `masks/<stem>.*`), so
+  pointing the Train tab's *images* at `images/` and *masks* at `masks/` trains
+  on the export with zero conversion. The README says exactly that.
+- **`SegmentController.dataset_items()` / `export_project_dataset()`** — gather
+  every image in the project that has a persisted (proofread) result mask and
+  export it; raises if nothing's been segmented yet.
+- **UI:** an "Export dataset…" button in the Results pane (project-level,
+  distinct from the single-image Save/Export CSV above it) and an
+  "Export dataset (images + masks)" ⌘K command. Both toast the resulting
+  image/cell counts and target path, or a friendly reason when there's nothing
+  to export.
+- **Verified:** 17 new tests (14 pure-logic in `test_dataset_export.py` —
+  layout, manifest round-trip, collision-safe stems, deterministic splits,
+  verbatim-copy of an exotic-extension source, mask label round-trip; 3 wiring
+  in `test_segment_controller.py`). Full `studio/` suite green; offscreen
+  screenshot confirms the button renders in context. **Not verified here:** the
+  live GUI click-through and a real end-to-end train *on* an exported dataset.
+
+---
+
 ## 2026-07-22 — Microscopy formats now work through the complete Studio import flow
 
 Studio's import copy was inconsistent with the core: the new-project dialog
