@@ -28,7 +28,14 @@ Follow-up on live user testing of the two canvas features below.
   `tuple(int(v) for v in region)` blew up. Fixed: both connections wrapped in
   `lambda: self._start_predict()`, plus defensive `isinstance` guards in
   `_start_predict` and `SegmentController.run_predict_async` (a 4-tuple/list or
-  nothing).
+  nothing). **Same footgun, second site (found live):** the "Clear all points"
+  / "Clear all shapes" buttons used `lambda ly=layer: …` — a `clicked`-emitted
+  bool overrides the `ly=layer` default (crash: `'bool' object has no attribute
+  'points'`). Fixed with the `lambda _=False, ly=layer: …` idiom the rest of the
+  file already uses; a swept audit of every `clicked/toggled` connection found
+  no other vulnerable site (the `toggled(bool)` slots receive the bool by
+  design). Regression tests now click the real buttons *through the signal*
+  (the path the old handler-only tests missed).
 - **Cross-image / cross-project result races.** A slow run (cellpose can be
   minutes) that finished *after* the user switched image or project used to
   paint its mask onto whatever was on screen. Now the workspace records which

@@ -1265,7 +1265,7 @@ class WorkspaceScreen(QWidget):
         v.addWidget(ssl)
 
         clear_btn = PillButton("Clear all points", t, "ghost", "trash", small=True)
-        clear_btn.clicked.connect(lambda ly=layer: self._clear_points(ly))
+        clear_btn.clicked.connect(lambda _=False, ly=layer: self._clear_points(ly))
         v.addWidget(clear_btn)
         v.addStretch(1)
         return w
@@ -1294,7 +1294,7 @@ class WorkspaceScreen(QWidget):
         v.addWidget(wsl)
 
         clear_btn = PillButton("Clear all shapes", t, "ghost", "trash", small=True)
-        clear_btn.clicked.connect(lambda ly=layer: self._clear_shapes(ly))
+        clear_btn.clicked.connect(lambda _=False, ly=layer: self._clear_shapes(ly))
         v.addWidget(clear_btn)
         v.addStretch(1)
         return w

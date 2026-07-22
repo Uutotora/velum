@@ -1794,3 +1794,35 @@ def test_predict_log_forwards_to_the_shared_log_bus_and_toasts_are_unchanged(
         (log_bus.INFO, "try a smaller tile size", "studio.segment"),
     ]
     assert toasts == [("Segmentation failed", "boom"), ("Hint", "try a smaller tile size")]
+
+
+def test_clear_points_button_click_does_not_pass_bool_as_layer(
+        app, segment, projects, toasts, tmp_path, storage):
+    """Regression: the Clear button's clicked.connect used to feed Qt's
+    `checked` bool into the layer arg (crash: 'bool' has no attribute
+    'points'). Click the real button *through the signal* and confirm it
+    clears the layer instead of crashing."""
+    from studio.components import PillButton
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    pts = PointsLayer("Prompts"); pts.add(3, 4); pts.add(5, 6)
+    ws._layers.add(pts, select=True)
+    ws._rebuild_layer_controls()
+    btn = next(b for b in ws.findChildren(PillButton) if b.text() == "Clear all points")
+    btn.click()  # emits clicked(checked=False) via the real signal path
+    assert pts.points == []
+
+
+def test_clear_shapes_button_click_does_not_pass_bool_as_layer(
+        app, segment, projects, toasts, tmp_path, storage):
+    from studio.components import PillButton
+    project = _make_project(tmp_path, projects, storage)
+    ws = _ws(app, segment, projects, toasts)
+    ws._load_project(project)
+    shp = ShapesLayer("Shapes"); shp.add("polygon", [(0, 0), (0, 5), (5, 5)])
+    ws._layers.add(shp, select=True)
+    ws._rebuild_layer_controls()
+    btn = next(b for b in ws.findChildren(PillButton) if b.text() == "Clear all shapes")
+    btn.click()
+    assert shp.shapes == []
