@@ -28,8 +28,8 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import QWidget
 
 from studio.layer_model import (
-    ERASE, FILL, ImageLayer, IMAGE_COLORMAPS, LabelsLayer, LayerList, PAINT, PAN_ZOOM,
-    PICK, POLYGON, PointsLayer, ShapesLayer, TRANSFORM,
+    BOX, ERASE, FILL, ImageLayer, IMAGE_COLORMAPS, INSPECT, LabelsLayer, LayerList,
+    PAINT, PAN_ZOOM, PICK, POLYGON, PointsLayer, ShapesLayer, TRANSFORM,
 )
 
 _MIN_ZOOM, _MAX_ZOOM = 0.05, 40.0
@@ -53,6 +53,8 @@ class Canvas(QWidget):
                  on_status: Optional[Callable[[str], None]] = None,
                  on_label_picked: Optional[Callable[[int], None]] = None,
                  on_mode_change: Optional[Callable[[str], None]] = None,
+                 on_cell_clicked: Optional[Callable[[int, float, float], None]] = None,
+                 on_roi_selected: Optional[Callable[[tuple], None]] = None,
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._t = t
@@ -60,6 +62,15 @@ class Canvas(QWidget):
         self._on_status = on_status
         self._on_label_picked = on_label_picked
         self._on_mode_change = on_mode_change
+        # INSPECT: click a segmented cell → on_cell_clicked(label_id, row, col).
+        # BOX: drag a rectangle → on_roi_selected((r0, c0, r1, c1)) on release.
+        self._on_cell_clicked = on_cell_clicked
+        self._on_roi_selected = on_roi_selected
+        self._highlight_id = 0                      # currently inspected cell (0 = none)
+        self._highlight_img: Optional[QImage] = None
+        self._roi: Optional[tuple] = None           # committed segmentation box (image coords)
+        self._box_anchor: Optional[tuple[float, float]] = None
+        self._box_cur: Optional[tuple[float, float]] = None
 
         self.mode = PAN_ZOOM
         self.grid = False
@@ -98,6 +109,49 @@ class Canvas(QWidget):
     # ── layer-model plumbing ─────────────────────────────────────────────────
     def _on_layers_changed(self) -> None:
         self._composite_dirty = True
+        self._highlight_img = None   # cell pixels may have changed; rebuild lazily
+        self.update()
+
+    # ── cell inspection + segmentation box (public) ──────────────────────────
+    def set_highlight(self, label_id: int) -> None:
+        """Highlight one segmented instance (0 clears). Builds a cached RGBA
+        overlay of just that label's pixels, drawn over the composite."""
+        self._highlight_id = int(label_id)
+        self._highlight_img = None
+        self.update()
+
+    def _highlight_overlay(self) -> Optional[QImage]:
+        if self._highlight_id <= 0:
+            return None
+        if self._highlight_img is not None:
+            return self._highlight_img
+        labels = self.layers.by_kind("labels")
+        if not labels:
+            return None
+        plane = self._plane_of(labels[0])
+        if plane.ndim != 2:
+            return None
+        if self.transposed:
+            plane = plane.T
+        sel = plane == self._highlight_id
+        if not sel.any():
+            return None
+        h, w = plane.shape
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        c = QColor(self._t.get("primary", "#7c9cff"))
+        rgba[sel] = (c.red(), c.green(), c.blue(), 185)
+        arr = np.ascontiguousarray(rgba)
+        self._highlight_img = QImage(arr.data, w, h, w * 4,
+                                     QImage.Format.Format_RGBA8888).copy()
+        return self._highlight_img
+
+    def current_roi(self) -> Optional[tuple]:
+        return self._roi
+
+    def clear_roi(self) -> None:
+        self._roi = None
+        self._box_anchor = None
+        self._box_cur = None
         self.update()
 
     def edit_target(self) -> Optional[LabelsLayer]:
@@ -136,7 +190,8 @@ class Canvas(QWidget):
         cursors = {
             PAINT: Qt.CursorShape.CrossCursor, ERASE: Qt.CursorShape.CrossCursor,
             FILL: Qt.CursorShape.PointingHandCursor, PICK: Qt.CursorShape.PointingHandCursor,
-            POLYGON: Qt.CursorShape.CrossCursor,
+            POLYGON: Qt.CursorShape.CrossCursor, INSPECT: Qt.CursorShape.PointingHandCursor,
+            BOX: Qt.CursorShape.CrossCursor,
         }
         self.setCursor(cursors.get(mode, Qt.CursorShape.ArrowCursor))
         self.update()
@@ -330,9 +385,33 @@ class Canvas(QWidget):
             self._draw_pseudo_3d(p, image)
         else:
             p.drawImage(0, 0, image)
+            self._draw_inspect_and_box(p)
         self._draw_vectors(p)
         self._draw_cursor(p)
         p.restore()
+
+    def _draw_inspect_and_box(self, p: QPainter) -> None:
+        """Overlay the highlighted (inspected) cell and the segmentation box.
+        Called inside the pan/zoom transform, so coords are image pixels."""
+        overlay = self._highlight_overlay()
+        if overlay is not None:
+            p.drawImage(0, 0, overlay)
+        # committed box + the live rubber-band while dragging
+        box = None
+        if self._box_anchor is not None and self._box_cur is not None:
+            (r0, c0), (r1, c1) = self._box_anchor, self._box_cur
+            box = (min(r0, r1), min(c0, c1), max(r0, r1), max(c0, c1))
+        elif self._roi is not None:
+            box = self._roi
+        if box is not None:
+            r0, c0, r1, c1 = box
+            pen = QPen(QColor(self._t.get("signal", "#5be3c0")))
+            pen.setWidthF(max(1.0, 2.0 / max(self._zoom, 1e-6)))
+            pen.setStyle(Qt.PenStyle.DashLine)
+            pen.setCosmetic(False)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRect(QRectF(c0, r0, c1 - c0, r1 - r0))
 
     def _draw_pseudo_3d(self, p: QPainter, image: QImage) -> None:
         """"3-D" on a flat 2-D image (no z-stack to max-project): real
@@ -523,6 +602,33 @@ class Canvas(QWidget):
         sel = self.layers.selected
         z = self.layers.current_z if self.layers.n_planes > 1 else None
 
+        # INSPECT: click a segmented cell → read its label id and report it
+        # (read-only; unlike PICK it never changes the paint colour).
+        if self.mode == INSPECT and e.button() == Qt.MouseButton.LeftButton:
+            labels = self.layers.by_kind("labels")
+            label_id = 0
+            if labels:
+                plane = self._plane_of(labels[0])
+                if plane.ndim == 2:
+                    if self.transposed:
+                        plane = plane.T
+                    r_i, c_i = int(round(row)), int(round(col))
+                    if 0 <= r_i < plane.shape[0] and 0 <= c_i < plane.shape[1]:
+                        label_id = int(plane[r_i, c_i])
+            self.set_highlight(label_id)
+            if self._on_cell_clicked is not None:
+                self._on_cell_clicked(label_id, row, col)
+            return
+
+        # BOX: start a rubber-band rectangle; segmentation runs inside it on
+        # release (mouseReleaseEvent → on_roi_selected).
+        if self.mode == BOX and e.button() == Qt.MouseButton.LeftButton:
+            self._box_anchor = (row, col)
+            self._box_cur = (row, col)
+            self._roi = None
+            self.update()
+            return
+
         # Points/Shapes take over the click while selected and *some tool
         # other than pan_zoom/transform is active* (those two are always
         # reserved for navigation, checked above, so panning still works
@@ -622,6 +728,11 @@ class Canvas(QWidget):
         col, row = self.widget_to_image(pos)
         self._hover_img = (row, col)
 
+        if self._box_anchor is not None and self.mode == BOX:
+            self._box_cur = (row, col)
+            self.update()
+            return
+
         if self._panning and self._pan_anchor is not None:
             self._pan = self._pan_anchor_pan + (pos - self._pan_anchor)
             self._clamp_pan()
@@ -653,6 +764,22 @@ class Canvas(QWidget):
             self.update()  # keep the brush-size cursor preview live
 
     def mouseReleaseEvent(self, e: QMouseEvent) -> None:
+        if self._box_anchor is not None and self.mode == BOX \
+                and e.button() == Qt.MouseButton.LeftButton:
+            (r0, c0), (r1, c1) = self._box_anchor, (self._box_cur or self._box_anchor)
+            self._box_anchor = None
+            self._box_cur = None
+            roi = (min(r0, r1), min(c0, c1), max(r0, r1), max(c0, c1))
+            # Ignore an accidental click (near-zero box); a real drag commits.
+            if roi[2] - roi[0] >= 2 and roi[3] - roi[1] >= 2:
+                self._roi = roi
+                self.update()
+                if self._on_roi_selected is not None:
+                    self._on_roi_selected(roi)
+            else:
+                self._roi = None
+                self.update()
+            return
         if self._rotating:
             self._rotating = False
             self._rot_anchor = None

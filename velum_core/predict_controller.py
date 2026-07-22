@@ -84,19 +84,37 @@ def _read_for_predict(config):
     return img, None
 
 
-def _predict_cached(config, on_tile=None, sink=None):
+def _clamp_region(region, shape):
+    """Normalise + clamp a ``(r0, c0, r1, c1)`` box to the image bounds.
+
+    Accepts corners in any order (a box drawn bottom-up/right-to-left) and
+    returns ``(r0, c0, r1, c1)`` with ``r0<r1``, ``c0<c1``, inside ``shape``.
+    Returns ``None`` for a degenerate box (< 2 px on a side) — the caller then
+    falls back to segmenting the whole image, so a stray click never blanks the
+    result."""
+    h, w = shape[:2]
+    r0, c0, r1, c1 = region
+    r0, r1 = sorted((int(r0), int(r1)))
+    c0, c1 = sorted((int(c0), int(c1)))
+    r0, r1 = max(0, min(r0, h)), max(0, min(r1, h))
+    c0, c1 = max(0, min(c0, w)), max(0, min(c1, w))
+    if r1 - r0 < 2 or c1 - c0 < 2:
+        return None
+    return r0, c0, r1, c1
+
+
+def _predict_rgb(config, img, on_tile=None):
+    """Segment one already-read RGB image → a full-resolution instance mask
+    the same H×W as ``img``. The tiling-or-resize/predict/resize core shared by
+    the whole-image path and the box-region path (:func:`_predict_cached`)."""
     from data.utils import resize_image
     import cv2
-
-    img, stack = _read_for_predict(config)
-    if sink is not None:
-        sink["stack"] = stack
 
     # Large-image path: tile at native resolution instead of shrinking the
     # whole image (which loses small cells). Opt-in via the "Large image" box.
     from velum_core.tiling import should_tile
     if config.get("tiled") and should_tile(img.shape, tile=int(config.get("tile_size") or 1024)):
-        return img, _predict_tiled(config, img, on_tile=on_tile)
+        return _predict_tiled(config, img, on_tile=on_tile)
 
     orig_h, orig_w = img.shape[:2]
     resized = resize_image(img, config["resize_size"])
@@ -107,11 +125,32 @@ def _predict_cached(config, on_tile=None, sink=None):
     small = spec.predict(resized, config)
 
     if small.shape != (orig_h, orig_w):
-        mask = cv2.resize(small.astype(np.float32), (orig_w, orig_h),
+        return cv2.resize(small.astype(np.float32), (orig_w, orig_h),
                           interpolation=cv2.INTER_NEAREST).astype(small.dtype)
-    else:
-        mask = small
-    return img, mask
+    return small
+
+
+def _predict_cached(config, on_tile=None, sink=None):
+    img, stack = _read_for_predict(config)
+    if sink is not None:
+        sink["stack"] = stack
+
+    # Box-region path: when the user drags a segmentation box on the canvas,
+    # segment only inside it (crop → predict → paste back into a full-size
+    # mask), so instances land at the right place and nothing outside the box
+    # is touched. Opt-in via config["region"]; absent → the whole image, exactly
+    # as before (default path byte-unchanged).
+    region = config.get("region")
+    if region:
+        box = _clamp_region(region, img.shape)
+        if box is not None:
+            r0, c0, r1, c1 = box
+            crop_mask = _predict_rgb(config, img[r0:r1, c0:c1], on_tile=on_tile)
+            mask = np.zeros(img.shape[:2], dtype=crop_mask.dtype)
+            mask[r0:r1, c0:c1] = crop_mask
+            return img, mask
+
+    return img, _predict_rgb(config, img, on_tile=on_tile)
 
 
 def _predict_tiled(config, img, on_tile=None):

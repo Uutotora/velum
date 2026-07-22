@@ -48,7 +48,7 @@ from studio.components import (
 )
 from studio.canvas import Canvas
 from studio.layer_model import (
-    BLENDING_MODES, ImageLayer, IMAGE_COLORMAPS, LabelsLayer, LayerList,
+    BLENDING_MODES, BOX, ImageLayer, IMAGE_COLORMAPS, INSPECT, LabelsLayer, LayerList,
     PAN_ZOOM, PAINT, ERASE, FILL, POLYGON, PICK, PointsLayer, ShapesLayer,
 )
 from studio.segment_controller import SegmentController, apply_quality_preset
@@ -1464,7 +1464,9 @@ class WorkspaceScreen(QWidget):
             f" border-right:1px solid {t['border']};")
         self._canvas = Canvas(t, self._layers, on_status=self._on_canvas_status,
                              on_label_picked=self._on_label_picked,
-                             on_mode_change=self._on_canvas_mode_changed)
+                             on_mode_change=self._on_canvas_mode_changed,
+                             on_cell_clicked=self._on_cell_clicked,
+                             on_roi_selected=self._on_roi_selected)
         lay = QVBoxLayout(vp)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self._canvas)
@@ -1501,9 +1503,13 @@ class WorkspaceScreen(QWidget):
         # very same "target" glyph as Pan two rows up. Distinct icons now:
         # pan, add-a-prompt-point, home.
         self._floating_tool_buttons: list[tuple[QToolButton, str, str]] = []
-        for icon_name, action in [("target", PAN_ZOOM),
-                                   ("points", "__add_point__"), ("home", "__home__")]:
-            b = IconButton(icon_name, t, 30)
+        for icon_name, action, tip in [
+                ("target", PAN_ZOOM, "Pan / zoom"),
+                ("search", INSPECT, "Inspect cell — click a cell to select it"),
+                ("square", BOX, "Segment in box — drag a rectangle to segment inside it"),
+                ("points", "__add_point__", "Add prompt point"),
+                ("home", "__home__", "Reset view")]:
+            b = IconButton(icon_name, t, 30, tip)
             b.clicked.connect(lambda _=False, a=action: self._on_floating_tool(a))
             tl.addWidget(b)
             self._floating_tool_buttons.append((b, action, icon_name))
@@ -1601,6 +1607,47 @@ class WorkspaceScreen(QWidget):
         self._update_legend()
         if isinstance(self._layers.selected, LabelsLayer):
             self._rebuild_layer_controls()
+
+    # ── cell inspection (Inspect tool) ───────────────────────────────────────
+    def _on_cell_clicked(self, label_id: int, row: float, col: float) -> None:
+        """Inspect tool: a segmented cell was clicked. The canvas has already
+        highlighted it; here we surface its per-cell measurements in the
+        viewport status pill (0 = clicked empty space → clear)."""
+        if label_id <= 0:
+            self._on_canvas_status("No cell here — click a segmented cell to inspect it")
+            return
+        self._on_canvas_status(self._cell_summary(label_id))
+
+    def _cell_summary(self, label_id: int) -> str:
+        """A one-line summary of one cell's measurements from ``_last_result``."""
+        res = self._last_result
+        if not res or not res.get("rows") or not res.get("columns"):
+            return f"Cell {label_id}"
+        columns = res["columns"]                       # list of (key, label, unit)
+        keys = [c[0] for c in columns]
+        idx = keys.index("cell_id") if "cell_id" in keys else 0
+        row = next((r for r in res["rows"] if int(r[idx]) == label_id), None)
+        if row is None:
+            return f"Cell {label_id}"
+        by_key = {columns[i][0]: (row[i], columns[i][2]) for i in range(len(columns))}
+        bits = [f"Cell {label_id}"]
+        for key, short in (("area", "area"), ("diameter", "Ø"),
+                           ("circularity", "circ"), ("mean_intensity", "int")):
+            if key in by_key and by_key[key][0] is not None:
+                val, unit = by_key[key]
+                unit = f" {unit}" if unit else ""
+                bits.append(f"{short} {val:.1f}{unit}")
+        return "   ·   ".join(bits)
+
+    # ── segmentation box (Box tool) ──────────────────────────────────────────
+    def _on_roi_selected(self, roi: tuple) -> None:
+        """Box tool: the user dragged a rectangle — segment only inside it."""
+        if self._project is None or self._current_image_path is None:
+            self._toast("No image", "Load an image before drawing a segmentation box.")
+            return
+        self._toast("Segmenting in box",
+                    "Running segmentation inside the selected region…")
+        self._start_predict(region=roi)
 
     def _update_legend(self, detected: Optional[int] = None) -> None:
         labels_layers = self._layers.by_kind("labels")
@@ -1973,7 +2020,7 @@ class WorkspaceScreen(QWidget):
         self._run_btn_bar.setText("Segmenting…" if running else "Run segmentation")
         self._progress_frame.setVisible(running)
 
-    def _start_predict(self) -> None:
+    def _start_predict(self, region: Optional[tuple] = None) -> None:
         if self._project is None:
             self._toast("No project open", "Open or create a project first.")
             return
@@ -1992,7 +2039,7 @@ class WorkspaceScreen(QWidget):
         self._run_started_at = time.monotonic()
         self._set_running(True)
         self._segment.run_predict_async(
-            self._project, self._current_image_path,
+            self._project, self._current_image_path, region=region,
             on_result=self._safe_emit_predict_result, on_log=self._safe_emit_predict_log,
             on_finish=self._safe_emit_predict_finish)
 

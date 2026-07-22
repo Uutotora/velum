@@ -193,11 +193,16 @@ class SegmentController:
 
     # ── single-image predict ─────────────────────────────────────────────────
     def run_predict_async(self, project: Project, image_path: str | Path, *,
+                          region: Optional[tuple] = None,
                           on_result: Optional[Callable] = None,
                           on_log: Optional[Callable[[str], None]] = None,
                           on_finish: Optional[Callable[[], None]] = None,
                           on_tile: Optional[Callable[[int, int], None]] = None) -> threading.Thread:
         config = self.build_config(project, image_path)
+        # region = (r0, c0, r1, c1) in image pixels — segment only inside the
+        # box the user dragged on the canvas. Absent → whole image, unchanged.
+        if region is not None:
+            config["region"] = tuple(int(v) for v in region)
         return self._pc().run_prediction_async(
             config, on_tile=on_tile, on_result=on_result, on_log=on_log, on_finish=on_finish)
 

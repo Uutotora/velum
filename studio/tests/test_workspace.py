@@ -1755,10 +1755,14 @@ def test_floating_tool_strip_shows_real_icons_not_a_fallback_chevron(
     def _img(name, color):
         return icons.icon(name, color, 16).pixmap(16, 16).toImage()
 
+    # order: target · search (inspect) · square (box) · points · home
+    by_icon = {icon: b for b, _a, icon in ws._floating_tool_buttons}
     pan_btn = ws._floating_tool_buttons[0][0]   # (target, PAN_ZOOM)
-    point_btn = ws._floating_tool_buttons[1][0]  # (points, __add_point__)
     assert pan_btn.icon().pixmap(16, 16).toImage() == _img("target", t["signal"])
-    assert point_btn.icon().pixmap(16, 16).toImage() == _img("points", t["text_muted"])
+    assert by_icon["points"].icon().pixmap(16, 16).toImage() == _img("points", t["text_muted"])
+    # the two new tools draw their real glyphs, not a fallback chevron
+    for name in ("search", "square"):
+        assert by_icon[name].icon().pixmap(16, 16).toImage() == _img(name, t["text_muted"])
 
     ws._set_canvas_mode(PAINT)  # forces another _sync_toolbars() restyle pass
     assert pan_btn.icon().pixmap(16, 16).toImage() == _img("target", t["text_muted"])

@@ -32,6 +32,8 @@ ERASE = "erase"
 FILL = "fill"
 PICK = "pick"
 POLYGON = "polygon"
+INSPECT = "inspect"   # click a segmented cell to select + inspect it (read-only)
+BOX = "box"           # drag a rectangle to segment only inside it
 
 BLENDING_MODES = ("translucent", "additive", "opaque")
 

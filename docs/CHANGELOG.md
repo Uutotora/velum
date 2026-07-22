@@ -18,6 +18,39 @@ narrative, not a mirror of it. Don't transcribe every commit; one bullet per
 
 ---
 
+## 2026-07-22 — Canvas: click-to-inspect a cell + segment-inside-a-box
+
+Two interactive canvas tools in the Segment workspace (floating tool strip +
+new modes in `layer_model`):
+
+- **Inspect cell** (`search` icon, `INSPECT` mode): after segmentation, click
+  any cell to select it — the canvas highlights just that instance (a tinted
+  RGBA overlay of its pixels) and the viewport status pill shows its per-cell
+  measurements (area / Ø / circularity / intensity) pulled from the existing
+  `_last_result`. Clicking empty space clears it. Read-only — unlike the Pick
+  tool it never changes the paint colour.
+- **Segment in box** (`square` icon, `BOX` mode): drag a rectangle and
+  segmentation runs **only inside it** — the box is drawn as a dashed overlay,
+  and on release predict runs on that region. Engine-agnostic: implemented in
+  the core choke point (`velum_core.predict_controller._predict_cached`) as
+  crop → predict → paste back into a full-size mask, so instances land at the
+  right place and nothing outside the box is touched. Opt-in via a new
+  `config["region"]`; absent → whole image, default path byte-unchanged
+  (the old `_predict_cached` body is now the shared `_predict_rgb` helper).
+  `SegmentController.run_predict_async` gained a `region=` param.
+
+- **Tests:** 4 new core tests (`tests/test_predict_controller.py`:
+  `_clamp_region` normalise/clamp/reject-degenerate, and `_predict_cached`
+  segmenting only inside the box vs. the whole image, with a fake engine).
+  `test_canvas` / `test_workspace` / `test_segment_controller` stay green
+  (the floating-tool-strip icon regression test updated for the two new
+  buttons). Both features verified by an offscreen render (highlighted cell +
+  dashed box) and a functional click check (correct label id returned).
+- **Not verified here:** the box path with a *real* SAM/Cellpose model (no GPU
+  in this sandbox — the crop/paste logic is proven with a fake engine, the
+  real segmentation quality inside the box is not); live mouse interaction on
+  a real display (offscreen screenshot + direct handler calls only).
+
 ## 2026-07-22 — Prototype Memory Bank: training-free few-shot retrieval core
 
 New `velum_core/memory_bank.py` — the buildable, GPU-free core of the

@@ -1043,3 +1043,60 @@ def test_run_benchmark_async_logs_per_pair_errors(tmp_path, monkeypatch):
                                        on_log=logs.append)
     t.join(timeout=10)
     assert any("[ERROR] cellpose img0.png: boom" in s for s in logs)
+
+
+# ── box-region ("segment inside this box") ─────────────────────────────────────
+
+def test_clamp_region_normalises_and_clamps():
+    from velum_core.predict_controller import _clamp_region
+    # reversed corners get sorted; stays within (100, 100)
+    assert _clamp_region((40, 40, 10, 10), (100, 100)) == (10, 10, 40, 40)
+    # out-of-bounds clamped to the image
+    assert _clamp_region((-5, -5, 200, 200), (100, 80)) == (0, 0, 100, 80)
+
+
+def test_clamp_region_rejects_degenerate():
+    from velum_core.predict_controller import _clamp_region
+    assert _clamp_region((10, 10, 11, 40), (100, 100)) is None   # <2px tall
+    assert _clamp_region((10, 10, 10, 10), (100, 100)) is None
+
+
+def test_predict_cached_region_segments_only_inside_the_box(tmp_path, monkeypatch):
+    import cv2
+    import velum_core.engines as engines
+    from velum_core.predict_controller import _predict_cached
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+
+    img = np.zeros((100, 100, 3), dtype=np.uint8)
+    img[20:40, 20:40] = 220     # blob INSIDE the box
+    img[60:80, 60:80] = 220     # blob OUTSIDE the box
+    path = tmp_path / "two.png"
+    cv2.imwrite(str(path), img)
+    config = {"engine": "cellpose", "image_path": str(path),
+              "resize_size": [64, 64], "clahe": False, "tile_size": 1024,
+              "region": (15, 15, 45, 45)}
+
+    _out_img, mask = _predict_cached(config)
+    assert mask.shape == (100, 100)
+    assert mask[30, 30] > 0            # inside-box blob segmented
+    assert mask[70, 70] == 0          # outside-box blob untouched
+    assert mask[50:, :].sum() == 0    # nothing below the box
+    assert mask[:, 50:].sum() == 0    # nothing right of the box
+
+
+def test_predict_cached_no_region_segments_whole_image(tmp_path, monkeypatch):
+    import cv2
+    import velum_core.engines as engines
+    from velum_core.predict_controller import _predict_cached
+    monkeypatch.setattr(engines, "predict_cellpose", lambda t, **k: _cc(t))
+
+    img = np.zeros((100, 100, 3), dtype=np.uint8)
+    img[20:40, 20:40] = 220
+    img[60:80, 60:80] = 220
+    path = tmp_path / "two.png"
+    cv2.imwrite(str(path), img)
+    config = {"engine": "cellpose", "image_path": str(path),
+              "resize_size": [100, 100], "clahe": False, "tile_size": 1024}
+
+    _out_img, mask = _predict_cached(config)
+    assert int(mask.max()) == 2       # both blobs found, no region
